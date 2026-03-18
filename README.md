@@ -1,0 +1,269 @@
+# AETHER Semantic Kernel
+
+AETHER is a semantic coordination runtime for distributed agent systems.
+
+Its claim is simple, but not modest: the right center of gravity for agent coordination is not a queue, not a graph-walking convenience layer, not a pile of ad hoc service contracts, and not a host-language DSL masquerading as semantics. The right center of gravity is an authoritative semantic kernel: an append-only causal journal, a deterministic resolver, and a recursive rule engine that can state, derive, replay, and explain what a system believes.
+
+This repository is the beginning of that kernel.
+
+It is a Rust-first implementation workspace built from a spec-first package. The specification still matters. The prose still governs. But this is no longer only a bundle of architectural intent. The repository now contains a real Rust workspace, real crate boundaries, real tests, and the first end-to-end recursive runtime slice.
+
+## Thesis
+
+AETHER is built around two internal centers.
+
+The first is the authoritative semantic substrate:
+
+- append-only datoms
+- causal element identifiers
+- temporal replay
+- attribute-class-aware resolution
+- provenance-bearing facts
+- policy-aware semantic state
+
+The second is the recursive semantic closure:
+
+- predicates
+- rules
+- safety validation
+- dependency-graph construction
+- SCC-aware planning
+- fixed-point evaluation
+- explainable derived tuples
+
+The combination matters. A coordination system that stores facts without recursive closure becomes a passive ledger. A rule system without a temporal semantic substrate becomes clever but forgetful. AETHER is meant to keep both halves intact.
+
+## What AETHER Is
+
+AETHER is:
+
+- a semantic substrate for distributed coordination facts
+- a Datalog-native recursive derivation core
+- a temporal replay engine for deterministic `AsOf` views
+- a provenance-carrying kernel for explainable results
+- a Rust workspace with clear crate ownership boundaries
+- a foundation for future Go operational tooling and Python research tooling
+
+AETHER is not:
+
+- merely a Datalog engine
+- merely a database
+- merely an orchestration shell
+- a Janus fork with recursive features bolted on later
+- a Python-first or Go-first semantic implementation
+
+## Design Position
+
+The repository takes a deliberately opinionated stance.
+
+- Rust is the mainline implementation language for the semantic core.
+- The AETHER DSL is the canonical semantics surface, even before the parser is complete.
+- Go is an operational shell and service-wrapper language, not the semantic authority.
+- Python is a research and experimentation layer, not a shadow kernel.
+- Sidecars for artifacts, vectors, and streams remain subordinate to the semantic kernel.
+
+This posture is not aesthetic. It is structural. If the semantic center of gravity drifts into deployment code, scripting glue, or host-language convenience APIs, the system stops being a kernel and becomes a bag of integrations.
+
+## Current State
+
+The workspace has moved beyond scaffolding.
+
+Implemented today:
+
+- foundational identifiers, values, datoms, rule/query ASTs, and provenance types
+- schema registration and predicate arity validation
+- append-only in-memory journal semantics
+- deterministic `Current` and `AsOf` resolution across scalar, set, and sequence classes
+- rule safety checks
+- dependency-graph construction
+- SCC decomposition and phase-graph lowering
+- unstratified-negation rejection
+- a first real recursive runtime slice for positive monotone recursion
+- derived tuple metadata with rule, SCC, stratum, iteration, and parent tuple references
+
+Deliberately still narrow:
+
+- the canonical DSL parser is not implemented yet
+- the runtime currently rejects negation instead of evaluating full stratified negation
+- source datom provenance is not yet threaded through to `source_datom_ids`
+- Go and Python remain boundary placeholders rather than active implementations
+- sidecar integrations are specified, not yet implemented
+
+## First Working Vertical Slice
+
+The first meaningful semantic loop is now alive in the repo.
+
+That slice looks like this:
+
+1. extensional facts are written as datoms
+2. the resolver materializes current state or a prefix-constrained historical state
+3. the compiler validates rules, builds dependency structure, and records executable metadata
+4. the runtime lifts extensional relations from resolved attributes
+5. recursive rules are evaluated to a fixpoint
+6. derived tuples are emitted with iteration and parent-tuple metadata
+
+The initial runtime focus is monotone transitive closure, because it is the smallest slice that proves the architecture is real instead of rhetorical.
+
+## Semantic Invariants
+
+Several invariants govern the project from the start.
+
+- For a fixed schema, journal prefix, and compiled program, results must be deterministic.
+- The Rust kernel is the authoritative semantic implementation.
+- Derived tuples must be explainable.
+- Temporal replay is not a debugging convenience; it is part of the semantic model.
+- Non-Rust layers may consume results, but they must not silently redefine them.
+
+## Repository Shape
+
+The repository follows the crate boundaries declared in `REPO_LAYOUT.md`.
+
+### Workspace root
+
+- `Cargo.toml` defines the Rust workspace.
+- `Cargo.lock` is checked in.
+- spec and interface documents remain at the repository root because they still govern implementation direction.
+
+### Rust crates
+
+| Crate | Responsibility |
+| --- | --- |
+| `aether_ast` | IDs, values, datoms, rule/query ASTs, provenance, phase/explain structs |
+| `aether_schema` | attribute classes, schema registry, predicate signatures, validation |
+| `aether_storage` | journal trait, in-memory journal, history and prefix access |
+| `aether_resolver` | deterministic `Current` and `AsOf` materialization |
+| `aether_rules` | rule validation, dependency graphs, SCC analysis, extensional binding inference |
+| `aether_plan` | compiled-program planning structures, phase graphs, delta-plan metadata |
+| `aether_runtime` | recursive evaluation, iteration metadata, derived tuple production |
+| `aether_explain` | derivation and plan explanation surface |
+| `aether_api` | stable request/response boundary types for kernel-facing consumers |
+
+### Non-Rust boundaries
+
+- `go/` is reserved for operator tooling, service wrappers, and deployment ergonomics.
+- `python/` is reserved for fixture generation, benchmarks, notebooks, and research workflows.
+- `docs/` holds status, roadmap, ADR space, and known limitations.
+- `examples/`, `fixtures/`, and `scripts/` exist to support real implementation work rather than theory alone.
+
+## How To Read This Repository
+
+If you are new to AETHER, the most useful reading order is:
+
+1. `SPEC.md` for the system thesis and milestone structure
+2. `RULES.md` for the recursive semantics stance
+3. `INTERFACES.md` for crate ownership and trait boundaries
+4. `REPO_LAYOUT.md` for structural expectations
+5. the Rust crates themselves, starting with `aether_ast` and moving upward toward `aether_runtime`
+
+If you want to understand what is already implemented rather than what is only specified, start in the code:
+
+1. `crates/aether_storage`
+2. `crates/aether_resolver`
+3. `crates/aether_rules`
+4. `crates/aether_runtime`
+
+## Building And Verifying
+
+The current development baseline is Rust on both Windows MSVC and WSL Ubuntu.
+
+Recommended commands:
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test
+```
+
+WSL verification uses the same workspace and the same commands via the Linux toolchain.
+
+The workspace is currently verified under:
+
+- Windows stable MSVC toolchain
+- WSL Ubuntu stable GNU toolchain
+
+## Development Posture
+
+The intended implementation sequence is disciplined.
+
+- Make the substrate correct before making it distributed.
+- Make the rule engine semantically credible before making it feature-rich.
+- Keep crate boundaries explicit until there is compelling evidence to collapse them.
+- Add Go and Python only across a stable kernel boundary.
+- Prefer deterministic, explainable behavior over cleverness that obscures semantics.
+
+This matters because coordination systems age badly when their core semantics are implicit. AETHER is meant to age in the opposite direction: toward greater clarity, stronger replay guarantees, and more legible derivation.
+
+## What The Runtime Does Today
+
+The runtime crate now performs a genuine fixed-point evaluation for a narrow but important class of programs.
+
+Supported today:
+
+- positive rule bodies
+- recursive intensional predicates
+- extensional predicates lifted from resolved attributes
+- derived tuple de-duplication
+- iteration-by-iteration convergence tracking
+- parent derived tuple linkage
+
+Not yet supported in the runtime:
+
+- executable stratified negation
+- bounded aggregation
+- full semi-naive delta specialization
+- source datom provenance threading into derived tuples
+- optimizer-grade plan selection
+
+This is intentional. The project is building from semantic bedrock upward. The right next steps are to preserve correctness while widening expressive power, not to rush into breadth and backfill meaning later.
+
+## Roadmap
+
+The milestone sequence remains the governing roadmap.
+
+- `M0` Rust substrate core
+- `M1` deterministic resolver core
+- `M2` rule compiler and planning
+- `M3` recursive runtime and derivation traces
+- `M4` stable API boundary
+- `M5` Go shell and Python SDK
+
+In practical terms, the most immediate work now is:
+
+- threading source datom provenance through resolution and derivation
+- tightening the runtime from naive fixpoint evaluation toward true semi-naive delta execution
+- building the canonical DSL parser
+- widening explainability from tuple metadata to richer proof surfaces
+- introducing boundary-level examples that demonstrate end-to-end kernel usage
+
+## Why The README Is Long
+
+This repository began as a specification package for implementation agents and human collaborators working from the same architectural text. In a repo like that, a short README would be a false kindness. It would save a few seconds at the top and cost hours everywhere else.
+
+The job of this README is not to decorate the repository. Its job is to establish the center of gravity quickly and correctly:
+
+- what AETHER is
+- what it is trying not to become
+- what already exists in code
+- what remains deliberately deferred
+- where each responsibility belongs
+
+That clarity is part of the implementation.
+
+## Related Documents
+
+- `SPEC.md` defines the system objective, architecture, data model, temporal model, and milestones.
+- `RULES.md` defines the rule-language stance and recursive semantics expectations.
+- `INTERFACES.md` defines crate responsibilities and trait-shape guidance.
+- `IMPLEMENTATION_DECISION.md` records the fork-versus-own and language-split decisions.
+- `REPO_LAYOUT.md` defines the required repository structure.
+- `TESTPLAN.md` captures test intent and verification direction.
+- `docs/STATUS.md` tracks implementation status.
+- `docs/ROADMAP.md` and `docs/KNOWN_LIMITATIONS.md` hold forward-looking operational documentation.
+
+## Closing Position
+
+AETHER is trying to do something exacting.
+
+It is trying to give distributed agent systems a semantic core that is explicit, replayable, recursive, inspectable, and implementable without surrendering the center to shell code or fashionable abstraction. That is a narrow road. It asks for discipline at the language boundary, rigor in the data model, and honesty about what is implemented versus what is merely intended.
+
+This repository is the first serious step onto that road.

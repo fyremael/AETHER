@@ -1,0 +1,12 @@
+[package]
+name = "aether_storage"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+aether_ast = { path = "../aether_ast" }
+serde.workspace = true
+thiserror.workspace = true
+

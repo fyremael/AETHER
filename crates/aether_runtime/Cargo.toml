@@ -1,0 +1,18 @@
+[package]
+name = "aether_runtime"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+aether_ast = { path = "../aether_ast" }
+aether_plan = { path = "../aether_plan" }
+aether_resolver = { path = "../aether_resolver" }
+indexmap.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+aether_rules = { path = "../aether_rules" }
+aether_schema = { path = "../aether_schema" }

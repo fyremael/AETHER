@@ -1,0 +1,14 @@
+[package]
+name = "aether_rules"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+aether_ast = { path = "../aether_ast" }
+aether_plan = { path = "../aether_plan" }
+aether_schema = { path = "../aether_schema" }
+indexmap.workspace = true
+thiserror.workspace = true
+

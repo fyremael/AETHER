@@ -1,0 +1,14 @@
+[package]
+name = "aether_resolver"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+aether_ast = { path = "../aether_ast" }
+aether_schema = { path = "../aether_schema" }
+indexmap.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+

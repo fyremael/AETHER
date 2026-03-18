@@ -1,0 +1,24 @@
+[workspace]
+members = [
+    "crates/aether_ast",
+    "crates/aether_schema",
+    "crates/aether_storage",
+    "crates/aether_resolver",
+    "crates/aether_rules",
+    "crates/aether_plan",
+    "crates/aether_runtime",
+    "crates/aether_explain",
+    "crates/aether_api",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0 OR MIT"
+rust-version = "1.78"
+version = "0.1.0"
+
+[workspace.dependencies]
+indexmap = { version = "2.7.0", features = ["serde"] }
+serde = { version = "1.0.215", features = ["derive"] }
+thiserror = "1.0.69"
