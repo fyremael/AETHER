@@ -66,7 +66,6 @@ impl RuleRuntime for SemiNaiveRuntime {
             .map(|rule| rule.head.predicate.id)
             .collect();
         let scc_lookup = build_scc_lookup(program);
-        let scc_strata = build_scc_strata(program, &scc_lookup);
 
         let mut derived_by_predicate: IndexMap<PredicateId, Vec<RelationRow>> = IndexMap::new();
         let mut tuple_keys = IndexSet::new();
@@ -91,7 +90,9 @@ impl RuleRuntime for SemiNaiveRuntime {
                     .get(&rule.head.predicate.id)
                     .copied()
                     .unwrap_or_default();
-                let stratum = scc_strata.get(&scc_id).copied().unwrap_or_default();
+                // This runtime slice executes only positive-rule programs. In that subset,
+                // every evaluated rule belongs to stratum 0.
+                let stratum = 0usize;
 
                 for matched in matches {
                     let values = materialize_head(rule.id, &rule.head.terms, &matched.bindings)?;
@@ -335,46 +336,6 @@ fn build_scc_lookup(program: &CompiledProgram) -> IndexMap<PredicateId, usize> {
     lookup
 }
 
-fn build_scc_strata(
-    program: &CompiledProgram,
-    scc_lookup: &IndexMap<PredicateId, usize>,
-) -> IndexMap<usize, usize> {
-    let mut memo = IndexMap::new();
-    for scc in &program.sccs {
-        scc_stratum(scc.id, program, scc_lookup, &mut memo);
-    }
-    memo
-}
-
-fn scc_stratum(
-    scc_id: usize,
-    program: &CompiledProgram,
-    scc_lookup: &IndexMap<PredicateId, usize>,
-    memo: &mut IndexMap<usize, usize>,
-) -> usize {
-    if let Some(stratum) = memo.get(&scc_id) {
-        return *stratum;
-    }
-
-    let mut stratum = 0usize;
-    if let Some(scc) = program.sccs.iter().find(|component| component.id == scc_id) {
-        for predicate in &scc.predicates {
-            if let Some(dependencies) = program.dependency_graph.edges.get(predicate) {
-                for dependency in dependencies {
-                    let dependency_scc = scc_lookup.get(dependency).copied().unwrap_or_default();
-                    if dependency_scc != scc_id {
-                        stratum =
-                            stratum.max(scc_stratum(dependency_scc, program, scc_lookup, memo) + 1);
-                    }
-                }
-            }
-        }
-    }
-
-    memo.insert(scc_id, stratum);
-    stratum
-}
-
 fn tuple_key(predicate: PredicateId, values: &[Value]) -> String {
     let mut key = format!("{}#", predicate.0);
     for value in values {
@@ -573,7 +534,12 @@ mod tests {
             .expect("longest-path tuple");
         assert_eq!(longest_path.metadata.rule_id, RuleId::new(2));
         assert_eq!(longest_path.metadata.iteration, 3);
+        assert_eq!(longest_path.metadata.stratum, 0);
         assert!(!longest_path.metadata.parent_tuple_ids.is_empty());
+        assert!(derived
+            .tuples
+            .iter()
+            .all(|tuple| tuple.metadata.stratum == 0));
     }
 
     #[test]

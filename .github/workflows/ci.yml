@@ -13,7 +13,7 @@ env:
 
 jobs:
   rust:
-    name: Rust (${{ matrix.os }})
+    name: Rust (${{ matrix.os }}, ${{ matrix.toolchain }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -21,6 +21,9 @@ jobs:
         os:
           - ubuntu-latest
           - windows-latest
+        toolchain:
+          - "1.78.0"
+          - stable
 
     steps:
       - name: Checkout
@@ -28,8 +31,8 @@ jobs:
 
       - name: Install toolchain
         run: |
-          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
-          rustup default stable
+          rustup toolchain install ${{ matrix.toolchain }} --profile minimal --component rustfmt --component clippy
+          rustup default ${{ matrix.toolchain }}
 
       - name: cargo fmt
         run: cargo fmt --all --check

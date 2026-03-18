@@ -1,6 +1,6 @@
 use aether_ast::{Atom, AttributeId, Literal, PredicateId, RuleAst, RuleProgram, Variable};
 use aether_plan::{CompiledProgram, DeltaRulePlan, DependencyGraph, StronglyConnectedComponent};
-use aether_schema::{Schema, SchemaError};
+use aether_schema::{AttributeSchema, Schema, SchemaError, ValueType};
 use indexmap::{IndexMap, IndexSet};
 use thiserror::Error;
 
@@ -78,7 +78,7 @@ impl RuleCompiler for DefaultRuleCompiler {
         }
 
         let phase_graph = build_phase_graph(schema, &dependency_graph, &sccs, &scc_lookup);
-        let extensional_bindings = infer_extensional_bindings(schema, program);
+        let extensional_bindings = infer_extensional_bindings(schema, program)?;
 
         Ok(CompiledProgram {
             dependency_graph,
@@ -317,7 +317,7 @@ fn build_phase_graph(
 fn infer_extensional_bindings(
     schema: &Schema,
     program: &RuleProgram,
-) -> IndexMap<PredicateId, AttributeId> {
+) -> Result<IndexMap<PredicateId, AttributeId>, CompileError> {
     let mut bindings = IndexMap::new();
 
     for predicate in &program.predicates {
@@ -325,15 +325,16 @@ fn infer_extensional_bindings(
             continue;
         }
 
-        if let Some(attribute_id) = matching_attribute_id(schema, &predicate.name) {
-            bindings.insert(predicate.id, attribute_id);
+        if let Some(attribute) = matching_attribute(schema, &predicate.name) {
+            validate_extensional_binding(schema, predicate.id, attribute)?;
+            bindings.insert(predicate.id, attribute.id);
         }
     }
 
-    bindings
+    Ok(bindings)
 }
 
-fn matching_attribute_id(schema: &Schema, predicate_name: &str) -> Option<AttributeId> {
+fn matching_attribute<'a>(schema: &'a Schema, predicate_name: &str) -> Option<&'a AttributeSchema> {
     let mut candidates = vec![predicate_name.to_owned()];
     if predicate_name.contains('_') {
         candidates.push(predicate_name.replacen('_', ".", 1));
@@ -347,8 +348,29 @@ fn matching_attribute_id(schema: &Schema, predicate_name: &str) -> Option<Attrib
             .attributes
             .values()
             .find(|attribute| attribute.name == candidate)
-            .map(|attribute| attribute.id)
     })
+}
+
+fn validate_extensional_binding(
+    schema: &Schema,
+    predicate: PredicateId,
+    attribute: &AttributeSchema,
+) -> Result<(), CompileError> {
+    let signature = schema
+        .predicate(&predicate)
+        .expect("validated predicates are present in schema");
+    let expected_fields = vec![ValueType::Entity, attribute.value_type.clone()];
+
+    if signature.fields != expected_fields {
+        return Err(CompileError::IncompatibleExtensionalBinding {
+            predicate: signature.name.clone(),
+            attribute: attribute.name.clone(),
+            expected_fields,
+            actual_fields: signature.fields.clone(),
+        });
+    }
+
+    Ok(())
 }
 
 fn predicate_label(schema: &Schema, predicate: PredicateId) -> String {
@@ -362,6 +384,15 @@ fn predicate_label(schema: &Schema, predicate: PredicateId) -> String {
 pub enum CompileError {
     #[error(transparent)]
     Schema(#[from] SchemaError),
+    #[error(
+        "predicate {predicate} cannot bind to attribute {attribute}: expected {expected_fields:?}, found {actual_fields:?}"
+    )]
+    IncompatibleExtensionalBinding {
+        predicate: String,
+        attribute: String,
+        expected_fields: Vec<ValueType>,
+        actual_fields: Vec<ValueType>,
+    },
     #[error("rule {rule_id} uses unsafe variable {variable}")]
     UnsafeVariable {
         rule_id: aether_ast::RuleId,
@@ -521,6 +552,51 @@ mod tests {
             compiled.extensional_bindings.get(&task_depends_on.id),
             Some(&AttributeId::new(21))
         );
+    }
+
+    #[test]
+    fn extensional_binding_rejects_type_mismatches() {
+        let task_depends_on = predicate(10, "task_depends_on", 2);
+        let mut schema = Schema::new("v1");
+        schema
+            .register_predicate(PredicateSignature {
+                id: task_depends_on.id,
+                name: task_depends_on.name.clone(),
+                fields: vec![ValueType::String, ValueType::Entity],
+            })
+            .expect("register predicate");
+        schema
+            .register_attribute(AttributeSchema {
+                id: AttributeId::new(21),
+                name: "task.depends_on".into(),
+                class: AttributeClass::RefSet,
+                value_type: ValueType::Entity,
+            })
+            .expect("register attribute");
+
+        let error = DefaultRuleCompiler
+            .compile(
+                &schema,
+                &RuleProgram {
+                    predicates: vec![task_depends_on],
+                    rules: Vec::new(),
+                    materialized: Vec::new(),
+                },
+            )
+            .expect_err("type-mismatched binding should fail");
+
+        assert!(matches!(
+            error,
+            CompileError::IncompatibleExtensionalBinding {
+                predicate,
+                attribute,
+                expected_fields,
+                actual_fields,
+            } if predicate == "task_depends_on"
+                && attribute == "task.depends_on"
+                && expected_fields == vec![ValueType::Entity, ValueType::Entity]
+                && actual_fields == vec![ValueType::String, ValueType::Entity]
+        ));
     }
 
     #[test]
