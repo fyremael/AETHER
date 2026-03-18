@@ -1,5 +1,9 @@
 # AETHER Semantic Kernel
 
+[![CI](https://github.com/fyremael/AETHER/actions/workflows/ci.yml/badge.svg)](https://github.com/fyremael/AETHER/actions/workflows/ci.yml)
+[![Rust 1.78+](https://img.shields.io/badge/rust-1.78%2B-93450a?logo=rust)](https://www.rust-lang.org/)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-4b5563)](./LICENSE-MIT)
+
 AETHER is a semantic coordination runtime for distributed agent systems.
 
 Its claim is simple, but not modest: the right center of gravity for agent coordination is not a queue, not a graph-walking convenience layer, not a pile of ad hoc service contracts, and not a host-language DSL masquerading as semantics. The right center of gravity is an authoritative semantic kernel: an append-only causal journal, a deterministic resolver, and a recursive rule engine that can state, derive, replay, and explain what a system believes.
@@ -7,6 +11,8 @@ Its claim is simple, but not modest: the right center of gravity for agent coord
 This repository is the beginning of that kernel.
 
 It is a Rust-first implementation workspace built from a spec-first package. The specification still matters. The prose still governs. But this is no longer only a bundle of architectural intent. The repository now contains a real Rust workspace, real crate boundaries, real tests, and the first end-to-end recursive runtime slice.
+
+If you are joining the project fresh, read [`CONTRIBUTING.md`](./CONTRIBUTING.md) after this file and then walk through [`examples/transitive-closure.md`](./examples/transitive-closure.md). That sequence gets you from architectural stance to executable behavior without guesswork.
 
 ## Thesis
 
@@ -181,6 +187,8 @@ The workspace is currently verified under:
 - Windows stable MSVC toolchain
 - WSL Ubuntu stable GNU toolchain
 
+GitHub Actions now runs the same format, lint, and test gates on both Ubuntu and Windows so the public CI badge reflects the actual contributor contract.
+
 ## Development Posture
 
 The intended implementation sequence is disciplined.
@@ -257,6 +265,8 @@ That clarity is part of the implementation.
 - `IMPLEMENTATION_DECISION.md` records the fork-versus-own and language-split decisions.
 - `REPO_LAYOUT.md` defines the required repository structure.
 - `TESTPLAN.md` captures test intent and verification direction.
+- `CONTRIBUTING.md` explains contributor expectations and the local verification contract.
+- `examples/transitive-closure.md` walks through the first working recursive example.
 - `docs/STATUS.md` tracks implementation status.
 - `docs/ROADMAP.md` and `docs/KNOWN_LIMITATIONS.md` hold forward-looking operational documentation.
 

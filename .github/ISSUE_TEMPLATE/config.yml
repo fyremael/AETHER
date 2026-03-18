@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Read the spec first
+    url: https://github.com/fyremael/AETHER/blob/main/SPEC.md
+    about: Start with the system specification before opening a broad architectural issue.
+  - name: Contribution guide
+    url: https://github.com/fyremael/AETHER/blob/main/CONTRIBUTING.md
+    about: Review contributor expectations and local verification steps before submitting changes.

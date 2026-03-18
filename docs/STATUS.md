@@ -2,28 +2,33 @@
 
 ## Current state
 
-The repository has been upgraded from a pure spec package to an implementation scaffold.
+The repository has advanced from a pure specification bundle to a functioning early implementation workspace.
 
 Completed:
 
 - Rust workspace root created
 - canonical Rust crates added under `crates/`
 - Go and Python boundary directories created
-- initial docs placeholders added for ADRs, roadmap, and limitations
+- schema, storage, resolver, compiler, and runtime substrate implemented as an initial vertical slice
+- unit tests added across the Rust core crates
+- `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test` verified on Windows and WSL
+- GitHub CI added for Ubuntu and Windows
+- repository front-door docs, contribution guidance, and worked examples now exist
 
 Not yet completed:
 
-- semantic invariants beyond basic type scaffolding
-- deterministic resolver behavior for all merge classes
-- real rule parsing, planning, and semi-naive evaluation
-- end-to-end acceptance tests from `TESTPLAN.md`
+- canonical DSL parser
+- executable stratified negation
+- bounded aggregation
+- durable storage backends
+- full derivation provenance threading from source datoms into runtime outputs
+- stable Go and Python boundary clients
 
 ## Immediate focus
 
-Milestone `M0` remains the next implementation target:
+The most immediate work now sits between late `M2` and early `M3`:
 
-- element IDs
-- schema typing
-- datom journal
-- in-memory store
-- temporal replay
+- preserve the current recursive runtime slice while tightening it toward true semi-naive execution
+- thread `source_datom_ids` through resolution and derivation
+- build the canonical DSL parser
+- expand worked examples and acceptance-style tests

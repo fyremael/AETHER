@@ -1,8 +1,9 @@
 # KNOWN_LIMITATIONS
 
-- The Rust crates currently provide compile-oriented scaffolding, not production semantics.
-- Rule compilation only establishes boundary types and lightweight validation hooks.
-- Runtime evaluation is a placeholder and does not yet perform full semi-naive recursive execution.
-- Go and Python directories are structural placeholders and do not yet expose a stable client implementation.
-- No automated verification has been run from this shell because the Rust toolchain is not currently available on `PATH`.
-
+- The runtime currently supports a narrow positive monotone recursive slice; it does not yet execute stratified negation or bounded aggregation.
+- The current fixed-point evaluator is intentionally simple and is not yet a fully optimized semi-naive engine.
+- Extensional predicate binding is inferred by name against schema attributes and is therefore deliberately conservative.
+- Derived tuples currently record parent derived tuple IDs, but `source_datom_ids` are not yet populated.
+- The canonical AETHER DSL parser does not exist yet; rules are authored through the Rust AST surface for now.
+- Storage is currently in-memory only.
+- Go and Python directories remain boundary placeholders rather than stable clients.
