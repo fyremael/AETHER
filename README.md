@@ -12,7 +12,7 @@ This repository is the beginning of that kernel.
 
 It is a Rust-first implementation workspace built from a spec-first package. The specification still matters. The prose still governs. But this is no longer only a bundle of architectural intent. The repository now contains a real Rust workspace, real crate boundaries, real tests, and the first end-to-end recursive runtime slice.
 
-If you are joining the project fresh, read [`CONTRIBUTING.md`](./CONTRIBUTING.md) after this file and then walk through [`examples/demo-03-coordination-situation-room.md`](./examples/demo-03-coordination-situation-room.md). That is the fastest path from architectural stance to executable behavior.
+If you are joining the project fresh, read [`docs/README.md`](./docs/README.md) and [`CONTRIBUTING.md`](./CONTRIBUTING.md) after this file and then walk through [`examples/demo-03-coordination-situation-room.md`](./examples/demo-03-coordination-situation-room.md). That is the fastest path from architectural stance to executable behavior.
 
 ## Thesis
 
@@ -269,6 +269,12 @@ That clarity is part of the implementation.
 
 ## Related Documents
 
+- `docs/README.md` is the documentation portal and reading-map entry point.
+- `docs/ARCHITECTURE.md` is the current implementation architecture guide.
+- `docs/DEVELOPER_WORKFLOW.md` explains the engineering loop and definition of done.
+- `docs/OPERATIONS.md` explains the operator path, demo catalog, and report workflow.
+- `docs/GLOSSARY.md` defines canonical project vocabulary.
+- `docs/DOCUMENTATION_STANDARD.md` defines the documentation quality bar and update rules.
 - `SPEC.md` defines the system objective, architecture, data model, temporal model, and milestones.
 - `RULES.md` defines the rule-language stance and recursive semantics expectations.
 - `INTERFACES.md` defines crate responsibilities and trait-shape guidance.

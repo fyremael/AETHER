@@ -2,6 +2,8 @@
 
 Repository automation, fixture generation, release support scripts, and operator-facing demo launchers live here.
 
+For the operator-facing presentation flow and demo-selection guidance, read `docs/OPERATIONS.md` first.
+
 For non-technical operators on Windows:
 
 - double-click `run-demo-01.cmd` to run the first AETHER demonstration

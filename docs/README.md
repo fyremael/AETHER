@@ -1,0 +1,97 @@
+# Documentation Center
+
+This directory is the operating manual for the AETHER repository.
+
+The root documents still matter. `SPEC.md`, `RULES.md`, `INTERFACES.md`, and `REPO_LAYOUT.md` remain governing texts. What lives here is the connective tissue around them: the guides that help people understand the current implementation, operate the demonstrations, contribute safely, and keep the documentation itself honest.
+
+## Reading Paths
+
+### If you are new to AETHER
+
+Read these in order:
+
+1. `README.md`
+2. `examples/demo-03-coordination-situation-room.md`
+3. `docs/ARCHITECTURE.md`
+4. `docs/STATUS.md`
+5. `docs/KNOWN_LIMITATIONS.md`
+
+That path gets you from thesis to running system to current boundary.
+
+### If you are implementing features
+
+Read these in order:
+
+1. `docs/ARCHITECTURE.md`
+2. `docs/GLOSSARY.md`
+3. `docs/DEVELOPER_WORKFLOW.md`
+4. `CONTRIBUTING.md`
+5. `docs/DOCUMENTATION_STANDARD.md`
+
+That path is the shortest route to “make a change without accidentally moving the center of gravity.”
+
+### If you are operating demos or presenting the project
+
+Start here:
+
+1. `docs/OPERATIONS.md`
+2. `examples/README.md`
+3. `scripts/README.md`
+
+Those documents explain which demo to run, what output to expect, and where reports are written.
+
+### If you need the long-range picture
+
+Read:
+
+1. `docs/STATUS.md`
+2. `docs/ROADMAP.md`
+3. `docs/KNOWN_LIMITATIONS.md`
+
+That set answers “what exists now, what does not yet exist, and what comes next.”
+
+## Documentation Map
+
+### Repository root
+
+| Document | Purpose |
+| --- | --- |
+| `README.md` | Public front door and architectural stance |
+| `SPEC.md` | Governing system thesis, data model, and milestone plan |
+| `RULES.md` | Rule-language and recursive semantics expectations |
+| `INTERFACES.md` | Crate boundaries and trait-shape guidance |
+| `REPO_LAYOUT.md` | Required repository structure |
+| `TESTPLAN.md` | Test intent and acceptance direction |
+| `CONTRIBUTING.md` | Contribution expectations and review contract |
+
+### Docs directory
+
+| Document | Purpose |
+| --- | --- |
+| `docs/ARCHITECTURE.md` | How the current kernel is shaped and how data moves through it |
+| `docs/DEVELOPER_WORKFLOW.md` | Day-to-day engineering loop, verification contract, and definition of done |
+| `docs/OPERATIONS.md` | Operator-facing guidance for demos, reports, and presentations |
+| `docs/GLOSSARY.md` | Canonical vocabulary for the codebase and its semantics |
+| `docs/DOCUMENTATION_STANDARD.md` | Documentation quality bar, update triggers, and maintenance rules |
+| `docs/STATUS.md` | What is implemented now |
+| `docs/ROADMAP.md` | What is planned next |
+| `docs/KNOWN_LIMITATIONS.md` | Where the current implementation is intentionally incomplete |
+| `docs/ADR/README.md` | ADR policy and location for numbered architecture decisions |
+
+## Principles
+
+The documentation system follows a few non-negotiable rules:
+
+- say what the system does today before describing what it may do later
+- distinguish governing specification from current implementation guide
+- optimize for precision, not hype
+- make the operator path as explicit as the developer path
+- treat process documentation as product surface, not internal trivia
+
+## Maintenance
+
+Documentation quality is not a cleanup phase after implementation. It is part of the implementation.
+
+The working rule is simple: if a change affects behavior, architecture, workflow, operator experience, or public expectations, the relevant documentation should change in the same commit.
+
+The full maintenance standard lives in `docs/DOCUMENTATION_STANDARD.md`.

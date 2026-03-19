@@ -19,6 +19,7 @@ Completed:
 - executable stratified negation implemented for stratified programs
 - first coordination acceptance slice implemented for readiness, claims, leases, and stale-attempt rejection
 - in-memory kernel service implemented in `aether_api`
+- documentation portal, architecture guide, developer workflow guide, operator guide, glossary, and documentation standards now exist
 - unit tests added across the Rust core crates
 - `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test` verified on Windows and WSL
 - GitHub CI added for Ubuntu and Windows

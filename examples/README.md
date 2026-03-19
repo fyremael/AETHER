@@ -2,6 +2,8 @@
 
 This directory holds worked examples and end-to-end walkthroughs for the AETHER kernel.
 
+For the operator path and demo-selection guidance, start with `docs/OPERATIONS.md`.
+
 Start here:
 
 - `demo-03-coordination-situation-room.md` is the current flagship showcase: recursive closure, temporal replay, claim windows, lease handoff, stale fencing, and proof traces in one operator-facing run.

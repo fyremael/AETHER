@@ -9,12 +9,14 @@ AETHER is trying to become a semantic kernel, not merely a repository of useful 
 Before opening a pull request, read these documents in order:
 
 1. `README.md`
-2. `SPEC.md`
-3. `RULES.md`
-4. `INTERFACES.md`
-5. `REPO_LAYOUT.md`
+2. `docs/README.md`
+3. `SPEC.md`
+4. `RULES.md`
+5. `INTERFACES.md`
+6. `REPO_LAYOUT.md`
 
 If your change touches architecture, semantics, or crate boundaries, also read `IMPLEMENTATION_DECISION.md`.
+If your change affects public behavior, contributor flow, or operator flow, also read `docs/DOCUMENTATION_STANDARD.md`.
 
 ## Development Baseline
 
@@ -99,6 +101,7 @@ Before opening a pull request, make sure the answer to each question is yes:
 - Does it preserve Rust as the semantic authority?
 - Does it include tests or a clear explanation of why tests are not applicable?
 - Does it update docs if behavior, boundaries, or contributor workflow changed?
+- Does it meet the quality bar in `docs/DOCUMENTATION_STANDARD.md` when docs were touched?
 - Does it avoid unrelated drive-by refactors?
 
 ## Issues
