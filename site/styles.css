@@ -384,6 +384,23 @@ h3 {
   margin-top: 8px;
 }
 
+.api-crate-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.api-crate-list a {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.api-crate-list a:hover {
+  text-decoration: underline;
+}
+
 .stacked-actions {
   flex-direction: column;
 }
