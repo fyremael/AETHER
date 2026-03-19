@@ -1,0 +1,13 @@
+<svg width="240" height="220" viewBox="0 0 240 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="240" height="220" rx="24" fill="#0B141A"/>
+  <path d="M38 126C52 94 76 69 111 53C141 40 173 38 205 44C188 75 164 98 132 114C103 129 72 133 38 126Z" fill="#182933"/>
+  <path d="M52 140C78 133 102 133 126 136C153 139 177 146 199 158C175 169 149 175 120 176C91 176 68 164 52 140Z" fill="#102027"/>
+  <circle cx="109" cy="102" r="31" fill="#10242D"/>
+  <circle cx="109" cy="102" r="22" fill="#25D0FF" fill-opacity="0.84"/>
+  <circle cx="109" cy="102" r="11" fill="#08131A"/>
+  <circle cx="114" cy="97" r="3" fill="#E7FCFF"/>
+  <path d="M52 171C82 142 103 130 117 130C131 130 152 142 185 171" stroke="#1FE3FF" stroke-width="5" stroke-linecap="round"/>
+  <path d="M47 184C82 152 107 139 122 139C137 139 160 151 192 180" stroke="#D2FBFF" stroke-width="2.5" stroke-linecap="round" opacity="0.88"/>
+  <path d="M70 192C93 170 109 161 120 161C131 161 148 171 170 191" stroke="#C6A56C" stroke-width="4" stroke-linecap="round"/>
+  <text x="120" y="210" text-anchor="middle" font-family="Aptos, Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#B9E4EF">The Weaver</text>
+</svg>

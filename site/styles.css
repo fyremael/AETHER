@@ -1,15 +1,15 @@
 :root {
-  --bg: #f3efe6;
-  --panel: rgba(255, 252, 246, 0.84);
-  --panel-strong: #fffaf1;
-  --ink: #1c1915;
-  --muted: #5d584f;
-  --line: rgba(45, 35, 20, 0.12);
-  --accent: #0f766e;
-  --accent-strong: #0b5e57;
-  --accent-soft: rgba(15, 118, 110, 0.12);
-  --warm: #b45309;
-  --shadow: 0 24px 60px rgba(30, 25, 15, 0.12);
+  --bg: #071118;
+  --panel: rgba(10, 20, 28, 0.82);
+  --panel-strong: rgba(13, 25, 35, 0.95);
+  --ink: #e7edf2;
+  --muted: #99aab5;
+  --line: rgba(184, 202, 216, 0.12);
+  --accent: #25d0c4;
+  --accent-strong: #109e94;
+  --accent-soft: rgba(37, 208, 196, 0.15);
+  --warm: #d7b56c;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
   --radius: 22px;
   --max-width: 1180px;
 }
@@ -27,9 +27,10 @@ body {
   min-height: 100vh;
   color: var(--ink);
   background:
-    radial-gradient(circle at top left, rgba(180, 83, 9, 0.12), transparent 34%),
-    radial-gradient(circle at top right, rgba(15, 118, 110, 0.16), transparent 32%),
-    linear-gradient(180deg, #f7f2e8 0%, #efe8da 48%, #ece5d8 100%);
+    radial-gradient(circle at top left, rgba(37, 208, 196, 0.16), transparent 28%),
+    radial-gradient(circle at top right, rgba(122, 226, 255, 0.13), transparent 26%),
+    radial-gradient(circle at 50% 130%, rgba(17, 52, 40, 0.66), transparent 42%),
+    linear-gradient(180deg, #0b161d 0%, #091118 45%, #05090d 100%);
   font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
   line-height: 1.6;
 }
@@ -57,7 +58,7 @@ a {
   border: 1px solid var(--line);
   border-radius: 32px;
   background:
-    linear-gradient(140deg, rgba(255, 250, 241, 0.95), rgba(255, 246, 232, 0.88)),
+    linear-gradient(140deg, rgba(16, 31, 41, 0.96), rgba(8, 17, 24, 0.92)),
     var(--panel-strong);
   box-shadow: var(--shadow);
 }
@@ -70,6 +71,7 @@ a {
   height: 260px;
   border-radius: 999px;
   background: radial-gradient(circle, rgba(15, 118, 110, 0.18), transparent 70%);
+  background: radial-gradient(circle, rgba(37, 208, 196, 0.22), transparent 70%);
   pointer-events: none;
 }
 
@@ -129,6 +131,13 @@ h3 {
   color: var(--muted);
 }
 
+.hero-note {
+  max-width: 56ch;
+  margin: 18px 0 0;
+  color: #c0ced7;
+  font-size: 0.98rem;
+}
+
 .hero-actions {
   display: flex;
   flex-wrap: wrap;
@@ -148,11 +157,11 @@ h3 {
   align-items: center;
   padding: 8px 12px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(45, 35, 20, 0.08);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(184, 202, 216, 0.12);
   font-size: 0.94rem;
   font-weight: 700;
-  color: var(--muted);
+  color: #d8e3eb;
 }
 
 .hero-visual {
@@ -167,8 +176,8 @@ h3 {
   width: 100%;
   height: auto;
   border-radius: 24px;
-  border: 1px solid rgba(45, 35, 20, 0.08);
-  background: rgba(255, 255, 255, 0.48);
+  border: 1px solid rgba(184, 202, 216, 0.12);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .hero-visual figcaption {
@@ -202,7 +211,7 @@ h3 {
 
 .button-secondary {
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .section {
@@ -211,25 +220,25 @@ h3 {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
-  box-shadow: 0 18px 44px rgba(30, 25, 15, 0.08);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
   backdrop-filter: blur(10px);
 }
 
 .highlight-band {
   background:
-    linear-gradient(145deg, rgba(15, 118, 110, 0.08), rgba(255, 250, 241, 0.92)),
+    linear-gradient(145deg, rgba(37, 208, 196, 0.1), rgba(10, 20, 28, 0.88)),
     var(--panel);
 }
 
 .teaching-band {
   background:
-    linear-gradient(145deg, rgba(180, 83, 9, 0.08), rgba(255, 249, 238, 0.95)),
+    linear-gradient(145deg, rgba(215, 181, 108, 0.08), rgba(10, 20, 28, 0.92)),
     var(--panel);
 }
 
 .story-band {
   background:
-    linear-gradient(145deg, rgba(15, 118, 110, 0.06), rgba(255, 255, 255, 0.95)),
+    linear-gradient(145deg, rgba(122, 226, 255, 0.08), rgba(10, 20, 28, 0.92)),
     var(--panel);
 }
 
@@ -258,9 +267,9 @@ h3 {
 
 .lesson-card {
   padding: 20px;
-  border: 1px solid rgba(45, 35, 20, 0.1);
+  border: 1px solid rgba(184, 202, 216, 0.1);
   border-radius: 18px;
-  background: rgba(255, 253, 248, 0.92);
+  background: rgba(15, 26, 34, 0.92);
 }
 
 .lesson-step {
@@ -281,31 +290,33 @@ h3 {
   color: var(--muted);
 }
 
-.minderling-grid {
+.warden-grid {
   display: grid;
   gap: 18px;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
 }
 
-.minderling-card {
+.warden-card {
   display: grid;
   gap: 14px;
   align-content: start;
   padding: 18px;
-  border: 1px solid rgba(45, 35, 20, 0.1);
+  border: 1px solid rgba(184, 202, 216, 0.12);
   border-radius: 20px;
-  background: rgba(255, 253, 248, 0.94);
+  background:
+    linear-gradient(180deg, rgba(17, 31, 40, 0.96), rgba(11, 20, 26, 0.95)),
+    rgba(15, 26, 34, 0.95);
 }
 
-.minderling-card img {
+.warden-card img {
   width: 100%;
   height: auto;
   border-radius: 16px;
-  border: 1px solid rgba(45, 35, 20, 0.08);
-  background: rgba(255, 255, 255, 0.66);
+  border: 1px solid rgba(184, 202, 216, 0.12);
+  background: rgba(255, 255, 255, 0.03);
 }
 
-.minderling-card p {
+.warden-card p {
   margin: 10px 0 0;
   color: var(--muted);
 }
@@ -315,9 +326,9 @@ h3 {
   display: block;
   height: 100%;
   padding: 22px;
-  border: 1px solid rgba(45, 35, 20, 0.1);
+  border: 1px solid rgba(184, 202, 216, 0.12);
   border-radius: 18px;
-  background: rgba(255, 253, 248, 0.92);
+  background: rgba(14, 25, 33, 0.92);
   text-decoration: none;
   transition:
     transform 180ms ease,
@@ -328,8 +339,8 @@ h3 {
 .card:hover,
 .metric-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(15, 118, 110, 0.28);
-  box-shadow: 0 16px 34px rgba(18, 22, 21, 0.08);
+  border-color: rgba(37, 208, 196, 0.34);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28);
 }
 
 .card p,
@@ -352,15 +363,15 @@ h3 {
 
 .showcase-card {
   padding: 22px;
-  border: 1px solid rgba(45, 35, 20, 0.1);
+  border: 1px solid rgba(184, 202, 216, 0.12);
   border-radius: 20px;
-  background: rgba(255, 253, 248, 0.92);
+  background: rgba(14, 25, 33, 0.92);
 }
 
 .accent-card {
   background:
-    linear-gradient(145deg, rgba(15, 118, 110, 0.1), rgba(255, 253, 248, 0.92)),
-    rgba(255, 253, 248, 0.92);
+    linear-gradient(145deg, rgba(37, 208, 196, 0.14), rgba(14, 25, 33, 0.92)),
+    rgba(14, 25, 33, 0.92);
 }
 
 .showcase-list {
@@ -386,9 +397,9 @@ h3 {
   display: grid;
   gap: 4px;
   padding: 18px 20px;
-  border: 1px solid rgba(45, 35, 20, 0.1);
+  border: 1px solid rgba(184, 202, 216, 0.12);
   border-radius: 16px;
-  background: rgba(255, 253, 248, 0.9);
+  background: rgba(14, 25, 33, 0.9);
   text-decoration: none;
 }
 
