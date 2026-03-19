@@ -1,5 +1,6 @@
 target/
 artifacts/
+_site/
 .idea/
 .vscode/
 __pycache__/

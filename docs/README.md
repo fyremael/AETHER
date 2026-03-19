@@ -4,6 +4,8 @@ This directory is the operating manual for the AETHER repository.
 
 The root documents still matter. `SPEC.md`, `RULES.md`, `INTERFACES.md`, and `REPO_LAYOUT.md` remain governing texts. What lives here is the connective tissue around them: the guides that help people understand the current implementation, operate the demonstrations, contribute safely, and keep the documentation itself honest.
 
+The GitHub Pages site is the published front door for this material. It hosts the generated Rust API reference and a curated landing page that points readers back into the handbook documents in the repository.
+
 ## Reading Paths
 
 ### If you are new to AETHER

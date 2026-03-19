@@ -1,6 +1,7 @@
 # AETHER Semantic Kernel
 
 [![CI](https://github.com/fyremael/AETHER/actions/workflows/ci.yml/badge.svg)](https://github.com/fyremael/AETHER/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-pages-0f766e)](https://fyremael.github.io/AETHER/)
 [![Rust 1.78+](https://img.shields.io/badge/rust-1.78%2B-93450a?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-4b5563)](./LICENSE-MIT)
 
@@ -11,6 +12,8 @@ Its claim is simple, but not modest: the right center of gravity for agent coord
 This repository is the beginning of that kernel.
 
 It is a Rust-first implementation workspace built from a spec-first package. The specification still matters. The prose still governs. But this is no longer only a bundle of architectural intent. The repository now contains a real Rust workspace, real crate boundaries, real tests, and the first end-to-end recursive runtime slice.
+
+The documentation surface now has two layers: the source-controlled handbook in this repository and an automated GitHub Pages site that publishes the Rust API reference alongside a curated documentation portal.
 
 If you are joining the project fresh, read [`docs/README.md`](./docs/README.md) and [`CONTRIBUTING.md`](./CONTRIBUTING.md) after this file and then walk through [`examples/demo-03-coordination-situation-room.md`](./examples/demo-03-coordination-situation-room.md). That is the fastest path from architectural stance to executable behavior.
 
