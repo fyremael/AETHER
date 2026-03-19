@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("01")]
+    [ValidateSet("01", "02")]
     [string]$Demo = "01",
     [switch]$PauseOnExit
 )
@@ -13,6 +13,24 @@ $demoMap = @{
         Crate = "aether_explain"
         Example = "demo_01_temporal_dependency_horizon"
         Narrative = Join-Path $repoRoot "examples\demo-01-temporal-dependency-horizon.md"
+        Highlights = @(
+            "append-only journal replay"
+            "recursive rule compilation"
+            "different semantic results at different points in time"
+            "explainable proof traces with source datom IDs"
+        )
+    }
+    "02" = @{
+        Title = "Multi-Worker Lease Handoff"
+        Crate = "aether_api"
+        Example = "demo_02_multi_worker_lease_handoff"
+        Narrative = Join-Path $repoRoot "examples\demo-02-multi-worker-lease-handoff.md"
+        Highlights = @(
+            "service-backed coordination queries"
+            "lease handoff across AsOf and Current views"
+            "stale execution fencing for multiple workers and epochs"
+            "claimable-task reporting with proof traces"
+        )
     }
 }
 
@@ -49,10 +67,9 @@ New-Item -ItemType Directory -Force $reportDir | Out-Null
 
 $commandText = "cargo run -p $($selectedDemo.Crate) --example $($selectedDemo.Example)"
 Write-Host "What this demo shows:"
-Write-Host "  - append-only journal replay"
-Write-Host "  - recursive rule compilation"
-Write-Host "  - different semantic results at different points in time"
-Write-Host "  - explainable proof traces with source datom IDs"
+foreach ($highlight in $selectedDemo.Highlights) {
+    Write-Host "  - $highlight"
+}
 Write-Host ""
 Write-Host "Running: $commandText"
 Write-Host "A report will be saved to:"

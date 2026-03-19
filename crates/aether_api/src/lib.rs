@@ -311,7 +311,7 @@ mod tests {
     use aether_ast::{AttributeId, Datom, DatomProvenance, ElementId, EntityId, Value};
 
     #[test]
-    fn service_runs_coordination_document_end_to_end() {
+    fn service_models_multi_worker_lease_handoff_and_fencing() {
         let mut service = InMemoryKernelService::new();
         service
             .append(AppendRequest {
@@ -321,70 +321,119 @@ mod tests {
                     datom(1, 3, Value::String("worker-a".into()), 3),
                     datom(1, 4, Value::U64(1), 4),
                     datom(1, 5, Value::String("active".into()), 5),
-                    datom(1, 5, Value::String("expired".into()), 6),
+                    datom(1, 3, Value::String("worker-b".into()), 6),
+                    datom(1, 4, Value::U64(2), 7),
                 ],
             })
             .expect("append journal");
 
         let parsed = service
             .parse_document(ParseDocumentRequest {
-                dsl: readiness_dsl(
+                dsl: coordination_dsl(
                     "as_of e5",
-                    "goal task_ready(t)\n  goal task_claimed_by(t, \"worker-a\")\n  keep t",
+                    "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
                 ),
             })
-            .expect("parse readiness document");
-        assert_eq!(parsed.program.facts.len(), 3);
+            .expect("parse coordination document");
+        assert_eq!(parsed.program.facts.len(), 11);
         assert_eq!(
-            parsed.program.facts[2].policy,
+            parsed.program.facts[10].policy,
             Some(aether_ast::PolicyEnvelope {
                 capability: Some("executor".into()),
                 visibility: Some("ops".into()),
             })
         );
 
-        let as_of = service
+        let as_of_authorized = service
             .run_document(RunDocumentRequest {
-                dsl: readiness_dsl(
+                dsl: coordination_dsl(
                     "as_of e5",
-                    "goal task_ready(t)\n  goal task_claimed_by(t, \"worker-a\")\n  keep t",
+                    "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
                 ),
             })
-            .expect("run as_of readiness document");
-        assert_eq!(as_of.state.as_of, Some(ElementId::new(5)));
-        assert!(as_of
-            .query
-            .as_ref()
-            .expect("query result should exist")
-            .rows
-            .is_empty());
-
-        let current = service
-            .run_document(RunDocumentRequest {
-                dsl: readiness_dsl(
-                    "current",
-                    "goal task_ready(t)\n  goal task_claimed_by(t, \"worker-a\")\n  keep t",
-                ),
-            })
-            .expect("run current readiness document");
-        let ready_rows = &current
+            .expect("run as_of authorization document");
+        assert_eq!(as_of_authorized.state.as_of, Some(ElementId::new(5)));
+        let as_of_authorized_rows = &as_of_authorized
             .query
             .as_ref()
             .expect("query result should exist")
             .rows;
-        assert_eq!(ready_rows.len(), 1);
-        assert_eq!(ready_rows[0].values, vec![Value::Entity(EntityId::new(1))]);
+        assert_eq!(as_of_authorized_rows.len(), 1);
+        assert_eq!(
+            as_of_authorized_rows[0].values,
+            vec![
+                Value::Entity(EntityId::new(1)),
+                Value::String("worker-a".into()),
+                Value::U64(1),
+            ]
+        );
+
+        let current_authorized = service
+            .run_document(RunDocumentRequest {
+                dsl: coordination_dsl(
+                    "current",
+                    "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
+                ),
+            })
+            .expect("run current authorization document");
+        let authorized_rows = &current_authorized
+            .query
+            .as_ref()
+            .expect("query result should exist")
+            .rows;
+        assert_eq!(authorized_rows.len(), 1);
+        assert_eq!(
+            authorized_rows[0].values,
+            vec![
+                Value::Entity(EntityId::new(1)),
+                Value::String("worker-b".into()),
+                Value::U64(2),
+            ]
+        );
         let trace = service
             .explain_tuple(ExplainTupleRequest {
-                tuple_id: ready_rows[0].tuple_id.expect("task_ready tuple id"),
+                tuple_id: authorized_rows[0]
+                    .tuple_id
+                    .expect("execution_authorized tuple id"),
             })
-            .expect("explain readiness tuple")
+            .expect("explain authorization tuple")
             .trace;
         assert!(!trace.tuples.is_empty());
 
+        let claimable = service
+            .run_document(RunDocumentRequest {
+                dsl: coordination_dsl(
+                    "current",
+                    "goal worker_can_claim(t, worker)\n  keep t, worker",
+                ),
+            })
+            .expect("run claimability document");
+        let claimable_rows = &claimable
+            .query
+            .as_ref()
+            .expect("query result should exist")
+            .rows;
+        assert_eq!(claimable_rows.len(), 2);
+        assert_eq!(
+            claimable_rows
+                .iter()
+                .map(|row| row.values.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                vec![
+                    Value::Entity(EntityId::new(3)),
+                    Value::String("worker-a".into()),
+                ],
+                vec![
+                    Value::Entity(EntityId::new(3)),
+                    Value::String("worker-b".into()),
+                ],
+            ]
+        );
+
         let stale = service
             .run_document(RunDocumentRequest {
-                dsl: readiness_dsl(
+                dsl: coordination_dsl(
                     "current",
                     "goal execution_rejected_stale(t, worker, epoch)\n  keep t, worker, epoch",
                 ),
@@ -395,18 +444,33 @@ mod tests {
             .as_ref()
             .expect("query result should exist")
             .rows;
-        assert_eq!(stale_rows.len(), 1);
+        assert_eq!(stale_rows.len(), 3);
         assert_eq!(
-            stale_rows[0].values,
+            stale_rows
+                .iter()
+                .map(|row| row.values.clone())
+                .collect::<Vec<_>>(),
             vec![
-                Value::Entity(EntityId::new(1)),
-                Value::String("worker-a".into()),
-                Value::U64(1),
+                vec![
+                    Value::Entity(EntityId::new(1)),
+                    Value::String("worker-a".into()),
+                    Value::U64(1),
+                ],
+                vec![
+                    Value::Entity(EntityId::new(1)),
+                    Value::String("worker-a".into()),
+                    Value::U64(2),
+                ],
+                vec![
+                    Value::Entity(EntityId::new(1)),
+                    Value::String("worker-b".into()),
+                    Value::U64(1),
+                ],
             ]
         );
     }
 
-    fn readiness_dsl(view: &str, query_body: &str) -> String {
+    fn coordination_dsl(view: &str, query_body: &str) -> String {
         format!(
             r#"
 schema v1 {{
@@ -419,6 +483,8 @@ schema v1 {{
 
 predicates {{
   task(Entity)
+  worker(String)
+  worker_capability(String, String)
   execution_attempt(Entity, String, U64)
   task_depends_on(Entity, Entity)
   task_status(Entity, String)
@@ -430,26 +496,40 @@ predicates {{
   lease_active(Entity, String, U64)
   active_claim(Entity)
   task_ready(Entity)
+  worker_can_claim(Entity, String)
+  execution_authorized(Entity, String, U64)
   execution_rejected_stale(Entity, String, U64)
 }}
 
 facts {{
   task(entity(1))
   task(entity(2))
-  execution_attempt(entity(1), "worker-a", 1) @capability("executor") @visibility("ops")
+  task(entity(3))
+  worker("worker-a")
+  worker("worker-b")
+  worker_capability("worker-a", "executor")
+  worker_capability("worker-b", "executor")
+  execution_attempt(entity(1), "worker-a", 1)
+  execution_attempt(entity(1), "worker-b", 1)
+  execution_attempt(entity(1), "worker-a", 2)
+  execution_attempt(entity(1), "worker-b", 2) @capability("executor") @visibility("ops")
 }}
 
 rules {{
   task_complete(t) <- task_status(t, "done")
   dependency_blocked(t) <- task_depends_on(t, dep), not task_complete(dep)
-  lease_active(t, worker, epoch) <- task_claimed_by(t, worker), task_lease_epoch(t, epoch), task_lease_state(t, "active")
-  active_claim(t) <- lease_active(t, worker, epoch)
-  task_ready(t) <- task(t), not dependency_blocked(t), not active_claim(t)
+  lease_active(t, w, epoch) <- task_claimed_by(t, w), task_lease_epoch(t, epoch), task_lease_state(t, "active")
+  active_claim(t) <- lease_active(t, w, epoch)
+  task_ready(t) <- task(t), not task_complete(t), not dependency_blocked(t), not active_claim(t)
+  worker_can_claim(t, w) <- task_ready(t), worker(w), worker_capability(w, "executor")
+  execution_authorized(t, w, epoch) <- execution_attempt(t, w, epoch), lease_active(t, w, epoch)
   execution_rejected_stale(t, worker, epoch) <- execution_attempt(t, worker, epoch), not lease_active(t, worker, epoch)
 }}
 
 materialize {{
   task_ready
+  worker_can_claim
+  execution_authorized
   execution_rejected_stale
 }}
 

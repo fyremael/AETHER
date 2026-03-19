@@ -12,7 +12,7 @@ This repository is the beginning of that kernel.
 
 It is a Rust-first implementation workspace built from a spec-first package. The specification still matters. The prose still governs. But this is no longer only a bundle of architectural intent. The repository now contains a real Rust workspace, real crate boundaries, real tests, and the first end-to-end recursive runtime slice.
 
-If you are joining the project fresh, read [`CONTRIBUTING.md`](./CONTRIBUTING.md) after this file and then walk through [`examples/demo-01-temporal-dependency-horizon.md`](./examples/demo-01-temporal-dependency-horizon.md). That sequence gets you from architectural stance to executable behavior without guesswork.
+If you are joining the project fresh, read [`CONTRIBUTING.md`](./CONTRIBUTING.md) after this file and then walk through [`examples/demo-01-temporal-dependency-horizon.md`](./examples/demo-01-temporal-dependency-horizon.md) and [`examples/demo-02-multi-worker-lease-handoff.md`](./examples/demo-02-multi-worker-lease-handoff.md). That sequence gets you from architectural stance to executable behavior without guesswork.
 
 ## Thesis
 
@@ -91,7 +91,7 @@ Implemented today:
 - source datom provenance threaded from resolved facts into derived tuples
 - derived tuple metadata with rule, SCC, stratum, iteration, parent tuple references, and source datom IDs
 - an in-memory explainer that reconstructs recursive tuple traces
-- a coordination acceptance slice for task readiness, claims, leases, and stale-attempt rejection
+- a coordination acceptance slice for task readiness, claims, lease handoff, and stale-attempt rejection
 - an in-memory kernel service over `aether_api` with end-to-end integration tests
 
 Deliberately still narrow:
