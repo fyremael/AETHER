@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" fill="none">
+  <defs>
+    <pattern id="hex-large" width="182" height="158" patternUnits="userSpaceOnUse">
+      <polygon
+        points="91,6 170,46 170,112 91,152 12,112 12,46"
+        stroke="#193543"
+        stroke-width="6"
+      />
+    </pattern>
+    <pattern id="hex-medium" width="96" height="84" patternUnits="userSpaceOnUse">
+      <polygon
+        points="48,4 90,24 90,60 48,80 6,60 6,24"
+        stroke="#193543"
+        stroke-width="3.4"
+      />
+    </pattern>
+    <pattern id="hex-small" width="48" height="42" patternUnits="userSpaceOnUse">
+      <polygon
+        points="24,2 45,12 45,30 24,40 3,30 3,12"
+        stroke="#193543"
+        stroke-width="1.8"
+      />
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="760" fill="url(#hex-large)" opacity="0.96" />
+  <g transform="translate(76 54) scale(0.8)" opacity="0.92">
+    <rect width="360" height="280" fill="url(#hex-medium)" />
+    <g transform="translate(88 68) scale(0.72)">
+      <rect width="220" height="180" fill="url(#hex-small)" />
+    </g>
+  </g>
+  <g transform="translate(820 462) scale(0.8)" opacity="0.92">
+    <rect width="360" height="280" fill="url(#hex-medium)" />
+    <g transform="translate(90 66) scale(0.72)">
+      <rect width="220" height="180" fill="url(#hex-small)" />
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" fill="none">
+  <g stroke="#193543" stroke-linecap="round" opacity="0.96">
+    <g stroke-width="7">
+      <ellipse cx="255" cy="172" rx="348" ry="204" transform="rotate(-18 255 172)" />
+      <ellipse cx="255" cy="172" rx="308" ry="262" transform="rotate(24 255 172)" />
+      <ellipse cx="255" cy="172" rx="238" ry="332" transform="rotate(62 255 172)" />
+      <ellipse cx="944" cy="574" rx="306" ry="182" transform="rotate(-16 944 574)" />
+      <ellipse cx="944" cy="574" rx="262" ry="236" transform="rotate(28 944 574)" />
+      <ellipse cx="944" cy="574" rx="194" ry="316" transform="rotate(64 944 574)" />
+    </g>
+    <g stroke-width="4.25" opacity="0.9">
+      <circle cx="255" cy="172" r="112" />
+      <circle cx="255" cy="172" r="74" />
+      <circle cx="255" cy="172" r="46" />
+      <circle cx="255" cy="172" r="24" />
+      <circle cx="944" cy="574" r="102" />
+      <circle cx="944" cy="574" r="66" />
+      <circle cx="944" cy="574" r="39" />
+      <circle cx="944" cy="574" r="20" />
+    </g>
+    <g stroke-width="2.4" opacity="0.88">
+      <path d="M255 0v342" />
+      <path d="M0 172h586" />
+      <path d="M76 22l358 300" />
+      <path d="M53 279L458 72" />
+      <path d="M894 396l100 356" />
+      <path d="M696 574h504" />
+      <path d="M758 424l372 300" />
+      <path d="M735 684l401-207" />
+    </g>
+    <g stroke-width="1.15" opacity="0.72">
+      <circle cx="255" cy="172" r="12" />
+      <circle cx="255" cy="172" r="6" />
+      <circle cx="255" cy="172" r="2.5" />
+      <circle cx="944" cy="574" r="10" />
+      <circle cx="944" cy="574" r="5" />
+      <circle cx="944" cy="574" r="2.25" />
+    </g>
+  </g>
+</svg>

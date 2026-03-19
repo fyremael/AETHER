@@ -1,17 +1,20 @@
 :root {
-  --bg: #071118;
-  --panel: rgba(10, 20, 28, 0.82);
-  --panel-strong: rgba(13, 25, 35, 0.95);
-  --ink: #e7edf2;
-  --muted: #99aab5;
-  --line: rgba(184, 202, 216, 0.12);
-  --accent: #25d0c4;
-  --accent-strong: #109e94;
-  --accent-soft: rgba(37, 208, 196, 0.15);
-  --warm: #d7b56c;
-  --shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
-  --radius: 22px;
-  --max-width: 1180px;
+  --bg: #f3efe2;
+  --bg-strong: #ebe5d3;
+  --panel: rgba(251, 248, 238, 0.9);
+  --panel-strong: rgba(253, 251, 244, 0.96);
+  --ink: #183342;
+  --muted: #50646f;
+  --line: rgba(24, 51, 66, 0.18);
+  --line-strong: rgba(24, 51, 66, 0.34);
+  --accent: #193543;
+  --accent-strong: #0e5667;
+  --accent-soft: rgba(25, 53, 67, 0.08);
+  --warm: #936028;
+  --warm-soft: rgba(147, 96, 40, 0.12);
+  --shadow: 0 22px 54px rgba(71, 63, 46, 0.14);
+  --radius: 24px;
+  --max-width: 1200px;
 }
 
 * {
@@ -27,12 +30,23 @@ body {
   min-height: 100vh;
   color: var(--ink);
   background:
-    radial-gradient(circle at top left, rgba(37, 208, 196, 0.16), transparent 28%),
-    radial-gradient(circle at top right, rgba(122, 226, 255, 0.13), transparent 26%),
-    radial-gradient(circle at 50% 130%, rgba(17, 52, 40, 0.66), transparent 42%),
-    linear-gradient(180deg, #0b161d 0%, #091118 45%, #05090d 100%);
-  font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
-  line-height: 1.6;
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.76), transparent 24%),
+    radial-gradient(circle at bottom right, rgba(227, 220, 198, 0.7), transparent 28%),
+    linear-gradient(180deg, #f6f2e6 0%, #efe9d8 100%);
+  font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  line-height: 1.65;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background:
+    url("./assets/geometry-orbits.svg") top right / min(92vw, 980px) auto no-repeat,
+    url("./assets/geometry-cells.svg") bottom left / min(90vw, 920px) auto no-repeat;
+  opacity: 0.09;
+  pointer-events: none;
+  z-index: 0;
 }
 
 a {
@@ -40,9 +54,11 @@ a {
 }
 
 .page-shell {
+  position: relative;
+  z-index: 1;
   width: min(calc(100% - 40px), var(--max-width));
   margin: 0 auto;
-  padding: 40px 0 72px;
+  padding: 40px 0 76px;
 }
 
 .centered {
@@ -54,41 +70,54 @@ a {
 .hero {
   position: relative;
   overflow: hidden;
-  padding: 56px;
+  padding: 58px;
   border: 1px solid var(--line);
-  border-radius: 32px;
+  border-radius: 36px;
   background:
-    linear-gradient(140deg, rgba(16, 31, 41, 0.96), rgba(8, 17, 24, 0.92)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(245, 240, 226, 0.9)),
     var(--panel-strong);
   box-shadow: var(--shadow);
+}
+
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    url("./assets/geometry-orbits.svg") right -120px top -40px / 58% auto no-repeat,
+    linear-gradient(135deg, rgba(147, 96, 40, 0.08), rgba(25, 53, 67, 0.02));
+  opacity: 0.34;
+  pointer-events: none;
 }
 
 .hero::after {
   content: "";
   position: absolute;
-  inset: auto -80px -80px auto;
-  width: 260px;
-  height: 260px;
-  border-radius: 999px;
-  background: radial-gradient(circle, rgba(15, 118, 110, 0.18), transparent 70%);
-  background: radial-gradient(circle, rgba(37, 208, 196, 0.22), transparent 70%);
+  right: 24px;
+  bottom: 18px;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  border: 1px solid rgba(24, 51, 66, 0.1);
+  background: radial-gradient(circle, rgba(147, 96, 40, 0.08), transparent 70%);
   pointer-events: none;
 }
 
 .hero-grid {
   display: grid;
-  gap: 28px;
-  grid-template-columns: minmax(0, 1.08fr) minmax(280px, 0.92fr);
+  gap: 34px;
+  grid-template-columns: minmax(0, 1.08fr) minmax(300px, 0.92fr);
   align-items: center;
 }
 
-.hero-copy {
+.hero-copy,
+.hero-visual {
   position: relative;
   z-index: 1;
 }
 
 .compact-hero {
-  max-width: 760px;
+  max-width: 780px;
   text-align: center;
 }
 
@@ -97,9 +126,9 @@ a {
 .card-label {
   margin: 0 0 12px;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
-  font-size: 0.78rem;
-  font-weight: 700;
+  letter-spacing: 0.16em;
+  font-size: 0.76rem;
+  font-weight: 800;
   color: var(--warm);
 }
 
@@ -108,34 +137,34 @@ h2,
 h3 {
   margin: 0;
   font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", "URW Palladio L", serif;
-  line-height: 1.05;
+  line-height: 1.02;
 }
 
 h1 {
-  max-width: 12ch;
-  font-size: clamp(2.8rem, 6vw, 5.2rem);
+  max-width: 12.5ch;
+  font-size: clamp(3rem, 6vw, 5.3rem);
 }
 
 h2 {
-  font-size: clamp(1.8rem, 3vw, 2.7rem);
+  font-size: clamp(1.92rem, 3vw, 2.8rem);
 }
 
 h3 {
-  font-size: 1.35rem;
+  font-size: 1.34rem;
 }
 
 .lede {
-  max-width: 60ch;
+  max-width: 62ch;
   margin: 22px 0 0;
-  font-size: 1.1rem;
+  font-size: 1.08rem;
   color: var(--muted);
 }
 
 .hero-note {
   max-width: 56ch;
   margin: 18px 0 0;
-  color: #c0ced7;
-  font-size: 0.98rem;
+  color: #35515c;
+  font-size: 0.99rem;
 }
 
 .hero-actions {
@@ -157,27 +186,47 @@ h3 {
   align-items: center;
   padding: 8px 12px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(184, 202, 216, 0.12);
+  border: 1px solid rgba(24, 51, 66, 0.12);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
   font-size: 0.94rem;
   font-weight: 700;
-  color: #d8e3eb;
+  color: #21414f;
 }
 
 .hero-visual {
-  position: relative;
-  z-index: 1;
   display: grid;
-  gap: 10px;
+  gap: 12px;
   margin: 0;
 }
 
-.hero-visual img {
-  width: 100%;
-  height: auto;
+.motif-stack {
+  align-content: start;
+}
+
+.motif-card {
+  min-height: 228px;
+  border: 1px solid var(--line);
   border-radius: 24px;
-  border: 1px solid rgba(184, 202, 216, 0.12);
-  background: rgba(255, 255, 255, 0.03);
+  background-color: rgba(252, 249, 242, 0.9);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.68),
+    0 16px 28px rgba(70, 61, 44, 0.1);
+  animation: motifDrift 18s ease-in-out infinite alternate;
+}
+
+.motif-orbits {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.54), rgba(243, 236, 219, 0.66)),
+    url("./assets/geometry-orbits.svg") center / cover no-repeat;
+}
+
+.motif-cells {
+  min-height: 196px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.54), rgba(243, 236, 219, 0.66)),
+    url("./assets/geometry-cells.svg") center / cover no-repeat;
+  animation-delay: -7s;
 }
 
 .hero-visual figcaption {
@@ -192,74 +241,91 @@ h3 {
   justify-content: center;
   padding: 12px 18px;
   border-radius: 999px;
+  border: 1px solid transparent;
   text-decoration: none;
   font-weight: 700;
   transition:
     transform 160ms ease,
     background-color 160ms ease,
-    border-color 160ms ease;
+    border-color 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .button:hover {
   transform: translateY(-1px);
+  box-shadow: 0 12px 20px rgba(25, 53, 67, 0.12);
 }
 
 .button-primary {
-  color: #fff;
-  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  color: #f8f4ea;
+  background: linear-gradient(135deg, #1c3a48, #0e5667);
 }
 
 .button-secondary {
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.58);
 }
 
 .section {
+  position: relative;
+  overflow: hidden;
   margin-top: 32px;
   padding: 34px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--panel);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
-  backdrop-filter: blur(10px);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(246, 241, 229, 0.88)),
+    var(--panel);
+  box-shadow: 0 18px 40px rgba(71, 63, 46, 0.11);
 }
 
-.highlight-band {
-  background:
-    linear-gradient(145deg, rgba(37, 208, 196, 0.1), rgba(10, 20, 28, 0.88)),
-    var(--panel);
+.section::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.14;
+  pointer-events: none;
 }
 
-.teaching-band {
+.highlight-band::before {
   background:
-    linear-gradient(145deg, rgba(215, 181, 108, 0.08), rgba(10, 20, 28, 0.92)),
-    var(--panel);
+    url("./assets/geometry-orbits.svg") right -220px center / 62% auto no-repeat;
 }
 
-.story-band {
+.teaching-band::before {
   background:
-    linear-gradient(145deg, rgba(122, 226, 255, 0.08), rgba(10, 20, 28, 0.92)),
-    var(--panel);
+    url("./assets/geometry-orbits.svg") center top / 108% auto no-repeat;
+}
+
+.story-band::before {
+  background:
+    url("./assets/geometry-cells.svg") center center / 112% auto no-repeat;
 }
 
 .section-heading {
+  position: relative;
+  z-index: 1;
   margin-bottom: 22px;
 }
 
 .section-heading p {
-  max-width: 70ch;
+  max-width: 72ch;
   margin: 14px 0 0;
   color: var(--muted);
 }
 
 .card-grid,
 .metric-grid {
+  position: relative;
+  z-index: 1;
   display: grid;
   gap: 18px;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .lesson-grid {
+  position: relative;
+  z-index: 1;
   display: grid;
   gap: 16px;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
@@ -267,9 +333,11 @@ h3 {
 
 .lesson-card {
   padding: 20px;
-  border: 1px solid rgba(184, 202, 216, 0.1);
+  border: 1px solid rgba(24, 51, 66, 0.13);
   border-radius: 18px;
-  background: rgba(15, 26, 34, 0.92);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(245, 239, 226, 0.86)),
+    rgba(255, 255, 255, 0.8);
 }
 
 .lesson-step {
@@ -281,7 +349,7 @@ h3 {
   margin-bottom: 12px;
   border-radius: 999px;
   background: var(--accent);
-  color: #fff;
+  color: #f6f1e4;
   font-weight: 700;
 }
 
@@ -291,6 +359,8 @@ h3 {
 }
 
 .warden-grid {
+  position: relative;
+  z-index: 1;
   display: grid;
   gap: 18px;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
@@ -301,19 +371,21 @@ h3 {
   gap: 14px;
   align-content: start;
   padding: 18px;
-  border: 1px solid rgba(184, 202, 216, 0.12);
+  border: 1px solid rgba(24, 51, 66, 0.14);
   border-radius: 20px;
   background:
-    linear-gradient(180deg, rgba(17, 31, 40, 0.96), rgba(11, 20, 26, 0.95)),
-    rgba(15, 26, 34, 0.95);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(246, 241, 229, 0.94)),
+    rgba(255, 255, 255, 0.8);
 }
 
 .warden-card img {
   width: 100%;
   height: auto;
   border-radius: 16px;
-  border: 1px solid rgba(184, 202, 216, 0.12);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(24, 51, 66, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(243, 236, 219, 0.8)),
+    rgba(255, 255, 255, 0.82);
 }
 
 .warden-card p {
@@ -326,9 +398,11 @@ h3 {
   display: block;
   height: 100%;
   padding: 22px;
-  border: 1px solid rgba(184, 202, 216, 0.12);
+  border: 1px solid rgba(24, 51, 66, 0.14);
   border-radius: 18px;
-  background: rgba(14, 25, 33, 0.92);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(247, 242, 230, 0.92)),
+    rgba(255, 255, 255, 0.84);
   text-decoration: none;
   transition:
     transform 180ms ease,
@@ -337,10 +411,11 @@ h3 {
 }
 
 .card:hover,
-.metric-card:hover {
+.metric-card:hover,
+.link-table a:hover {
   transform: translateY(-2px);
-  border-color: rgba(37, 208, 196, 0.34);
-  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28);
+  border-color: rgba(14, 86, 103, 0.34);
+  box-shadow: 0 18px 34px rgba(71, 63, 46, 0.12);
 }
 
 .card p,
@@ -350,12 +425,15 @@ h3 {
 }
 
 .metric-card a,
-.link-table a {
+.link-table a,
+.api-crate-list a {
   color: var(--accent-strong);
   font-weight: 700;
 }
 
 .showcase-layout {
+  position: relative;
+  z-index: 1;
   display: grid;
   gap: 18px;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -363,15 +441,17 @@ h3 {
 
 .showcase-card {
   padding: 22px;
-  border: 1px solid rgba(184, 202, 216, 0.12);
+  border: 1px solid rgba(24, 51, 66, 0.14);
   border-radius: 20px;
-  background: rgba(14, 25, 33, 0.92);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(246, 241, 229, 0.92)),
+    rgba(255, 255, 255, 0.84);
 }
 
 .accent-card {
   background:
-    linear-gradient(145deg, rgba(37, 208, 196, 0.14), rgba(14, 25, 33, 0.92)),
-    rgba(14, 25, 33, 0.92);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(241, 231, 210, 0.95)),
+    rgba(255, 255, 255, 0.84);
 }
 
 .showcase-list {
@@ -392,8 +472,6 @@ h3 {
 }
 
 .api-crate-list a {
-  color: var(--accent);
-  font-weight: 700;
   text-decoration: none;
 }
 
@@ -406,6 +484,8 @@ h3 {
 }
 
 .link-table {
+  position: relative;
+  z-index: 1;
   display: grid;
   gap: 12px;
 }
@@ -414,10 +494,16 @@ h3 {
   display: grid;
   gap: 4px;
   padding: 18px 20px;
-  border: 1px solid rgba(184, 202, 216, 0.12);
+  border: 1px solid rgba(24, 51, 66, 0.13);
   border-radius: 16px;
-  background: rgba(14, 25, 33, 0.9);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(246, 241, 229, 0.9)),
+    rgba(255, 255, 255, 0.82);
   text-decoration: none;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease;
 }
 
 .link-table span {
@@ -446,6 +532,18 @@ code {
   font-size: 0.92em;
 }
 
+@keyframes motifDrift {
+  from {
+    transform: translateY(0) scale(1);
+    background-position: center;
+  }
+
+  to {
+    transform: translateY(-3px) scale(1.01);
+    background-position: center 12px;
+  }
+}
+
 @media (max-width: 720px) {
   .page-shell {
     width: min(calc(100% - 24px), var(--max-width));
@@ -459,6 +557,19 @@ code {
 
   .hero-grid {
     grid-template-columns: 1fr;
+  }
+
+  .hero::before {
+    background-size: 125% auto;
+    background-position: right -120px top -20px;
+  }
+
+  .motif-card {
+    min-height: 180px;
+  }
+
+  .motif-cells {
+    min-height: 154px;
   }
 
   .hero-actions {
