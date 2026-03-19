@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("01", "02")]
+    [ValidateSet("01", "02", "03")]
     [string]$Demo = "01",
     [switch]$PauseOnExit
 )
@@ -30,6 +30,18 @@ $demoMap = @{
             "lease handoff across AsOf and Current views"
             "stale execution fencing for multiple workers and epochs"
             "claimable-task reporting with proof traces"
+        )
+    }
+    "03" = @{
+        Title = "Coordination Situation Room"
+        Crate = "aether_api"
+        Example = "demo_03_coordination_situation_room"
+        Narrative = Join-Path $repoRoot "examples\demo-03-coordination-situation-room.md"
+        Highlights = @(
+            "recursive closure plus temporal replay in one story"
+            "claim windows, active leases, and stale fencing"
+            "multiple semantic snapshots over one append-only journal"
+            "service-backed proof traces for the current answer"
         )
     }
 }
