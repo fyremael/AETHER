@@ -1,6 +1,6 @@
 target/
+artifacts/
 .idea/
 .vscode/
 __pycache__/
 *.pyc
-
