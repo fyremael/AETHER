@@ -97,6 +97,7 @@ Implemented today:
 - a coordination acceptance slice for task readiness, claims, lease handoff, and stale-attempt rejection
 - an in-memory kernel service over `aether_api` with end-to-end integration tests
 - a minimal HTTP JSON kernel service boundary over `aether_api`
+- a release-mode performance report, Criterion benchmark suite, and ignored stress workloads for early regression tracking
 
 Deliberately still narrow:
 
@@ -193,6 +194,14 @@ cargo test
 
 WSL verification uses the same workspace and the same commands via the Linux toolchain.
 
+For performance tracking:
+
+```bash
+cargo run -p aether_api --example performance_report --release
+cargo bench -p aether_api
+cargo test -p aether_api --test performance_stress --release -- --ignored --nocapture
+```
+
 The workspace is currently verified under:
 
 - Windows stable MSVC toolchain
@@ -277,6 +286,7 @@ That clarity is part of the implementation.
 - `docs/ARCHITECTURE.md` is the current implementation architecture guide.
 - `docs/DEVELOPER_WORKFLOW.md` explains the engineering loop and definition of done.
 - `docs/OPERATIONS.md` explains the operator path, demo catalog, and report workflow.
+- `docs/PERFORMANCE.md` explains the benchmark harness, stress tests, and performance-report path.
 - `docs/GLOSSARY.md` defines canonical project vocabulary.
 - `docs/DOCUMENTATION_STANDARD.md` defines the documentation quality bar and update rules.
 - `SPEC.md` defines the system objective, architecture, data model, temporal model, and milestones.

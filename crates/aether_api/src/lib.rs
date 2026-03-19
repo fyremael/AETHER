@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub mod http;
+#[doc(hidden)]
+pub mod perf;
 
 pub use http::{http_router, HealthResponse, HttpKernelState};
 

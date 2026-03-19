@@ -42,6 +42,16 @@ Start here:
 
 Those documents explain which demo to run, what output to expect, and where reports are written.
 
+### If you need performance numbers
+
+Read:
+
+1. `docs/PERFORMANCE.md`
+2. `scripts/README.md`
+3. `TESTPLAN.md`
+
+That path explains the operator-facing report, the benchmark harness, the stress workloads, and the target interpretation.
+
 ### If you need the long-range picture
 
 Read:
@@ -73,6 +83,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 | `docs/ARCHITECTURE.md` | How the current kernel is shaped and how data moves through it |
 | `docs/DEVELOPER_WORKFLOW.md` | Day-to-day engineering loop, verification contract, and definition of done |
 | `docs/OPERATIONS.md` | Operator-facing guidance for demos, reports, and presentations |
+| `docs/PERFORMANCE.md` | Performance workloads, runner commands, benchmark harness, and interpretation guidance |
 | `docs/GLOSSARY.md` | Canonical vocabulary for the codebase and its semantics |
 | `docs/DOCUMENTATION_STANDARD.md` | Documentation quality bar, update triggers, and maintenance rules |
 | `docs/STATUS.md` | What is implemented now |

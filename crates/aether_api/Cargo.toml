@@ -22,4 +22,10 @@ thiserror.workspace = true
 tokio = { version = "=1.41.1", features = ["macros", "rt-multi-thread", "net"] }
 
 [dev-dependencies]
+clap = "=4.5.20"
+criterion = "=0.5.1"
 reqwest = { version = "=0.12.9", default-features = false, features = ["json", "rustls-tls"] }
+
+[[bench]]
+name = "kernel_perf"
+harness = false

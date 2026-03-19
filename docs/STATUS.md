@@ -20,6 +20,7 @@ Completed:
 - first coordination acceptance slice implemented for readiness, claims, leases, and stale-attempt rejection
 - in-memory kernel service implemented in `aether_api`
 - minimal HTTP JSON kernel service implemented over `aether_api`
+- release-mode performance report example, Criterion benchmarks, and ignored stress workloads added for early performance tracking
 - documentation portal, architecture guide, developer workflow guide, operator guide, glossary, and documentation standards now exist
 - GitHub Pages publishing pipeline added for the documentation portal and generated Rust API reference
 - unit tests added across the Rust core crates
@@ -34,6 +35,7 @@ Not yet completed:
 - durable storage backends
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
 - stable Go and Python boundary clients
+- historical benchmark dashboards and automated drift gates
 
 ## Immediate focus
 

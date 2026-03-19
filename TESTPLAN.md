@@ -94,3 +94,17 @@ Track at least:
 - SCC compile time,
 - recursive closure runtime on DAG fixtures,
 - derivation trace memory overhead.
+
+The current harness now lives in:
+
+- `crates/aether_api/examples/performance_report.rs` for the release-mode report
+- `crates/aether_api/benches/kernel_perf.rs` for Criterion benchmarks
+- `crates/aether_api/tests/performance_stress.rs` for ignored release-mode stress workloads
+
+Primary commands:
+
+```bash
+cargo run -p aether_api --example performance_report --release
+cargo bench -p aether_api
+cargo test -p aether_api --test performance_stress --release -- --ignored --nocapture
+```

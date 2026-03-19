@@ -16,6 +16,12 @@ double-click scripts/run-demo-03.cmd
 
 That is the current flagship demonstration.
 
+If you need fresh performance numbers for operations, run the performance report:
+
+```text
+double-click scripts/run-performance-report.cmd
+```
+
 ## Demo Catalog
 
 | Demo | Purpose | Best use |
@@ -95,6 +101,22 @@ Each run produces:
 
 If you need to hand someone the last run without rerunning it, use the `latest.txt` file.
 
+Performance reports are written to:
+
+- `artifacts/performance/`
+
+Each run produces:
+
+- a timestamped markdown report
+- `latest.md`, which points to the most recent performance output
+
+For the full engineering-facing performance suite, also run:
+
+```bash
+cargo bench -p aether_api
+cargo test -p aether_api --test performance_stress --release -- --ignored --nocapture
+```
+
 ## How To Present The Output
 
 The operator framing that tends to work best is:
@@ -129,4 +151,5 @@ Run Demo 03 and keep the report from that run. It is the best current summary of
 
 - `examples/README.md` for the example catalog
 - `scripts/README.md` for launcher details
+- `docs/PERFORMANCE.md` for the benchmark harness and interpretation guidance
 - `examples/demo-03-coordination-situation-room.md` for the flagship narrative
