@@ -85,13 +85,14 @@ Implemented today:
 - SCC decomposition and phase-graph lowering
 - unstratified-negation rejection
 - a first real recursive runtime slice for positive monotone recursion
-- derived tuple metadata with rule, SCC, stratum, iteration, and parent tuple references
+- source datom provenance threaded from resolved facts into derived tuples
+- derived tuple metadata with rule, SCC, stratum, iteration, parent tuple references, and source datom IDs
+- an in-memory explainer that reconstructs recursive tuple traces
 
 Deliberately still narrow:
 
 - the canonical DSL parser is not implemented yet
 - the runtime currently rejects negation instead of evaluating full stratified negation
-- source datom provenance is not yet threaded through to `source_datom_ids`
 - Go and Python remain boundary placeholders rather than active implementations
 - sidecar integrations are specified, not yet implemented
 
@@ -106,7 +107,8 @@ That slice looks like this:
 3. the compiler validates rules, builds dependency structure, and records executable metadata
 4. the runtime lifts extensional relations from resolved attributes
 5. recursive rules are evaluated to a fixpoint
-6. derived tuples are emitted with iteration and parent-tuple metadata
+6. derived tuples are emitted with iteration, parent-tuple, and source-datom provenance metadata
+7. the explainer can reconstruct a tuple-local proof trace from the derived graph
 
 The initial runtime focus is monotone transitive closure, because it is the smallest slice that proves the architecture is real instead of rhetorical.
 
@@ -213,13 +215,14 @@ Supported today:
 - derived tuple de-duplication
 - iteration-by-iteration convergence tracking
 - parent derived tuple linkage
+- source datom provenance on derived tuples
+- recursive tuple trace reconstruction
 
 Not yet supported in the runtime:
 
 - executable stratified negation
 - bounded aggregation
 - full semi-naive delta specialization
-- source datom provenance threading into derived tuples
 - optimizer-grade plan selection
 
 This is intentional. The project is building from semantic bedrock upward. The right next steps are to preserve correctness while widening expressive power, not to rush into breadth and backfill meaning later.
@@ -237,10 +240,9 @@ The milestone sequence remains the governing roadmap.
 
 In practical terms, the most immediate work now is:
 
-- threading source datom provenance through resolution and derivation
 - tightening the runtime from naive fixpoint evaluation toward true semi-naive delta execution
 - building the canonical DSL parser
-- widening explainability from tuple metadata to richer proof surfaces
+- widening explainability from tuple traces to richer operator-facing proof surfaces
 - introducing boundary-level examples that demonstrate end-to-end kernel usage
 
 ## Why The README Is Long

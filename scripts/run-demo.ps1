@@ -10,7 +10,7 @@ $repoRoot = Split-Path -Path $PSScriptRoot -Parent
 $demoMap = @{
     "01" = @{
         Title = "Temporal Dependency Horizon"
-        Crate = "aether_runtime"
+        Crate = "aether_explain"
         Example = "demo_01_temporal_dependency_horizon"
         Narrative = Join-Path $repoRoot "examples\demo-01-temporal-dependency-horizon.md"
     }
@@ -52,6 +52,7 @@ Write-Host "What this demo shows:"
 Write-Host "  - append-only journal replay"
 Write-Host "  - recursive rule compilation"
 Write-Host "  - different semantic results at different points in time"
+Write-Host "  - explainable proof traces with source datom IDs"
 Write-Host ""
 Write-Host "Running: $commandText"
 Write-Host "A report will be saved to:"

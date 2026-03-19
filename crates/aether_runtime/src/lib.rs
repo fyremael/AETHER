@@ -1,9 +1,9 @@
 use aether_ast::{
-    DerivedTuple, DerivedTupleMetadata, EntityId, Literal, PredicateId, RuleId, Term, Tuple,
+    DerivedTuple, DerivedTupleMetadata, ElementId, Literal, PredicateId, RuleId, Term, Tuple,
     TupleId, Value, Variable,
 };
 use aether_plan::CompiledProgram;
-use aether_resolver::{ResolvedState, ResolvedValue};
+use aether_resolver::ResolvedState;
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -42,12 +42,14 @@ impl DerivedSet {
 struct RelationRow {
     values: Vec<Value>,
     tuple_id: Option<TupleId>,
+    source_datom_ids: Vec<ElementId>,
 }
 
 #[derive(Clone, Debug, Default)]
 struct MatchState {
     bindings: IndexMap<Variable, Value>,
     parent_tuple_ids: Vec<TupleId>,
+    source_datom_ids: Vec<ElementId>,
 }
 
 #[derive(Default)]
@@ -111,6 +113,7 @@ impl RuleRuntime for SemiNaiveRuntime {
                         .push(RelationRow {
                             values: values.clone(),
                             tuple_id: Some(tuple_id),
+                            source_datom_ids: matched.source_datom_ids.clone(),
                         });
                     delta_tuples.push(DerivedTuple {
                         tuple: Tuple {
@@ -125,7 +128,7 @@ impl RuleRuntime for SemiNaiveRuntime {
                             scc_id,
                             iteration,
                             parent_tuple_ids: matched.parent_tuple_ids,
-                            source_datom_ids: Vec::new(),
+                            source_datom_ids: matched.source_datom_ids,
                         },
                     });
                 }
@@ -181,34 +184,18 @@ fn build_extensional_rows(
     for (predicate, attribute) in &program.extensional_bindings {
         let mut predicate_rows = Vec::new();
         for (entity_id, entity_state) in &state.entities {
-            let Some(value) = entity_state.attributes.get(attribute) else {
-                continue;
-            };
-
-            predicate_rows.extend(resolved_value_rows(*entity_id, value));
+            predicate_rows.extend(entity_state.facts(attribute).iter().cloned().map(|fact| {
+                RelationRow {
+                    values: vec![Value::Entity(*entity_id), fact.value],
+                    tuple_id: None,
+                    source_datom_ids: fact.source_datom_ids,
+                }
+            }));
         }
         rows.insert(*predicate, predicate_rows);
     }
 
     rows
-}
-
-fn resolved_value_rows(entity_id: EntityId, value: &ResolvedValue) -> Vec<RelationRow> {
-    match value {
-        ResolvedValue::Scalar(Some(value)) => vec![RelationRow {
-            values: vec![Value::Entity(entity_id), value.clone()],
-            tuple_id: None,
-        }],
-        ResolvedValue::Scalar(None) => Vec::new(),
-        ResolvedValue::Set(values) | ResolvedValue::Sequence(values) => values
-            .iter()
-            .cloned()
-            .map(|value| RelationRow {
-                values: vec![Value::Entity(entity_id), value],
-                tuple_id: None,
-            })
-            .collect(),
-    }
 }
 
 fn evaluate_rule_body(
@@ -241,9 +228,12 @@ fn evaluate_rule_body(
                             parent_tuple_ids.push(tuple_id);
                         }
                     }
+                    let mut source_datom_ids = state.source_datom_ids.clone();
+                    extend_unique(&mut source_datom_ids, &row.source_datom_ids);
                     next_states.push(MatchState {
                         bindings,
                         parent_tuple_ids,
+                        source_datom_ids,
                     });
                 }
             }
@@ -343,6 +333,17 @@ fn tuple_key(predicate: PredicateId, values: &[Value]) -> String {
         key.push('|');
     }
     key
+}
+
+fn extend_unique<T>(target: &mut Vec<T>, additions: &[T])
+where
+    T: Copy + Eq,
+{
+    for addition in additions {
+        if !target.contains(addition) {
+            target.push(*addition);
+        }
+    }
 }
 
 fn value_key(value: &Value) -> String {
@@ -536,10 +537,26 @@ mod tests {
         assert_eq!(longest_path.metadata.iteration, 3);
         assert_eq!(longest_path.metadata.stratum, 0);
         assert!(!longest_path.metadata.parent_tuple_ids.is_empty());
+        assert_eq!(
+            longest_path.metadata.source_datom_ids,
+            vec![ElementId::new(1), ElementId::new(2), ElementId::new(3)]
+        );
         assert!(derived
             .tuples
             .iter()
             .all(|tuple| tuple.metadata.stratum == 0));
+        let base_edge = derived
+            .tuples
+            .iter()
+            .find(|tuple| {
+                tuple.tuple.values
+                    == vec![
+                        Value::Entity(EntityId::new(1)),
+                        Value::Entity(EntityId::new(2)),
+                    ]
+            })
+            .expect("base edge tuple");
+        assert_eq!(base_edge.metadata.source_datom_ids, vec![ElementId::new(1)]);
     }
 
     #[test]

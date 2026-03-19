@@ -9,6 +9,8 @@ It is designed to showcase the strongest slice of the kernel that is already rea
 - rule compilation
 - recursive fixed-point evaluation
 - derivation metadata
+- proof traces
+- source datom provenance
 
 ## Why This Demo Comes First
 
@@ -46,7 +48,7 @@ That launcher captures a timestamped report in `artifacts/demos/demo-01/` and pa
 Technical path:
 
 ```bash
-cargo run -p aether_runtime --example demo_01_temporal_dependency_horizon
+cargo run -p aether_explain --example demo_01_temporal_dependency_horizon
 ```
 
 ## What You Should See
@@ -58,7 +60,8 @@ The demo prints:
 - the closure at `AsOf(e3)`
 - the closure at `Current(e5)`
 - iteration delta sizes for each snapshot
-- one highlighted longest-path derivation with rule and parent-tuple metadata
+- one highlighted longest-path derivation with supporting source datoms
+- a proof trace that walks the tuple graph behind that derivation
 
 At `AsOf(e3)`, the closure stops at `task/4`.
 
@@ -77,11 +80,13 @@ This demo shows that AETHER has crossed an important line:
 
 The system can already state a recursive semantic claim, replay history, and derive different truths at different cut points of the same append-only history.
 
+It can now also show which journal elements support that claim.
+
 ## Source
 
 The runnable example lives at:
 
-- `crates/aether_runtime/examples/demo_01_temporal_dependency_horizon.rs`
+- `crates/aether_explain/examples/demo_01_temporal_dependency_horizon.rs`
 
 The underlying runtime tests live in:
 

@@ -28,13 +28,24 @@ impl Default for ResolvedValue {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ResolvedFact {
+    pub value: Value,
+    pub source_datom_ids: Vec<ElementId>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EntityState {
     pub attributes: IndexMap<AttributeId, ResolvedValue>,
+    pub facts: IndexMap<AttributeId, Vec<ResolvedFact>>,
 }
 
 impl EntityState {
     pub fn attribute(&self, id: &AttributeId) -> Option<&ResolvedValue> {
         self.attributes.get(id)
+    }
+
+    pub fn facts(&self, id: &AttributeId) -> &[ResolvedFact] {
+        self.facts.get(id).map(Vec::as_slice).unwrap_or(&[])
     }
 }
 
@@ -88,42 +99,79 @@ fn resolve_datoms(
             .attribute(&datom.attribute)
             .ok_or(ResolveError::UnknownAttribute(datom.attribute))?;
         let entity_state = state.entities.entry(datom.entity).or_default();
-        let slot = entity_state
-            .attributes
-            .entry(datom.attribute)
-            .or_insert_with(|| default_value_for(attribute));
+        match attribute.class {
+            AttributeClass::ScalarLww | AttributeClass::RefScalar => {
+                let slot = entity_state
+                    .attributes
+                    .entry(datom.attribute)
+                    .or_insert_with(|| default_value_for(attribute));
+                let ResolvedValue::Scalar(value) = slot else {
+                    return Err(ResolveError::AttributeClassMismatch(datom.attribute));
+                };
 
-        match (attribute.class, slot) {
-            (
-                AttributeClass::ScalarLww | AttributeClass::RefScalar,
-                ResolvedValue::Scalar(value),
-            ) => match datom.op {
-                OperationKind::Retract | OperationKind::Remove | OperationKind::Release => {
-                    *value = None;
+                match datom.op {
+                    OperationKind::Retract | OperationKind::Remove | OperationKind::Release => {
+                        *value = None;
+                        entity_state
+                            .facts
+                            .entry(datom.attribute)
+                            .or_default()
+                            .clear();
+                    }
+                    _ => {
+                        *value = Some(datom.value.clone());
+                        let facts = entity_state.facts.entry(datom.attribute).or_default();
+                        facts.clear();
+                        facts.push(resolved_fact(datom));
+                    }
                 }
-                _ => {
-                    *value = Some(datom.value.clone());
-                }
-            },
-            (AttributeClass::SetAddWins | AttributeClass::RefSet, ResolvedValue::Set(values)) => {
+            }
+            AttributeClass::SetAddWins | AttributeClass::RefSet => {
+                let slot = entity_state
+                    .attributes
+                    .entry(datom.attribute)
+                    .or_insert_with(|| default_value_for(attribute));
+                let ResolvedValue::Set(values) = slot else {
+                    return Err(ResolveError::AttributeClassMismatch(datom.attribute));
+                };
+                let facts = entity_state.facts.entry(datom.attribute).or_default();
+
                 match datom.op {
                     OperationKind::Retract | OperationKind::Remove | OperationKind::Release => {
                         values.retain(|value| value != &datom.value);
+                        facts.retain(|fact| fact.value != datom.value);
                     }
                     _ => {
                         if !values.iter().any(|value| value == &datom.value) {
                             values.push(datom.value.clone());
                         }
+                        if !facts.iter().any(|fact| fact.value == datom.value) {
+                            facts.push(resolved_fact(datom));
+                        }
                     }
                 }
             }
-            (AttributeClass::SequenceRga, ResolvedValue::Sequence(values)) => match datom.op {
-                OperationKind::Retract | OperationKind::Remove => {
-                    values.retain(|value| value != &datom.value);
+            AttributeClass::SequenceRga => {
+                let slot = entity_state
+                    .attributes
+                    .entry(datom.attribute)
+                    .or_insert_with(|| default_value_for(attribute));
+                let ResolvedValue::Sequence(values) = slot else {
+                    return Err(ResolveError::AttributeClassMismatch(datom.attribute));
+                };
+                let facts = entity_state.facts.entry(datom.attribute).or_default();
+
+                match datom.op {
+                    OperationKind::Retract | OperationKind::Remove => {
+                        values.retain(|value| value != &datom.value);
+                        facts.retain(|fact| fact.value != datom.value);
+                    }
+                    _ => {
+                        values.push(datom.value.clone());
+                        facts.push(resolved_fact(datom));
+                    }
                 }
-                _ => values.push(datom.value.clone()),
-            },
-            _ => return Err(ResolveError::AttributeClassMismatch(datom.attribute)),
+            }
         }
     }
 
@@ -135,6 +183,13 @@ fn default_value_for(attribute: &AttributeSchema) -> ResolvedValue {
         AttributeClass::ScalarLww | AttributeClass::RefScalar => ResolvedValue::Scalar(None),
         AttributeClass::SetAddWins | AttributeClass::RefSet => ResolvedValue::Set(Vec::new()),
         AttributeClass::SequenceRga => ResolvedValue::Sequence(Vec::new()),
+    }
+}
+
+fn resolved_fact(datom: &Datom) -> ResolvedFact {
+    ResolvedFact {
+        value: datom.value.clone(),
+        source_datom_ids: vec![datom.element],
     }
 }
 
@@ -150,7 +205,7 @@ pub enum ResolveError {
 
 #[cfg(test)]
 mod tests {
-    use super::{MaterializedResolver, ResolvedValue, Resolver};
+    use super::{MaterializedResolver, ResolvedFact, ResolvedValue, Resolver};
     use aether_ast::{
         AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, ReplicaId, Value,
     };
@@ -220,6 +275,21 @@ mod tests {
                 .and_then(|entity| entity.attribute(&SCALAR_ATTR)),
             Some(&ResolvedValue::Scalar(None))
         );
+        assert_eq!(
+            as_of
+                .entity(&EntityId::new(1))
+                .map(|entity| entity.facts(&SCALAR_ATTR)),
+            Some(
+                [ResolvedFact {
+                    value: Value::String("closed".into()),
+                    source_datom_ids: vec![ElementId::new(2)],
+                }]
+                .as_slice()
+            )
+        );
+        assert!(current
+            .entity(&EntityId::new(1))
+            .is_some_and(|entity| entity.facts(&SCALAR_ATTR).is_empty()));
     }
 
     #[test]
@@ -238,6 +308,18 @@ mod tests {
                 .entity(&EntityId::new(1))
                 .and_then(|entity| entity.attribute(&SET_ATTR)),
             Some(&ResolvedValue::Set(vec![Value::String("beta".into())]))
+        );
+        assert_eq!(
+            current
+                .entity(&EntityId::new(1))
+                .map(|entity| entity.facts(&SET_ATTR)),
+            Some(
+                [ResolvedFact {
+                    value: Value::String("beta".into()),
+                    source_datom_ids: vec![ElementId::new(2)],
+                }]
+                .as_slice()
+            )
         );
     }
 
@@ -261,6 +343,24 @@ mod tests {
                 Value::String("b".into()),
                 Value::String("c".into()),
             ]))
+        );
+        assert_eq!(
+            current
+                .entity(&EntityId::new(1))
+                .map(|entity| entity.facts(&SEQUENCE_ATTR)),
+            Some(
+                [
+                    ResolvedFact {
+                        value: Value::String("b".into()),
+                        source_datom_ids: vec![ElementId::new(2)],
+                    },
+                    ResolvedFact {
+                        value: Value::String("c".into()),
+                        source_datom_ids: vec![ElementId::new(4)],
+                    },
+                ]
+                .as_slice()
+            )
         );
     }
 

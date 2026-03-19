@@ -30,7 +30,10 @@ name = "aether_explain"
 version = "0.1.0"
 dependencies = [
  "aether_ast",
+ "aether_resolver",
+ "aether_rules",
  "aether_runtime",
+ "aether_schema",
  "indexmap",
  "thiserror",
 ]

@@ -4,7 +4,7 @@ This directory holds worked examples and end-to-end walkthroughs for the AETHER 
 
 Start here:
 
-- `demo-01-temporal-dependency-horizon.md` is the first public showcase: temporal replay plus recursive closure over the same journal.
+- `demo-01-temporal-dependency-horizon.md` is the first public showcase: temporal replay, recursive closure, and explainable proof traces over the same journal.
 - `transitive-closure.md` shows the first real recursive vertical slice, from datoms through resolution, compilation, and fixed-point evaluation.
 
 For non-technical Windows operators:
