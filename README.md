@@ -96,6 +96,7 @@ Implemented today:
 - an in-memory explainer that reconstructs recursive tuple traces
 - a coordination acceptance slice for task readiness, claims, lease handoff, and stale-attempt rejection
 - an in-memory kernel service over `aether_api` with end-to-end integration tests
+- a minimal HTTP JSON kernel service boundary over `aether_api`
 
 Deliberately still narrow:
 
@@ -152,7 +153,7 @@ The repository follows the crate boundaries declared in `REPO_LAYOUT.md`.
 | `aether_plan` | compiled-program planning structures, phase graphs, delta-plan metadata |
 | `aether_runtime` | semi-naive recursive evaluation, stratified negation, iteration metadata, derived tuple production |
 | `aether_explain` | derivation and plan explanation surface |
-| `aether_api` | request/response boundary types plus an in-memory kernel service |
+| `aether_api` | request/response boundary types, an in-memory kernel service, and a minimal HTTP JSON boundary |
 
 ### Non-Rust boundaries
 
@@ -253,7 +254,7 @@ In practical terms, the most immediate work now is:
 - widening the DSL from the current focused slice to the full canonical language
 - adding bounded aggregation and deeper runtime optimization
 - widening explainability from tuple traces to richer operator-facing proof surfaces
-- hardening the API boundary from the current in-memory service to richer process-boundary integrations
+- hardening the API boundary from the current minimal HTTP service to richer durable and authenticated process-boundary integrations
 - introducing more boundary-level examples and operator-facing demonstrations
 
 ## Why The README Is Long

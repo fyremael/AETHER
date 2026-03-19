@@ -14,6 +14,12 @@ aether_rules = { path = "../aether_rules" }
 aether_runtime = { path = "../aether_runtime" }
 aether_schema = { path = "../aether_schema" }
 aether_storage = { path = "../aether_storage" }
+axum = { version = "=0.7.9", features = ["json"] }
 indexmap.workspace = true
 serde.workspace = true
+serde_json = "1.0.133"
 thiserror.workspace = true
+tokio = { version = "=1.41.1", features = ["macros", "rt-multi-thread", "net"] }
+
+[dev-dependencies]
+reqwest = { version = "=0.12.9", default-features = false, features = ["json", "rustls-tls"] }

@@ -12,6 +12,10 @@ use aether_storage::{InMemoryJournal, Journal, JournalError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod http;
+
+pub use http::{http_router, HealthResponse, HttpKernelState};
+
 pub trait KernelService {
     fn append(&mut self, request: AppendRequest) -> Result<AppendResponse, ApiError>;
     fn history(&self, request: HistoryRequest) -> Result<HistoryResponse, ApiError>;

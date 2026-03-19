@@ -19,6 +19,7 @@ Completed:
 - executable stratified negation implemented for stratified programs
 - first coordination acceptance slice implemented for readiness, claims, leases, and stale-attempt rejection
 - in-memory kernel service implemented in `aether_api`
+- minimal HTTP JSON kernel service implemented over `aether_api`
 - documentation portal, architecture guide, developer workflow guide, operator guide, glossary, and documentation standards now exist
 - GitHub Pages publishing pipeline added for the documentation portal and generated Rust API reference
 - unit tests added across the Rust core crates
@@ -31,14 +32,15 @@ Not yet completed:
 - bounded aggregation
 - full canonical DSL coverage beyond the current query/fact/policy slice
 - durable storage backends
-- process-boundary kernel service integrations
+- production-hardened kernel service integrations beyond the current minimal HTTP boundary
 - stable Go and Python boundary clients
 
 ## Immediate focus
 
-The most immediate work now sits between late `M3` and early `M4`:
+The most immediate work now sits across late `M3` and active `M4`:
 
 - widen tuple explanation into richer proof and operator-facing surfaces
 - extend the DSL from the current focused authoring surface to the full canonical language
 - add bounded aggregation and further runtime optimization
+- deepen the networked service boundary with durability, authentication, and richer contract coverage
 - expand worked examples, API-level scenarios, and acceptance-style tests

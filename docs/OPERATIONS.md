@@ -64,7 +64,21 @@ You can also run the examples directly:
 cargo run -p aether_explain --example demo_01_temporal_dependency_horizon
 cargo run -p aether_api --example demo_02_multi_worker_lease_handoff
 cargo run -p aether_api --example demo_03_coordination_situation_room
+cargo run -p aether_api --example http_kernel_service
 ```
+
+The HTTP example starts the current minimal networked kernel boundary on `127.0.0.1:3000`.
+
+Available endpoints today:
+
+- `GET /health`
+- `GET /v1/history`
+- `POST /v1/append`
+- `POST /v1/state/current`
+- `POST /v1/state/as-of`
+- `POST /v1/documents/parse`
+- `POST /v1/documents/run`
+- `POST /v1/explain/tuple`
 
 ## Reports
 

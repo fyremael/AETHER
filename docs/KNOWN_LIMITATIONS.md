@@ -4,6 +4,6 @@
 - Extensional predicate binding is inferred by name against schema attributes and is therefore deliberately conservative.
 - Explain traces currently reconstruct one merged proof graph per tuple; they do not yet distinguish alternative proof families for the same derived tuple.
 - The DSL parser now supports facts, queries, `AsOf`, and policy annotations, but it is still a focused slice rather than the full canonical language.
-- The kernel service is currently in-memory only; there is no durable or networked service boundary yet.
+- The kernel service now has a minimal in-memory-backed HTTP JSON boundary, but it is not yet durable, authenticated, multi-tenant, or production-hardened.
 - Storage is currently in-memory only.
 - Go and Python directories remain boundary placeholders rather than stable clients.
