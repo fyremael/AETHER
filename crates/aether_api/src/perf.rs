@@ -53,6 +53,39 @@ pub struct PerfReport {
 }
 
 #[derive(Clone, Debug)]
+pub enum PerfEvent {
+    SuiteStart {
+        total_workloads: usize,
+        samples_per_workload: usize,
+    },
+    MeasurementStart {
+        workload: &'static str,
+        scale: String,
+        total_samples: usize,
+        units: usize,
+        unit_label: &'static str,
+        notes: Vec<String>,
+    },
+    SampleRecorded {
+        workload: &'static str,
+        scale: String,
+        sample_index: usize,
+        total_samples: usize,
+        elapsed: Duration,
+        throughput_per_second: f64,
+        mean_so_far: Duration,
+        min_so_far: Duration,
+        max_so_far: Duration,
+    },
+    MeasurementComplete {
+        measurement: PerfMeasurement,
+    },
+    FootprintComputed {
+        footprint: FootprintEstimate,
+    },
+}
+
+#[derive(Clone, Debug)]
 pub struct AppendFixture {
     pub datoms: Vec<Datom>,
 }
@@ -91,6 +124,15 @@ pub struct ServiceFixture {
     pub request: RunDocumentRequest,
     pub expected_row_count: usize,
     pub task_count: usize,
+}
+
+struct MeasurementPlan {
+    workload: &'static str,
+    scale: String,
+    units: usize,
+    unit_label: &'static str,
+    notes: Vec<String>,
+    samples: usize,
 }
 
 pub fn build_append_fixture(count: usize) -> AppendFixture {
@@ -341,6 +383,15 @@ pub fn build_coordination_service_fixture(task_count: usize) -> Result<ServiceFi
 }
 
 pub fn benchmark_append(count: usize, samples: usize) -> Result<PerfMeasurement, ApiError> {
+    let mut observer = None;
+    benchmark_append_impl(count, samples, &mut observer)
+}
+
+fn benchmark_append_impl(
+    count: usize,
+    samples: usize,
+    observer: &mut Option<&mut dyn FnMut(PerfEvent)>,
+) -> Result<PerfMeasurement, ApiError> {
     let fixture = build_append_fixture(count);
     let notes = vec![format!(
         "{} unique element IDs appended into an empty journal each sample",
@@ -348,12 +399,15 @@ pub fn benchmark_append(count: usize, samples: usize) -> Result<PerfMeasurement,
     )];
 
     benchmark_measurement(
-        "Journal append throughput",
-        format!("{} datoms", format_count(fixture.datoms.len())),
-        fixture.datoms.len(),
-        "datoms/s",
-        notes,
-        samples,
+        MeasurementPlan {
+            workload: "Journal append throughput",
+            scale: format!("{} datoms", format_count(fixture.datoms.len())),
+            units: fixture.datoms.len(),
+            unit_label: "datoms/s",
+            notes,
+            samples,
+        },
+        observer,
         move || {
             let mut journal = InMemoryJournal::new();
             journal.append(&fixture.datoms)?;
@@ -366,6 +420,15 @@ pub fn benchmark_resolve_current(
     entity_count: usize,
     samples: usize,
 ) -> Result<PerfMeasurement, ApiError> {
+    let mut observer = None;
+    benchmark_resolve_current_impl(entity_count, samples, &mut observer)
+}
+
+fn benchmark_resolve_current_impl(
+    entity_count: usize,
+    samples: usize,
+    observer: &mut Option<&mut dyn FnMut(PerfEvent)>,
+) -> Result<PerfMeasurement, ApiError> {
     let fixture = build_resolve_fixture(entity_count);
     let notes = vec![format!(
         "{} datoms across scalar, set, and ref attributes",
@@ -373,12 +436,15 @@ pub fn benchmark_resolve_current(
     )];
 
     benchmark_measurement(
-        "Resolver current throughput",
-        format!("{} entities", format_count(entity_count)),
-        entity_count,
-        "entities/s",
-        notes,
-        samples,
+        MeasurementPlan {
+            workload: "Resolver current throughput",
+            scale: format!("{} entities", format_count(entity_count)),
+            units: entity_count,
+            unit_label: "entities/s",
+            notes,
+            samples,
+        },
+        observer,
         move || {
             MaterializedResolver
                 .current(&fixture.schema, &fixture.datoms)
@@ -391,6 +457,15 @@ pub fn benchmark_resolve_as_of(
     entity_count: usize,
     samples: usize,
 ) -> Result<PerfMeasurement, ApiError> {
+    let mut observer = None;
+    benchmark_resolve_as_of_impl(entity_count, samples, &mut observer)
+}
+
+fn benchmark_resolve_as_of_impl(
+    entity_count: usize,
+    samples: usize,
+    observer: &mut Option<&mut dyn FnMut(PerfEvent)>,
+) -> Result<PerfMeasurement, ApiError> {
     let fixture = build_resolve_fixture(entity_count);
     let notes = vec![format!(
         "Inclusive prefix cut at {} across {} datoms",
@@ -399,12 +474,15 @@ pub fn benchmark_resolve_as_of(
     )];
 
     benchmark_measurement(
-        "Resolver as-of throughput",
-        format!("{} entities", format_count(entity_count)),
-        entity_count,
-        "entities/s",
-        notes,
-        samples,
+        MeasurementPlan {
+            workload: "Resolver as-of throughput",
+            scale: format!("{} entities", format_count(entity_count)),
+            units: entity_count,
+            unit_label: "entities/s",
+            notes,
+            samples,
+        },
+        observer,
         move || {
             MaterializedResolver
                 .as_of(&fixture.schema, &fixture.datoms, &fixture.as_of)
@@ -417,6 +495,15 @@ pub fn benchmark_compile_scc(
     scc_width: usize,
     samples: usize,
 ) -> Result<PerfMeasurement, ApiError> {
+    let mut observer = None;
+    benchmark_compile_scc_impl(scc_width, samples, &mut observer)
+}
+
+fn benchmark_compile_scc_impl(
+    scc_width: usize,
+    samples: usize,
+    observer: &mut Option<&mut dyn FnMut(PerfEvent)>,
+) -> Result<PerfMeasurement, ApiError> {
     let fixture = build_compile_fixture(scc_width);
     let notes = vec![format!(
         "{} predicates and {} rules with one large recursive SCC",
@@ -425,12 +512,15 @@ pub fn benchmark_compile_scc(
     )];
 
     benchmark_measurement(
-        "Compiler SCC planning",
-        format!("recursive width {}", format_count(scc_width)),
-        scc_width,
-        "predicates/s",
-        notes,
-        samples,
+        MeasurementPlan {
+            workload: "Compiler SCC planning",
+            scale: format!("recursive width {}", format_count(scc_width)),
+            units: scc_width,
+            unit_label: "predicates/s",
+            notes,
+            samples,
+        },
+        observer,
         move || {
             DefaultRuleCompiler
                 .compile(&fixture.schema, &fixture.program)
@@ -443,6 +533,15 @@ pub fn benchmark_runtime_closure(
     chain_len: usize,
     samples: usize,
 ) -> Result<PerfMeasurement, ApiError> {
+    let mut observer = None;
+    benchmark_runtime_closure_impl(chain_len, samples, &mut observer)
+}
+
+fn benchmark_runtime_closure_impl(
+    chain_len: usize,
+    samples: usize,
+    observer: &mut Option<&mut dyn FnMut(PerfEvent)>,
+) -> Result<PerfMeasurement, ApiError> {
     let fixture = build_runtime_fixture(chain_len)?;
     let notes = vec![format!(
         "{} derived tuples expected from a linear dependency chain",
@@ -450,12 +549,15 @@ pub fn benchmark_runtime_closure(
     )];
 
     benchmark_measurement(
-        "Recursive closure runtime",
-        format!("chain {}", format_count(chain_len)),
-        fixture.expected_tuple_count,
-        "tuples/s",
-        notes,
-        samples,
+        MeasurementPlan {
+            workload: "Recursive closure runtime",
+            scale: format!("chain {}", format_count(chain_len)),
+            units: fixture.expected_tuple_count,
+            unit_label: "tuples/s",
+            notes,
+            samples,
+        },
+        observer,
         move || {
             SemiNaiveRuntime
                 .evaluate(&fixture.state, &fixture.program)
@@ -467,6 +569,15 @@ pub fn benchmark_runtime_closure(
 pub fn benchmark_explain_trace(
     chain_len: usize,
     samples: usize,
+) -> Result<PerfMeasurement, ApiError> {
+    let mut observer = None;
+    benchmark_explain_trace_impl(chain_len, samples, &mut observer)
+}
+
+fn benchmark_explain_trace_impl(
+    chain_len: usize,
+    samples: usize,
+    observer: &mut Option<&mut dyn FnMut(PerfEvent)>,
 ) -> Result<PerfMeasurement, ApiError> {
     let fixture = build_explain_fixture(chain_len)?;
     let trace =
@@ -489,12 +600,15 @@ pub fn benchmark_explain_trace(
     ];
 
     benchmark_measurement(
-        "Tuple explanation runtime",
-        format!("chain {}", format_count(chain_len)),
-        trace.tuples.len(),
-        "trace-tuples/s",
-        notes,
-        samples,
+        MeasurementPlan {
+            workload: "Tuple explanation runtime",
+            scale: format!("chain {}", format_count(chain_len)),
+            units: trace.tuples.len(),
+            unit_label: "trace-tuples/s",
+            notes,
+            samples,
+        },
+        observer,
         move || {
             let explainer = InMemoryExplainer::from_derived_set(&fixture.derived);
             explainer
@@ -508,6 +622,15 @@ pub fn benchmark_service_coordination(
     task_count: usize,
     samples: usize,
 ) -> Result<PerfMeasurement, ApiError> {
+    let mut observer = None;
+    benchmark_service_coordination_impl(task_count, samples, &mut observer)
+}
+
+fn benchmark_service_coordination_impl(
+    task_count: usize,
+    samples: usize,
+    observer: &mut Option<&mut dyn FnMut(PerfEvent)>,
+) -> Result<PerfMeasurement, ApiError> {
     let mut fixture = build_coordination_service_fixture(task_count)?;
     let notes = vec![
         format!(
@@ -518,12 +641,15 @@ pub fn benchmark_service_coordination(
     ];
 
     benchmark_measurement(
-        "Kernel service coordination run",
-        format!("{} tasks", format_count(task_count)),
-        fixture.expected_row_count.max(1),
-        "rows/s",
-        notes,
-        samples,
+        MeasurementPlan {
+            workload: "Kernel service coordination run",
+            scale: format!("{} tasks", format_count(task_count)),
+            units: fixture.expected_row_count.max(1),
+            unit_label: "rows/s",
+            notes,
+            samples,
+        },
+        observer,
         move || fixture.service.run_document(fixture.request.clone()),
     )
 }
@@ -567,25 +693,56 @@ pub fn estimate_trace_footprint(chain_len: usize) -> Result<FootprintEstimate, A
 }
 
 pub fn default_performance_report() -> Result<PerfReport, ApiError> {
+    default_performance_report_impl(None)
+}
+
+pub fn default_performance_report_with_events<F>(mut observer: F) -> Result<PerfReport, ApiError>
+where
+    F: FnMut(PerfEvent),
+{
+    default_performance_report_impl(Some(&mut observer))
+}
+
+fn default_performance_report_impl(
+    mut observer: Option<&mut dyn FnMut(PerfEvent)>,
+) -> Result<PerfReport, ApiError> {
     let samples = DEFAULT_REPORT_SAMPLES;
+    emit_event(
+        &mut observer,
+        PerfEvent::SuiteStart {
+            total_workloads: 10,
+            samples_per_workload: samples,
+        },
+    );
+    let measurements = vec![
+        benchmark_append_impl(10_000, samples, &mut observer)?,
+        benchmark_append_impl(50_000, samples, &mut observer)?,
+        benchmark_resolve_current_impl(1_000, samples, &mut observer)?,
+        benchmark_resolve_as_of_impl(1_000, samples, &mut observer)?,
+        benchmark_compile_scc_impl(16, samples, &mut observer)?,
+        benchmark_compile_scc_impl(64, samples, &mut observer)?,
+        benchmark_runtime_closure_impl(64, samples, &mut observer)?,
+        benchmark_runtime_closure_impl(128, samples, &mut observer)?,
+        benchmark_explain_trace_impl(128, samples, &mut observer)?,
+        benchmark_service_coordination_impl(128, samples, &mut observer)?,
+    ];
+    let footprints = vec![
+        estimate_runtime_footprint(128)?,
+        estimate_trace_footprint(128)?,
+    ];
+    for footprint in &footprints {
+        emit_event(
+            &mut observer,
+            PerfEvent::FootprintComputed {
+                footprint: footprint.clone(),
+            },
+        );
+    }
+
     Ok(PerfReport {
         samples_per_workload: samples,
-        measurements: vec![
-            benchmark_append(10_000, samples)?,
-            benchmark_append(50_000, samples)?,
-            benchmark_resolve_current(1_000, samples)?,
-            benchmark_resolve_as_of(1_000, samples)?,
-            benchmark_compile_scc(16, samples)?,
-            benchmark_compile_scc(64, samples)?,
-            benchmark_runtime_closure(64, samples)?,
-            benchmark_runtime_closure(128, samples)?,
-            benchmark_explain_trace(128, samples)?,
-            benchmark_service_coordination(128, samples)?,
-        ],
-        footprints: vec![
-            estimate_runtime_footprint(128)?,
-            estimate_trace_footprint(128)?,
-        ],
+        measurements,
+        footprints,
     })
 }
 
@@ -701,52 +858,77 @@ pub fn estimate_derivation_trace_bytes(trace: &DerivationTrace) -> usize {
 }
 
 fn benchmark_measurement<T, F>(
-    workload: &'static str,
-    scale: String,
-    units: usize,
-    unit_label: &'static str,
-    notes: Vec<String>,
-    samples: usize,
+    plan: MeasurementPlan,
+    observer: &mut Option<&mut dyn FnMut(PerfEvent)>,
     mut operation: F,
 ) -> Result<PerfMeasurement, ApiError>
 where
     F: FnMut() -> Result<T, ApiError>,
 {
-    let samples = samples.max(1);
+    let samples = plan.samples.max(1);
     let mut durations = Vec::with_capacity(samples);
+    emit_event(
+        observer,
+        PerfEvent::MeasurementStart {
+            workload: plan.workload,
+            scale: plan.scale.clone(),
+            total_samples: samples,
+            units: plan.units,
+            unit_label: plan.unit_label,
+            notes: plan.notes.clone(),
+        },
+    );
+
+    let mut total = Duration::default();
+    let mut min = Duration::default();
+    let mut max = Duration::default();
     for _ in 0..samples {
         let started = Instant::now();
         let result = operation()?;
         black_box(result);
-        durations.push(started.elapsed());
+        let elapsed = started.elapsed();
+        durations.push(elapsed);
+        total += elapsed;
+        if durations.len() == 1 {
+            min = elapsed;
+            max = elapsed;
+        } else {
+            min = min.min(elapsed);
+            max = max.max(elapsed);
+        }
+        let sample_throughput = if elapsed.is_zero() {
+            0.0
+        } else {
+            plan.units as f64 / elapsed.as_secs_f64()
+        };
+        emit_event(
+            observer,
+            PerfEvent::SampleRecorded {
+                workload: plan.workload,
+                scale: plan.scale.clone(),
+                sample_index: durations.len(),
+                total_samples: samples,
+                elapsed,
+                throughput_per_second: sample_throughput,
+                mean_so_far: total / (durations.len() as u32),
+                min_so_far: min,
+                max_so_far: max,
+            },
+        );
     }
 
-    let total = durations
-        .iter()
-        .copied()
-        .fold(Duration::default(), |sum, duration| sum + duration);
     let mean = total / (samples as u32);
-    let min = durations
-        .iter()
-        .copied()
-        .min()
-        .unwrap_or_else(Duration::default);
-    let max = durations
-        .iter()
-        .copied()
-        .max()
-        .unwrap_or_else(Duration::default);
     let throughput_per_second = if mean.is_zero() {
         0.0
     } else {
-        units as f64 / mean.as_secs_f64()
+        plan.units as f64 / mean.as_secs_f64()
     };
 
-    Ok(PerfMeasurement {
-        workload,
-        scale,
-        units,
-        unit_label,
+    let measurement = PerfMeasurement {
+        workload: plan.workload,
+        scale: plan.scale,
+        units: plan.units,
+        unit_label: plan.unit_label,
         latency: LatencyStats {
             samples,
             mean,
@@ -754,8 +936,15 @@ where
             max,
         },
         throughput_per_second,
-        notes,
-    })
+        notes: plan.notes,
+    };
+    emit_event(
+        observer,
+        PerfEvent::MeasurementComplete {
+            measurement: measurement.clone(),
+        },
+    );
+    Ok(measurement)
 }
 
 fn validate_chain_len(chain_len: usize) -> Result<usize, ApiError> {
@@ -1045,4 +1234,10 @@ fn format_count(value: usize) -> String {
         output.push(ch);
     }
     output
+}
+
+fn emit_event(observer: &mut Option<&mut dyn FnMut(PerfEvent)>, event: PerfEvent) {
+    if let Some(observer) = observer.as_deref_mut() {
+        observer(event);
+    }
 }

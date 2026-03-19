@@ -6,11 +6,12 @@ The current goal is disciplined early tracking, not synthetic bravado. We want s
 
 ## What Exists Today
 
-The performance suite now has three layers:
+The performance suite now has four layers:
 
-1. A release-mode markdown report example in `crates/aether_api/examples/performance_report.rs`
-2. Criterion benchmarks in `crates/aether_api/benches/kernel_perf.rs`
-3. Ignored release-mode stress tests in `crates/aether_api/tests/performance_stress.rs`
+1. A live console dashboard in `crates/aether_api/examples/performance_dashboard.rs`
+2. A release-mode markdown report example in `crates/aether_api/examples/performance_report.rs`
+3. Criterion benchmarks in `crates/aether_api/benches/kernel_perf.rs`
+4. Ignored release-mode stress tests in `crates/aether_api/tests/performance_stress.rs`
 
 All three layers share the same fixture builders in `crates/aether_api/src/perf.rs`, so the report, benchmarks, and stress tests stay aligned.
 
@@ -33,6 +34,24 @@ The footprint estimates currently track:
 These footprint figures are intentionally conservative lower-bound estimates. They are useful for regression tracking. They are not allocator-exact memory telemetry.
 
 ## Commands
+
+### Operator-facing report
+
+### Live console dashboard
+
+Windows operator path:
+
+```text
+double-click scripts/run-performance-dashboard.cmd
+```
+
+Technical path:
+
+```bash
+cargo run -p aether_api --example performance_dashboard --release
+```
+
+That view streams sample-by-sample timing and throughput data while the suite is running, then leaves the collected measures and footprint estimates in the same console surface.
 
 ### Operator-facing report
 
@@ -69,6 +88,8 @@ Those tests are intentionally heavier and are excluded from the normal CI loop.
 ## Reading The Numbers
 
 Use the report as a baseline, not a promise.
+
+Use the dashboard when you need live visibility into how the suite is progressing.
 
 - The numbers are single-node local measurements.
 - The service benchmark includes parsing, compilation, resolution, runtime evaluation, and query execution.

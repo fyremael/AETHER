@@ -98,6 +98,7 @@ Implemented today:
 - an in-memory kernel service over `aether_api` with end-to-end integration tests
 - a minimal HTTP JSON kernel service boundary over `aether_api`
 - a release-mode performance report, Criterion benchmark suite, and ignored stress workloads for early regression tracking
+- a live console performance dashboard for real-time and collected instrument views
 
 Deliberately still narrow:
 
@@ -197,6 +198,7 @@ WSL verification uses the same workspace and the same commands via the Linux too
 For performance tracking:
 
 ```bash
+cargo run -p aether_api --example performance_dashboard --release
 cargo run -p aether_api --example performance_report --release
 cargo bench -p aether_api
 cargo test -p aether_api --test performance_stress --release -- --ignored --nocapture

@@ -22,6 +22,12 @@ If you need fresh performance numbers for operations, run the performance report
 double-click scripts/run-performance-report.cmd
 ```
 
+If you need a live visual readout while the suite is running, launch the dashboard:
+
+```text
+double-click scripts/run-performance-dashboard.cmd
+```
+
 ## Demo Catalog
 
 | Demo | Purpose | Best use |
@@ -116,6 +122,8 @@ For the full engineering-facing performance suite, also run:
 cargo bench -p aether_api
 cargo test -p aether_api --test performance_stress --release -- --ignored --nocapture
 ```
+
+Use the dashboard when people want to watch the measurements arrive in real time. Use the markdown report when you need to hand someone a saved artifact afterward.
 
 ## How To Present The Output
 

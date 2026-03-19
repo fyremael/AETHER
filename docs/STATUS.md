@@ -21,6 +21,7 @@ Completed:
 - in-memory kernel service implemented in `aether_api`
 - minimal HTTP JSON kernel service implemented over `aether_api`
 - release-mode performance report example, Criterion benchmarks, and ignored stress workloads added for early performance tracking
+- live console dashboard added for real-time and collected instrument views over the performance suite
 - documentation portal, architecture guide, developer workflow guide, operator guide, glossary, and documentation standards now exist
 - GitHub Pages publishing pipeline added for the documentation portal and generated Rust API reference
 - unit tests added across the Rust core crates
