@@ -64,6 +64,8 @@ version = "0.1.0"
 dependencies = [
  "aether_ast",
  "aether_plan",
+ "aether_resolver",
+ "aether_runtime",
  "aether_schema",
  "indexmap",
  "thiserror",

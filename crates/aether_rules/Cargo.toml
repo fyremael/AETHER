@@ -12,3 +12,6 @@ aether_schema = { path = "../aether_schema" }
 indexmap.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+aether_resolver = { path = "../aether_resolver" }
+aether_runtime = { path = "../aether_runtime" }

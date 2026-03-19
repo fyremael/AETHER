@@ -80,6 +80,7 @@ Implemented today:
 - schema registration and predicate arity validation
 - append-only in-memory journal semantics
 - deterministic `Current` and `AsOf` resolution across scalar, set, and sequence classes
+- an initial whole-document DSL parser for core `schema`, `predicates`, `rules`, and `materialize` sections
 - rule safety checks
 - dependency-graph construction
 - SCC decomposition and phase-graph lowering
@@ -91,7 +92,7 @@ Implemented today:
 
 Deliberately still narrow:
 
-- the canonical DSL parser is not implemented yet
+- the DSL parser does not yet cover queries, temporal views, policy annotations, or domain-level type aliases
 - the runtime currently rejects negation instead of evaluating full stratified negation
 - Go and Python remain boundary placeholders rather than active implementations
 - sidecar integrations are specified, not yet implemented
@@ -140,7 +141,7 @@ The repository follows the crate boundaries declared in `REPO_LAYOUT.md`.
 | `aether_schema` | attribute classes, schema registry, predicate signatures, validation |
 | `aether_storage` | journal trait, in-memory journal, history and prefix access |
 | `aether_resolver` | deterministic `Current` and `AsOf` materialization |
-| `aether_rules` | rule validation, dependency graphs, SCC analysis, extensional binding inference |
+| `aether_rules` | DSL parsing, rule validation, dependency graphs, SCC analysis, extensional binding inference |
 | `aether_plan` | compiled-program planning structures, phase graphs, delta-plan metadata |
 | `aether_runtime` | recursive evaluation, iteration metadata, derived tuple production |
 | `aether_explain` | derivation and plan explanation surface |
@@ -241,7 +242,8 @@ The milestone sequence remains the governing roadmap.
 In practical terms, the most immediate work now is:
 
 - tightening the runtime from naive fixpoint evaluation toward true semi-naive delta execution
-- building the canonical DSL parser
+- widening the DSL from the current core authoring surface to the full canonical language
+- completing the canonical DSL parser
 - widening explainability from tuple traces to richer operator-facing proof surfaces
 - introducing boundary-level examples that demonstrate end-to-end kernel usage
 

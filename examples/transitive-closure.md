@@ -4,14 +4,13 @@ This example demonstrates the first real recursive loop currently implemented in
 
 It shows how to:
 
-1. define a schema with an extensional relationship
-2. express recursive rules over that relationship
-3. resolve current state from datoms
-4. compile the rule program
-5. evaluate it to a fixpoint
-6. inspect both derived tuples and iteration metadata
-
-Until the DSL parser exists, the example is authored through the Rust AST surface.
+1. define a schema in the AETHER DSL
+2. express recursive rules in the same document
+3. parse that document into `Schema + RuleProgram`
+4. resolve current state from datoms
+5. compile the parsed rule program
+6. evaluate it to a fixpoint
+7. inspect both derived tuples and iteration metadata
 
 ## Scenario
 
@@ -23,37 +22,37 @@ We model a simple dependency chain:
 
 From those extensional facts, we want to derive the transitive dependency relation `depends_transitive(x, y)`.
 
+## DSL Document
+
+```text
+schema v1 {
+  attr task.depends_on: RefSet<Entity>
+}
+
+predicates {
+  task_depends_on(Entity, Entity)
+  depends_transitive(Entity, Entity)
+}
+
+rules {
+  depends_transitive(x, y) <- task_depends_on(x, y)
+  depends_transitive(x, z) <- depends_transitive(x, y), task_depends_on(y, z)
+}
+
+materialize {
+  depends_transitive
+}
+```
+
 ## Example
 
 ```rust
 use aether_ast::{
-    Atom, AttributeId, Datom, DatomProvenance, ElementId, EntityId, Literal, OperationKind,
-    PredicateId, PredicateRef, ReplicaId, RuleAst, RuleId, RuleProgram, Term, Value, Variable,
+    AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, ReplicaId, Value,
 };
 use aether_resolver::{MaterializedResolver, Resolver};
-use aether_rules::{DefaultRuleCompiler, RuleCompiler};
+use aether_rules::{DefaultDslParser, DefaultRuleCompiler, DslParser, RuleCompiler};
 use aether_runtime::{RuleRuntime, SemiNaiveRuntime};
-use aether_schema::{
-    AttributeClass, AttributeSchema, PredicateSignature, Schema, ValueType,
-};
-
-fn predicate(id: u64, name: &str, arity: usize) -> PredicateRef {
-    PredicateRef {
-        id: PredicateId::new(id),
-        name: name.into(),
-        arity,
-    }
-}
-
-fn atom(predicate: PredicateRef, vars: &[&str]) -> Atom {
-    Atom {
-        predicate,
-        terms: vars
-            .iter()
-            .map(|name| Term::Variable(Variable::new(*name)))
-            .collect(),
-    }
-}
 
 fn dependency_datom(entity: u64, value: u64, element: u64) -> Datom {
     Datom {
@@ -70,46 +69,27 @@ fn dependency_datom(entity: u64, value: u64, element: u64) -> Datom {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut schema = Schema::new("v1");
-    schema.register_attribute(AttributeSchema {
-        id: AttributeId::new(1),
-        name: "task.depends_on".into(),
-        class: AttributeClass::RefSet,
-        value_type: ValueType::Entity,
-    })?;
-    schema.register_predicate(PredicateSignature {
-        id: PredicateId::new(1),
-        name: "task_depends_on".into(),
-        fields: vec![ValueType::Entity, ValueType::Entity],
-    })?;
-    schema.register_predicate(PredicateSignature {
-        id: PredicateId::new(2),
-        name: "depends_transitive".into(),
-        fields: vec![ValueType::Entity, ValueType::Entity],
-    })?;
+    let document = DefaultDslParser.parse_document(
+        r#"
+        schema v1 {
+          attr task.depends_on: RefSet<Entity>
+        }
 
-    let task_depends_on = predicate(1, "task_depends_on", 2);
-    let depends_transitive = predicate(2, "depends_transitive", 2);
+        predicates {
+          task_depends_on(Entity, Entity)
+          depends_transitive(Entity, Entity)
+        }
 
-    let program = RuleProgram {
-        predicates: vec![task_depends_on.clone(), depends_transitive.clone()],
-        rules: vec![
-            RuleAst {
-                id: RuleId::new(1),
-                head: atom(depends_transitive.clone(), &["x", "y"]),
-                body: vec![Literal::Positive(atom(task_depends_on.clone(), &["x", "y"]))],
-            },
-            RuleAst {
-                id: RuleId::new(2),
-                head: atom(depends_transitive.clone(), &["x", "z"]),
-                body: vec![
-                    Literal::Positive(atom(depends_transitive.clone(), &["x", "y"])),
-                    Literal::Positive(atom(task_depends_on.clone(), &["y", "z"])),
-                ],
-            },
-        ],
-        materialized: vec![depends_transitive.id],
-    };
+        rules {
+          depends_transitive(x, y) <- task_depends_on(x, y)
+          depends_transitive(x, z) <- depends_transitive(x, y), task_depends_on(y, z)
+        }
+
+        materialize {
+          depends_transitive
+        }
+        "#,
+    )?;
 
     let datoms = vec![
         dependency_datom(1, 2, 1),
@@ -117,8 +97,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         dependency_datom(3, 4, 3),
     ];
 
-    let state = MaterializedResolver.current(&schema, &datoms)?;
-    let compiled = DefaultRuleCompiler.compile(&schema, &program)?;
+    let state = MaterializedResolver.current(&document.schema, &datoms)?;
+    let compiled = DefaultRuleCompiler.compile(&document.schema, &document.program)?;
     let derived = SemiNaiveRuntime.evaluate(&state, &compiled)?;
 
     let mut pairs = derived
@@ -151,6 +131,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 This example proves several important things about the current implementation:
 
+- the textual DSL can already express core schema, predicate, rule, and materialization sections
+- the parser lowers that document deterministically into the Rust semantic core
 - extensional predicates can be lifted from resolved attributes
 - recursive intensional predicates can be compiled and evaluated
 - the runtime converges deterministically
@@ -159,4 +141,13 @@ This example proves several important things about the current implementation:
 
 ## Where To See It In Executable Form
 
-The same scenario is covered by the runtime unit tests in `crates/aether_runtime/src/lib.rs`.
+Runnable example:
+
+```bash
+cargo run -p aether_rules --example dsl_transitive_closure
+```
+
+Code:
+
+- `crates/aether_rules/examples/dsl_transitive_closure.rs`
+- `crates/aether_runtime/src/lib.rs`

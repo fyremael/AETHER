@@ -1,3 +1,7 @@
+mod parser;
+
+pub use parser::{DefaultDslParser, DslDocument, DslParser, ParseError};
+
 use aether_ast::{Atom, AttributeId, Literal, PredicateId, RuleAst, RuleProgram, Variable};
 use aether_plan::{CompiledProgram, DeltaRulePlan, DependencyGraph, StronglyConnectedComponent};
 use aether_schema::{AttributeSchema, Schema, SchemaError, ValueType};

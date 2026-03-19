@@ -12,6 +12,7 @@ Completed:
 - schema, storage, resolver, compiler, and runtime substrate implemented as an initial vertical slice
 - source datom provenance threaded through resolution and derivation
 - first recursive tuple explainer implemented
+- first whole-document DSL parser implemented for `schema`, `predicates`, `rules`, and `materialize`
 - unit tests added across the Rust core crates
 - `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test` verified on Windows and WSL
 - GitHub CI added for Ubuntu and Windows
@@ -19,7 +20,7 @@ Completed:
 
 Not yet completed:
 
-- canonical DSL parser
+- full DSL coverage for queries, temporal views, policy annotations, and domain-level type aliases
 - executable stratified negation
 - bounded aggregation
 - durable storage backends
@@ -31,5 +32,5 @@ The most immediate work now sits between late `M2` and early `M3`:
 
 - preserve the current recursive runtime slice while tightening it toward true semi-naive execution
 - widen tuple explanation into richer proof and operator-facing surfaces
-- build the canonical DSL parser
+- extend the DSL beyond the current core authoring surface
 - expand worked examples and acceptance-style tests
