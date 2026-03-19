@@ -6,9 +6,10 @@ Start here:
 
 - `demo-01-temporal-dependency-horizon.md` is the first public showcase: temporal replay, recursive closure, and explainable proof traces over the same journal.
 - `transitive-closure.md` shows the first real recursive vertical slice through the textual DSL path, from parsing through resolution, compilation, and fixed-point evaluation.
+- the `aether_api` integration tests now exercise a coordination-focused DSL document with facts, `AsOf` queries, policy annotations, readiness, and stale-attempt rejection.
 
 For non-technical Windows operators:
 
 - double-click `scripts/run-demo-01.cmd`
 
-Until the DSL parser lands, examples use the Rust AST surface directly. That is a temporary authoring choice, not a change in the long-term semantic center of gravity.
+The DSL parser is now real for the core authoring path. Some examples still use the Rust AST surface where that is the clearest way to isolate a semantic behavior under test.

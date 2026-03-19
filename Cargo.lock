@@ -10,9 +10,11 @@ dependencies = [
  "aether_explain",
  "aether_plan",
  "aether_resolver",
+ "aether_rules",
  "aether_runtime",
  "aether_schema",
  "aether_storage",
+ "indexmap",
  "serde",
  "thiserror",
 ]

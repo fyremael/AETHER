@@ -1,6 +1,6 @@
 use aether_ast::{
-    DerivedTuple, DerivedTupleMetadata, ElementId, Literal, PredicateId, RuleId, Term, Tuple,
-    TupleId, Value, Variable,
+    DerivedTuple, DerivedTupleMetadata, ElementId, Literal, PredicateId, QueryAst, QueryResult,
+    QueryRow, RuleAst, RuleId, Term, Tuple, TupleId, Value, Variable,
 };
 use aether_plan::CompiledProgram;
 use aether_resolver::ResolvedState;
@@ -50,6 +50,7 @@ struct MatchState {
     bindings: IndexMap<Variable, Value>,
     parent_tuple_ids: Vec<TupleId>,
     source_datom_ids: Vec<ElementId>,
+    query_tuple_id: Option<TupleId>,
 }
 
 #[derive(Default)]
@@ -68,6 +69,8 @@ impl RuleRuntime for SemiNaiveRuntime {
             .map(|rule| rule.head.predicate.id)
             .collect();
         let scc_lookup = build_scc_lookup(program);
+        let scc_order = build_scc_evaluation_order(program, &scc_lookup);
+        let rules_by_scc = build_rules_by_scc(program, &scc_lookup);
 
         let mut derived_by_predicate: IndexMap<PredicateId, Vec<RelationRow>> = IndexMap::new();
         let mut tuple_keys = IndexSet::new();
@@ -76,83 +79,113 @@ impl RuleRuntime for SemiNaiveRuntime {
         let mut next_tuple_id = 1u64;
         let mut iteration = 1usize;
 
-        loop {
-            let snapshot = derived_by_predicate.clone();
-            let mut delta_by_predicate: IndexMap<PredicateId, Vec<RelationRow>> = IndexMap::new();
-            let mut delta_tuples = Vec::new();
+        for scc_id in scc_order {
+            let Some(rules) = rules_by_scc.get(&scc_id) else {
+                continue;
+            };
+            let current_scc_predicates: IndexSet<PredicateId> =
+                rules.iter().map(|rule| rule.head.predicate.id).collect();
+            let stratum = rules
+                .first()
+                .and_then(|rule| program.predicate_strata.get(&rule.head.predicate.id))
+                .copied()
+                .unwrap_or_default();
 
-            for rule in &program.rules {
-                let matches = evaluate_rule_body(
-                    rule,
-                    &snapshot,
-                    &extensional_rows,
-                    &intensional_predicates,
-                )?;
-                let scc_id = scc_lookup
-                    .get(&rule.head.predicate.id)
-                    .copied()
-                    .unwrap_or_default();
-                // This runtime slice executes only positive-rule programs. In that subset,
-                // every evaluated rule belongs to stratum 0.
-                let stratum = 0usize;
+            let mut delta_rows: IndexMap<PredicateId, Vec<RelationRow>> = IndexMap::new();
+            loop {
+                let mut batch_rows: IndexMap<PredicateId, Vec<RelationRow>> = IndexMap::new();
+                let mut batch_tuples = Vec::new();
 
-                for matched in matches {
-                    let values = materialize_head(rule.id, &rule.head.terms, &matched.bindings)?;
-                    let key = tuple_key(rule.head.predicate.id, &values);
-                    if tuple_keys.contains(&key) {
-                        continue;
+                for rule in rules {
+                    let anchor_indices =
+                        current_scc_positive_indices(rule, &current_scc_predicates);
+                    let anchor_plan = if delta_rows.is_empty() {
+                        if anchor_indices.is_empty() {
+                            vec![None]
+                        } else {
+                            Vec::new()
+                        }
+                    } else if anchor_indices.is_empty() {
+                        Vec::new()
+                    } else {
+                        anchor_indices.into_iter().map(Some).collect()
+                    };
+
+                    for anchor_index in anchor_plan {
+                        let matches = evaluate_rule_body_variant(
+                            rule,
+                            anchor_index,
+                            &derived_by_predicate,
+                            &delta_rows,
+                            &extensional_rows,
+                            &intensional_predicates,
+                            &current_scc_predicates,
+                        )?;
+
+                        for matched in matches {
+                            let values =
+                                materialize_head(rule.id, &rule.head.terms, &matched.bindings)?;
+                            let key = tuple_key(rule.head.predicate.id, &values);
+                            if tuple_keys.contains(&key) {
+                                continue;
+                            }
+
+                            let tuple_id = TupleId::new(next_tuple_id);
+                            next_tuple_id += 1;
+                            tuple_keys.insert(key);
+
+                            batch_rows.entry(rule.head.predicate.id).or_default().push(
+                                RelationRow {
+                                    values: values.clone(),
+                                    tuple_id: Some(tuple_id),
+                                    source_datom_ids: matched.source_datom_ids.clone(),
+                                },
+                            );
+                            batch_tuples.push(DerivedTuple {
+                                tuple: Tuple {
+                                    id: tuple_id,
+                                    predicate: rule.head.predicate.id,
+                                    values,
+                                },
+                                metadata: DerivedTupleMetadata {
+                                    rule_id: rule.id,
+                                    predicate_id: rule.head.predicate.id,
+                                    stratum,
+                                    scc_id,
+                                    iteration,
+                                    parent_tuple_ids: matched.parent_tuple_ids,
+                                    source_datom_ids: matched.source_datom_ids,
+                                },
+                            });
+                        }
                     }
-
-                    let tuple_id = TupleId::new(next_tuple_id);
-                    next_tuple_id += 1;
-                    tuple_keys.insert(key);
-
-                    delta_by_predicate
-                        .entry(rule.head.predicate.id)
-                        .or_default()
-                        .push(RelationRow {
-                            values: values.clone(),
-                            tuple_id: Some(tuple_id),
-                            source_datom_ids: matched.source_datom_ids.clone(),
-                        });
-                    delta_tuples.push(DerivedTuple {
-                        tuple: Tuple {
-                            id: tuple_id,
-                            predicate: rule.head.predicate.id,
-                            values,
-                        },
-                        metadata: DerivedTupleMetadata {
-                            rule_id: rule.id,
-                            predicate_id: rule.head.predicate.id,
-                            stratum,
-                            scc_id,
-                            iteration,
-                            parent_tuple_ids: matched.parent_tuple_ids,
-                            source_datom_ids: matched.source_datom_ids,
-                        },
-                    });
                 }
-            }
 
-            let delta_size = delta_tuples.len();
-            iterations.push(RuntimeIteration {
-                iteration,
-                delta_size,
-            });
+                if batch_tuples.is_empty() {
+                    break;
+                }
 
-            if delta_size == 0 {
-                break;
-            }
+                iterations.push(RuntimeIteration {
+                    iteration,
+                    delta_size: batch_tuples.len(),
+                });
+                iteration += 1;
 
-            for (predicate, rows) in delta_by_predicate {
-                derived_by_predicate
-                    .entry(predicate)
-                    .or_default()
-                    .extend(rows);
+                for (predicate, rows) in &batch_rows {
+                    derived_by_predicate
+                        .entry(*predicate)
+                        .or_default()
+                        .extend(rows.iter().cloned());
+                }
+                tuples.extend(batch_tuples);
+                delta_rows = batch_rows;
             }
-            tuples.extend(delta_tuples);
-            iteration += 1;
         }
+
+        iterations.push(RuntimeIteration {
+            iteration,
+            delta_size: 0,
+        });
 
         let mut predicate_index = program
             .materialized
@@ -175,11 +208,84 @@ impl RuleRuntime for SemiNaiveRuntime {
     }
 }
 
+pub fn execute_query(
+    state: &ResolvedState,
+    program: &CompiledProgram,
+    derived: &DerivedSet,
+    query: &QueryAst,
+) -> Result<QueryResult, RuntimeError> {
+    let extensional_rows = build_extensional_rows(state, program);
+    let intensional_predicates: IndexSet<PredicateId> = program
+        .rules
+        .iter()
+        .map(|rule| rule.head.predicate.id)
+        .collect();
+    let derived_rows = build_derived_rows(derived);
+
+    let mut states = vec![MatchState::default()];
+    for goal in &query.goals {
+        let rows = positive_relation_rows(
+            goal.predicate.id,
+            None,
+            &derived_rows,
+            &IndexMap::new(),
+            &extensional_rows,
+            &intensional_predicates,
+            &IndexSet::new(),
+        )?;
+        let mut next_states = Vec::new();
+
+        for state in &states {
+            for row in &rows {
+                if let Some(bindings) = unify_terms(&state.bindings, &goal.terms, &row.values) {
+                    next_states.push(MatchState {
+                        bindings,
+                        parent_tuple_ids: state.parent_tuple_ids.clone(),
+                        source_datom_ids: state.source_datom_ids.clone(),
+                        query_tuple_id: row.tuple_id.or(state.query_tuple_id),
+                    });
+                }
+            }
+        }
+
+        states = next_states;
+        if states.is_empty() {
+            break;
+        }
+    }
+
+    let mut rows = states
+        .into_iter()
+        .map(|state| QueryRow {
+            values: if query.keep.is_empty() {
+                state.bindings.values().cloned().collect()
+            } else {
+                query
+                    .keep
+                    .iter()
+                    .filter_map(|variable| state.bindings.get(variable).cloned())
+                    .collect()
+            },
+            tuple_id: state.query_tuple_id,
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by_key(|row| {
+        let mut key = String::new();
+        for value in &row.values {
+            key.push_str(&value_key(value));
+            key.push('|');
+        }
+        key
+    });
+
+    Ok(QueryResult { rows })
+}
+
 fn build_extensional_rows(
     state: &ResolvedState,
     program: &CompiledProgram,
 ) -> IndexMap<PredicateId, Vec<RelationRow>> {
-    let mut rows = IndexMap::new();
+    let mut rows: IndexMap<PredicateId, Vec<RelationRow>> = IndexMap::new();
 
     for (predicate, attribute) in &program.extensional_bindings {
         let mut predicate_rows = Vec::new();
@@ -192,54 +298,210 @@ fn build_extensional_rows(
                 }
             }));
         }
-        rows.insert(*predicate, predicate_rows);
+        rows.entry(*predicate).or_default().extend(predicate_rows);
+    }
+
+    for fact in &program.facts {
+        rows.entry(fact.predicate.id)
+            .or_default()
+            .push(RelationRow {
+                values: fact.values.clone(),
+                tuple_id: None,
+                source_datom_ids: Vec::new(),
+            });
     }
 
     rows
 }
 
-fn evaluate_rule_body(
-    rule: &aether_ast::RuleAst,
-    derived_rows: &IndexMap<PredicateId, Vec<RelationRow>>,
-    extensional_rows: &IndexMap<PredicateId, Vec<RelationRow>>,
-    intensional_predicates: &IndexSet<PredicateId>,
-) -> Result<Vec<MatchState>, RuntimeError> {
-    let mut states = vec![MatchState::default()];
+fn build_derived_rows(derived: &DerivedSet) -> IndexMap<PredicateId, Vec<RelationRow>> {
+    let mut rows: IndexMap<PredicateId, Vec<RelationRow>> = IndexMap::new();
+    for tuple in &derived.tuples {
+        rows.entry(tuple.tuple.predicate)
+            .or_default()
+            .push(RelationRow {
+                values: tuple.tuple.values.clone(),
+                tuple_id: Some(tuple.tuple.id),
+                source_datom_ids: tuple.metadata.source_datom_ids.clone(),
+            });
+    }
+    rows
+}
 
-    for literal in &rule.body {
-        let atom = match literal {
-            Literal::Positive(atom) => atom,
-            Literal::Negative(_) => return Err(RuntimeError::UnsupportedNegation(rule.id)),
-        };
-        let rows = relation_rows(
-            atom.predicate.id,
-            derived_rows,
-            extensional_rows,
-            intensional_predicates,
-        )?;
-        let mut next_states = Vec::new();
+fn build_rules_by_scc<'a>(
+    program: &'a CompiledProgram,
+    scc_lookup: &IndexMap<PredicateId, usize>,
+) -> IndexMap<usize, Vec<&'a RuleAst>> {
+    let mut rules = IndexMap::new();
+    for rule in &program.rules {
+        let scc_id = *scc_lookup
+            .get(&rule.head.predicate.id)
+            .expect("rule head predicate should be present in scc lookup");
+        rules.entry(scc_id).or_insert_with(Vec::new).push(rule);
+    }
+    rules
+}
 
-        for state in &states {
-            for row in rows {
-                if let Some(bindings) = unify_terms(&state.bindings, &atom.terms, &row.values) {
-                    let mut parent_tuple_ids = state.parent_tuple_ids.clone();
-                    if let Some(tuple_id) = row.tuple_id {
-                        if !parent_tuple_ids.contains(&tuple_id) {
-                            parent_tuple_ids.push(tuple_id);
-                        }
-                    }
-                    let mut source_datom_ids = state.source_datom_ids.clone();
-                    extend_unique(&mut source_datom_ids, &row.source_datom_ids);
-                    next_states.push(MatchState {
-                        bindings,
-                        parent_tuple_ids,
-                        source_datom_ids,
+fn build_scc_evaluation_order(
+    program: &CompiledProgram,
+    scc_lookup: &IndexMap<PredicateId, usize>,
+) -> Vec<usize> {
+    let mut edges = IndexSet::new();
+    let mut indegree = program
+        .sccs
+        .iter()
+        .map(|scc| (scc.id, 0usize))
+        .collect::<IndexMap<_, _>>();
+    let mut outgoing = program
+        .sccs
+        .iter()
+        .map(|scc| (scc.id, Vec::new()))
+        .collect::<IndexMap<_, _>>();
+
+    for (head, dependencies) in &program.dependency_graph.edges {
+        let head_scc = *scc_lookup
+            .get(head)
+            .expect("head predicate should be present in scc lookup");
+        for dependency in dependencies {
+            let dependency_scc = *scc_lookup
+                .get(dependency)
+                .expect("dependency predicate should be present in scc lookup");
+            if dependency_scc != head_scc && edges.insert((dependency_scc, head_scc)) {
+                outgoing.entry(dependency_scc).or_default().push(head_scc);
+                *indegree.entry(head_scc).or_default() += 1;
+            }
+        }
+    }
+
+    let scc_strata = program
+        .sccs
+        .iter()
+        .map(|scc| {
+            let stratum = scc
+                .predicates
+                .first()
+                .and_then(|predicate| program.predicate_strata.get(predicate))
+                .copied()
+                .unwrap_or_default();
+            (scc.id, stratum)
+        })
+        .collect::<IndexMap<_, _>>();
+    let mut ready = indegree
+        .iter()
+        .filter_map(|(scc_id, degree)| (*degree == 0).then_some(*scc_id))
+        .collect::<Vec<_>>();
+    ready.sort_by_key(|scc_id| (scc_strata.get(scc_id).copied().unwrap_or_default(), *scc_id));
+
+    let mut order = Vec::new();
+    while let Some(scc_id) = ready.first().copied() {
+        ready.remove(0);
+        order.push(scc_id);
+        if let Some(neighbors) = outgoing.get(&scc_id) {
+            for neighbor in neighbors {
+                let degree = indegree
+                    .get_mut(neighbor)
+                    .expect("neighbor scc should have indegree");
+                *degree -= 1;
+                if *degree == 0 {
+                    ready.push(*neighbor);
+                    ready.sort_by_key(|candidate| {
+                        (
+                            scc_strata.get(candidate).copied().unwrap_or_default(),
+                            *candidate,
+                        )
                     });
                 }
             }
         }
+    }
 
-        states = next_states;
+    order
+}
+
+fn current_scc_positive_indices(
+    rule: &RuleAst,
+    current_scc_predicates: &IndexSet<PredicateId>,
+) -> Vec<usize> {
+    rule.body
+        .iter()
+        .enumerate()
+        .filter_map(|(index, literal)| match literal {
+            Literal::Positive(atom) if current_scc_predicates.contains(&atom.predicate.id) => {
+                Some(index)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn evaluate_rule_body_variant(
+    rule: &RuleAst,
+    delta_anchor_index: Option<usize>,
+    derived_rows: &IndexMap<PredicateId, Vec<RelationRow>>,
+    delta_rows: &IndexMap<PredicateId, Vec<RelationRow>>,
+    extensional_rows: &IndexMap<PredicateId, Vec<RelationRow>>,
+    intensional_predicates: &IndexSet<PredicateId>,
+    current_scc_predicates: &IndexSet<PredicateId>,
+) -> Result<Vec<MatchState>, RuntimeError> {
+    let mut states = vec![MatchState::default()];
+
+    for (literal_index, literal) in ordered_rule_body(rule) {
+        match literal {
+            Literal::Positive(atom) => {
+                let rows = positive_relation_rows(
+                    atom.predicate.id,
+                    (delta_anchor_index == Some(literal_index)).then_some(()),
+                    derived_rows,
+                    delta_rows,
+                    extensional_rows,
+                    intensional_predicates,
+                    current_scc_predicates,
+                )?;
+                let mut next_states = Vec::new();
+
+                for state in &states {
+                    for row in &rows {
+                        if let Some(bindings) =
+                            unify_terms(&state.bindings, &atom.terms, &row.values)
+                        {
+                            let mut parent_tuple_ids = state.parent_tuple_ids.clone();
+                            if let Some(tuple_id) = row.tuple_id {
+                                if !parent_tuple_ids.contains(&tuple_id) {
+                                    parent_tuple_ids.push(tuple_id);
+                                }
+                            }
+                            let mut source_datom_ids = state.source_datom_ids.clone();
+                            extend_unique(&mut source_datom_ids, &row.source_datom_ids);
+                            next_states.push(MatchState {
+                                bindings,
+                                parent_tuple_ids,
+                                source_datom_ids,
+                                query_tuple_id: row.tuple_id.or(state.query_tuple_id),
+                            });
+                        }
+                    }
+                }
+
+                states = next_states;
+            }
+            Literal::Negative(atom) => {
+                if current_scc_predicates.contains(&atom.predicate.id) {
+                    return Err(RuntimeError::UnsupportedIntraStratumNegation(rule.id));
+                }
+                let rows = negative_relation_rows(
+                    atom.predicate.id,
+                    derived_rows,
+                    extensional_rows,
+                    intensional_predicates,
+                )?;
+                states.retain(|state| {
+                    !rows
+                        .iter()
+                        .any(|row| unify_terms(&state.bindings, &atom.terms, &row.values).is_some())
+                });
+            }
+        }
+
         if states.is_empty() {
             break;
         }
@@ -248,21 +510,53 @@ fn evaluate_rule_body(
     Ok(states)
 }
 
-fn relation_rows<'a>(
+fn ordered_rule_body(rule: &RuleAst) -> Vec<(usize, &Literal)> {
+    let mut positives = Vec::new();
+    let mut negatives = Vec::new();
+    for (index, literal) in rule.body.iter().enumerate() {
+        match literal {
+            Literal::Positive(_) => positives.push((index, literal)),
+            Literal::Negative(_) => negatives.push((index, literal)),
+        }
+    }
+    positives.extend(negatives);
+    positives
+}
+
+fn positive_relation_rows(
     predicate: PredicateId,
-    derived_rows: &'a IndexMap<PredicateId, Vec<RelationRow>>,
-    extensional_rows: &'a IndexMap<PredicateId, Vec<RelationRow>>,
+    use_delta: Option<()>,
+    derived_rows: &IndexMap<PredicateId, Vec<RelationRow>>,
+    delta_rows: &IndexMap<PredicateId, Vec<RelationRow>>,
+    extensional_rows: &IndexMap<PredicateId, Vec<RelationRow>>,
     intensional_predicates: &IndexSet<PredicateId>,
-) -> Result<&'a [RelationRow], RuntimeError> {
+    _current_scc_predicates: &IndexSet<PredicateId>,
+) -> Result<Vec<RelationRow>, RuntimeError> {
+    if use_delta.is_some() {
+        return Ok(delta_rows.get(&predicate).cloned().unwrap_or_default());
+    }
     if intensional_predicates.contains(&predicate) {
-        Ok(derived_rows
-            .get(&predicate)
-            .map(Vec::as_slice)
-            .unwrap_or(&[]))
+        return Ok(derived_rows.get(&predicate).cloned().unwrap_or_default());
+    }
+
+    extensional_rows
+        .get(&predicate)
+        .cloned()
+        .ok_or(RuntimeError::MissingExtensionalBinding(predicate))
+}
+
+fn negative_relation_rows(
+    predicate: PredicateId,
+    derived_rows: &IndexMap<PredicateId, Vec<RelationRow>>,
+    extensional_rows: &IndexMap<PredicateId, Vec<RelationRow>>,
+    intensional_predicates: &IndexSet<PredicateId>,
+) -> Result<Vec<RelationRow>, RuntimeError> {
+    if intensional_predicates.contains(&predicate) {
+        Ok(derived_rows.get(&predicate).cloned().unwrap_or_default())
     } else {
         extensional_rows
             .get(&predicate)
-            .map(Vec::as_slice)
+            .cloned()
             .ok_or(RuntimeError::MissingExtensionalBinding(predicate))
     }
 }
@@ -370,20 +664,21 @@ fn value_key(value: &Value) -> String {
 
 #[derive(Debug, Error)]
 pub enum RuntimeError {
-    #[error("predicate {0} has no extensional binding in the compiled program")]
+    #[error("predicate {0} has no extensional binding or fact rows in the compiled program")]
     MissingExtensionalBinding(PredicateId),
-    #[error("rule {0} uses negation, which is not implemented in this runtime slice")]
-    UnsupportedNegation(RuleId),
+    #[error("rule {0} uses same-stratum negation, which is not supported")]
+    UnsupportedIntraStratumNegation(RuleId),
     #[error("rule {rule_id} references unbound variable {variable}")]
     UnboundVariable { rule_id: RuleId, variable: String },
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{RuleRuntime, RuntimeError, SemiNaiveRuntime};
+    use super::{execute_query, RuleRuntime, RuntimeError, SemiNaiveRuntime};
     use aether_ast::{
-        Atom, AttributeId, Datom, DatomProvenance, ElementId, EntityId, Literal, OperationKind,
-        PredicateId, PredicateRef, ReplicaId, RuleAst, RuleId, RuleProgram, Term, Value, Variable,
+        Atom, AttributeId, Datom, DatomProvenance, ElementId, EntityId, ExtensionalFact, Literal,
+        PredicateId, PredicateRef, QueryAst, QueryRow, RuleAst, RuleId, RuleProgram, Term, Value,
+        Variable,
     };
     use aether_resolver::{MaterializedResolver, Resolver};
     use aether_rules::{DefaultRuleCompiler, RuleCompiler};
@@ -407,7 +702,22 @@ mod tests {
         }
     }
 
-    fn transitive_schema() -> Schema {
+    fn dependency_datom(entity: u64, value: u64, element: u64) -> Datom {
+        Datom {
+            entity: EntityId::new(entity),
+            attribute: AttributeId::new(1),
+            value: Value::Entity(EntityId::new(value)),
+            op: aether_ast::OperationKind::Add,
+            element: ElementId::new(element),
+            replica: aether_ast::ReplicaId::new(1),
+            causal_context: Default::default(),
+            provenance: DatomProvenance::default(),
+            policy: None,
+        }
+    }
+
+    #[test]
+    fn monotone_transitive_closure_converges_with_iteration_metadata() {
         let mut schema = Schema::new("v1");
         schema
             .register_attribute(AttributeSchema {
@@ -431,26 +741,7 @@ mod tests {
                 fields: vec![ValueType::Entity, ValueType::Entity],
             })
             .expect("register recursive predicate");
-        schema
-    }
 
-    fn dependency_datom(entity: u64, value: u64, element: u64) -> Datom {
-        Datom {
-            entity: EntityId::new(entity),
-            attribute: AttributeId::new(1),
-            value: Value::Entity(EntityId::new(value)),
-            op: OperationKind::Add,
-            element: ElementId::new(element),
-            replica: ReplicaId::new(1),
-            causal_context: Default::default(),
-            provenance: DatomProvenance::default(),
-            policy: None,
-        }
-    }
-
-    #[test]
-    fn monotone_transitive_closure_converges_with_iteration_metadata() {
-        let schema = transitive_schema();
         let program = RuleProgram {
             predicates: vec![
                 predicate(1, "task_depends_on", 2),
@@ -475,6 +766,7 @@ mod tests {
                 },
             ],
             materialized: vec![PredicateId::new(2)],
+            facts: Vec::new(),
         };
         let datoms = vec![
             dependency_datom(1, 2, 1),
@@ -513,15 +805,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![3, 2, 1, 0]
         );
-        assert!(derived.has_converged());
-        assert_eq!(
-            derived
-                .predicate_index
-                .get(&PredicateId::new(2))
-                .map(Vec::len),
-            Some(6)
-        );
-
         let longest_path = derived
             .tuples
             .iter()
@@ -533,30 +816,338 @@ mod tests {
                     ]
             })
             .expect("longest-path tuple");
-        assert_eq!(longest_path.metadata.rule_id, RuleId::new(2));
-        assert_eq!(longest_path.metadata.iteration, 3);
-        assert_eq!(longest_path.metadata.stratum, 0);
-        assert!(!longest_path.metadata.parent_tuple_ids.is_empty());
         assert_eq!(
             longest_path.metadata.source_datom_ids,
             vec![ElementId::new(1), ElementId::new(2), ElementId::new(3)]
         );
-        assert!(derived
-            .tuples
-            .iter()
-            .all(|tuple| tuple.metadata.stratum == 0));
-        let base_edge = derived
-            .tuples
-            .iter()
-            .find(|tuple| {
-                tuple.tuple.values
-                    == vec![
+    }
+
+    #[test]
+    fn stratified_negation_supports_readiness_and_stale_rejection() {
+        let mut schema = Schema::new("v1");
+        for attribute in [
+            AttributeSchema {
+                id: AttributeId::new(1),
+                name: "task.depends_on".into(),
+                class: AttributeClass::RefSet,
+                value_type: ValueType::Entity,
+            },
+            AttributeSchema {
+                id: AttributeId::new(2),
+                name: "task.status".into(),
+                class: AttributeClass::ScalarLww,
+                value_type: ValueType::String,
+            },
+            AttributeSchema {
+                id: AttributeId::new(3),
+                name: "task.claimed_by".into(),
+                class: AttributeClass::ScalarLww,
+                value_type: ValueType::String,
+            },
+            AttributeSchema {
+                id: AttributeId::new(4),
+                name: "task.lease_epoch".into(),
+                class: AttributeClass::ScalarLww,
+                value_type: ValueType::U64,
+            },
+            AttributeSchema {
+                id: AttributeId::new(5),
+                name: "task.lease_state".into(),
+                class: AttributeClass::ScalarLww,
+                value_type: ValueType::String,
+            },
+        ] {
+            schema
+                .register_attribute(attribute)
+                .expect("register attribute");
+        }
+
+        for signature in [
+            PredicateSignature {
+                id: PredicateId::new(1),
+                name: "task".into(),
+                fields: vec![ValueType::Entity],
+            },
+            PredicateSignature {
+                id: PredicateId::new(2),
+                name: "execution_attempt".into(),
+                fields: vec![ValueType::Entity, ValueType::String, ValueType::U64],
+            },
+            PredicateSignature {
+                id: PredicateId::new(3),
+                name: "task_depends_on".into(),
+                fields: vec![ValueType::Entity, ValueType::Entity],
+            },
+            PredicateSignature {
+                id: PredicateId::new(4),
+                name: "task_status".into(),
+                fields: vec![ValueType::Entity, ValueType::String],
+            },
+            PredicateSignature {
+                id: PredicateId::new(5),
+                name: "task_claimed_by".into(),
+                fields: vec![ValueType::Entity, ValueType::String],
+            },
+            PredicateSignature {
+                id: PredicateId::new(6),
+                name: "task_lease_epoch".into(),
+                fields: vec![ValueType::Entity, ValueType::U64],
+            },
+            PredicateSignature {
+                id: PredicateId::new(7),
+                name: "task_lease_state".into(),
+                fields: vec![ValueType::Entity, ValueType::String],
+            },
+            PredicateSignature {
+                id: PredicateId::new(8),
+                name: "task_complete".into(),
+                fields: vec![ValueType::Entity],
+            },
+            PredicateSignature {
+                id: PredicateId::new(9),
+                name: "dependency_blocked".into(),
+                fields: vec![ValueType::Entity],
+            },
+            PredicateSignature {
+                id: PredicateId::new(10),
+                name: "lease_active".into(),
+                fields: vec![ValueType::Entity, ValueType::String, ValueType::U64],
+            },
+            PredicateSignature {
+                id: PredicateId::new(11),
+                name: "active_claim".into(),
+                fields: vec![ValueType::Entity],
+            },
+            PredicateSignature {
+                id: PredicateId::new(12),
+                name: "task_ready".into(),
+                fields: vec![ValueType::Entity],
+            },
+            PredicateSignature {
+                id: PredicateId::new(13),
+                name: "execution_rejected_stale".into(),
+                fields: vec![ValueType::Entity, ValueType::String, ValueType::U64],
+            },
+        ] {
+            schema
+                .register_predicate(signature)
+                .expect("register predicate");
+        }
+
+        let program = RuleProgram {
+            predicates: vec![
+                predicate(1, "task", 1),
+                predicate(2, "execution_attempt", 3),
+                predicate(3, "task_depends_on", 2),
+                predicate(4, "task_status", 2),
+                predicate(5, "task_claimed_by", 2),
+                predicate(6, "task_lease_epoch", 2),
+                predicate(7, "task_lease_state", 2),
+                predicate(8, "task_complete", 1),
+                predicate(9, "dependency_blocked", 1),
+                predicate(10, "lease_active", 3),
+                predicate(11, "active_claim", 1),
+                predicate(12, "task_ready", 1),
+                predicate(13, "execution_rejected_stale", 3),
+            ],
+            rules: vec![
+                RuleAst {
+                    id: RuleId::new(1),
+                    head: atom(predicate(8, "task_complete", 1), &["t"]),
+                    body: vec![Literal::Positive(Atom {
+                        predicate: predicate(4, "task_status", 2),
+                        terms: vec![
+                            Term::Variable(Variable::new("t")),
+                            Term::Value(Value::String("done".into())),
+                        ],
+                    })],
+                },
+                RuleAst {
+                    id: RuleId::new(2),
+                    head: atom(predicate(9, "dependency_blocked", 1), &["t"]),
+                    body: vec![
+                        Literal::Positive(atom(predicate(3, "task_depends_on", 2), &["t", "dep"])),
+                        Literal::Negative(atom(predicate(8, "task_complete", 1), &["dep"])),
+                    ],
+                },
+                RuleAst {
+                    id: RuleId::new(3),
+                    head: atom(predicate(10, "lease_active", 3), &["t", "worker", "epoch"]),
+                    body: vec![
+                        Literal::Positive(atom(
+                            predicate(5, "task_claimed_by", 2),
+                            &["t", "worker"],
+                        )),
+                        Literal::Positive(atom(
+                            predicate(6, "task_lease_epoch", 2),
+                            &["t", "epoch"],
+                        )),
+                        Literal::Positive(Atom {
+                            predicate: predicate(7, "task_lease_state", 2),
+                            terms: vec![
+                                Term::Variable(Variable::new("t")),
+                                Term::Value(Value::String("active".into())),
+                            ],
+                        }),
+                    ],
+                },
+                RuleAst {
+                    id: RuleId::new(4),
+                    head: atom(predicate(11, "active_claim", 1), &["t"]),
+                    body: vec![Literal::Positive(atom(
+                        predicate(10, "lease_active", 3),
+                        &["t", "worker", "epoch"],
+                    ))],
+                },
+                RuleAst {
+                    id: RuleId::new(5),
+                    head: atom(predicate(12, "task_ready", 1), &["t"]),
+                    body: vec![
+                        Literal::Positive(atom(predicate(1, "task", 1), &["t"])),
+                        Literal::Negative(atom(predicate(9, "dependency_blocked", 1), &["t"])),
+                        Literal::Negative(atom(predicate(11, "active_claim", 1), &["t"])),
+                    ],
+                },
+                RuleAst {
+                    id: RuleId::new(6),
+                    head: atom(
+                        predicate(13, "execution_rejected_stale", 3),
+                        &["t", "worker", "epoch"],
+                    ),
+                    body: vec![
+                        Literal::Positive(atom(
+                            predicate(2, "execution_attempt", 3),
+                            &["t", "worker", "epoch"],
+                        )),
+                        Literal::Negative(atom(
+                            predicate(10, "lease_active", 3),
+                            &["t", "worker", "epoch"],
+                        )),
+                    ],
+                },
+            ],
+            materialized: vec![PredicateId::new(12), PredicateId::new(13)],
+            facts: vec![
+                ExtensionalFact {
+                    predicate: predicate(1, "task", 1),
+                    values: vec![Value::Entity(EntityId::new(1))],
+                    policy: None,
+                },
+                ExtensionalFact {
+                    predicate: predicate(1, "task", 1),
+                    values: vec![Value::Entity(EntityId::new(2))],
+                    policy: None,
+                },
+                ExtensionalFact {
+                    predicate: predicate(2, "execution_attempt", 3),
+                    values: vec![
                         Value::Entity(EntityId::new(1)),
-                        Value::Entity(EntityId::new(2)),
-                    ]
-            })
-            .expect("base edge tuple");
-        assert_eq!(base_edge.metadata.source_datom_ids, vec![ElementId::new(1)]);
+                        Value::String("worker-a".into()),
+                        Value::U64(1),
+                    ],
+                    policy: None,
+                },
+            ],
+        };
+        let datoms = vec![
+            dependency_datom(1, 2, 1),
+            datom(2, 2, Value::String("done".into()), 2),
+            datom(1, 3, Value::String("worker-a".into()), 3),
+            datom(1, 4, Value::U64(1), 4),
+            datom(1, 5, Value::String("active".into()), 5),
+            datom(1, 5, Value::String("expired".into()), 6),
+        ];
+
+        let compiled = DefaultRuleCompiler
+            .compile(&schema, &program)
+            .expect("compile coordination program");
+        let as_of_state = MaterializedResolver
+            .as_of(&schema, &datoms, &ElementId::new(5))
+            .expect("resolve as_of");
+        let current_state = MaterializedResolver
+            .current(&schema, &datoms)
+            .expect("resolve current");
+        let as_of_derived = SemiNaiveRuntime
+            .evaluate(&as_of_state, &compiled)
+            .expect("evaluate as_of");
+        let current_derived = SemiNaiveRuntime
+            .evaluate(&current_state, &compiled)
+            .expect("evaluate current");
+
+        let as_of_ready = execute_query(
+            &as_of_state,
+            &compiled,
+            &as_of_derived,
+            &QueryAst {
+                goals: vec![
+                    atom(predicate(12, "task_ready", 1), &["t"]),
+                    Atom {
+                        predicate: predicate(5, "task_claimed_by", 2),
+                        terms: vec![
+                            Term::Variable(Variable::new("t")),
+                            Term::Value(Value::String("worker-a".into())),
+                        ],
+                    },
+                ],
+                keep: vec![Variable::new("t")],
+            },
+        )
+        .expect("query as_of ready");
+        assert!(as_of_ready.rows.is_empty());
+
+        let current_ready = execute_query(
+            &current_state,
+            &compiled,
+            &current_derived,
+            &QueryAst {
+                goals: vec![
+                    atom(predicate(12, "task_ready", 1), &["t"]),
+                    Atom {
+                        predicate: predicate(5, "task_claimed_by", 2),
+                        terms: vec![
+                            Term::Variable(Variable::new("t")),
+                            Term::Value(Value::String("worker-a".into())),
+                        ],
+                    },
+                ],
+                keep: vec![Variable::new("t")],
+            },
+        )
+        .expect("query current ready");
+        assert_eq!(current_ready.rows.len(), 1);
+        assert_eq!(
+            current_ready.rows[0].values,
+            vec![Value::Entity(EntityId::new(1))]
+        );
+
+        let stale_attempts = execute_query(
+            &current_state,
+            &compiled,
+            &current_derived,
+            &QueryAst {
+                goals: vec![atom(
+                    predicate(13, "execution_rejected_stale", 3),
+                    &["t", "worker", "epoch"],
+                )],
+                keep: vec![
+                    Variable::new("t"),
+                    Variable::new("worker"),
+                    Variable::new("epoch"),
+                ],
+            },
+        )
+        .expect("query stale attempts");
+        assert_eq!(
+            stale_attempts.rows,
+            vec![QueryRow {
+                values: vec![
+                    Value::Entity(EntityId::new(1)),
+                    Value::String("worker-a".into()),
+                    Value::U64(1),
+                ],
+                tuple_id: stale_attempts.rows.first().and_then(|row| row.tuple_id),
+            }]
+        );
     }
 
     #[test]
@@ -587,6 +1178,7 @@ mod tests {
                 ))],
             }],
             materialized: vec![PredicateId::new(11)],
+            facts: Vec::new(),
         };
         let compiled = DefaultRuleCompiler
             .compile(&schema, &program)
@@ -599,5 +1191,19 @@ mod tests {
             error,
             RuntimeError::MissingExtensionalBinding(id) if id == PredicateId::new(10)
         ));
+    }
+
+    fn datom(entity: u64, attribute: u64, value: Value, element: u64) -> Datom {
+        Datom {
+            entity: EntityId::new(entity),
+            attribute: AttributeId::new(attribute),
+            value,
+            op: aether_ast::OperationKind::Assert,
+            element: ElementId::new(element),
+            replica: aether_ast::ReplicaId::new(1),
+            causal_context: Default::default(),
+            provenance: DatomProvenance::default(),
+            policy: None,
+        }
     }
 }

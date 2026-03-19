@@ -2,7 +2,9 @@ mod parser;
 
 pub use parser::{DefaultDslParser, DslDocument, DslParser, ParseError};
 
-use aether_ast::{Atom, AttributeId, Literal, PredicateId, RuleAst, RuleProgram, Variable};
+use aether_ast::{
+    Atom, AttributeId, ExtensionalFact, Literal, PredicateId, RuleAst, RuleProgram, Value, Variable,
+};
 use aether_plan::{CompiledProgram, DeltaRulePlan, DependencyGraph, StronglyConnectedComponent};
 use aether_schema::{AttributeSchema, Schema, SchemaError, ValueType};
 use indexmap::{IndexMap, IndexSet};
@@ -33,6 +35,11 @@ impl RuleCompiler for DefaultRuleCompiler {
         for predicate in &program.predicates {
             schema.validate_predicate_arity(&predicate.id, predicate.arity)?;
             all_predicates.insert(predicate.id);
+        }
+
+        for fact in &program.facts {
+            validate_fact(schema, fact)?;
+            all_predicates.insert(fact.predicate.id);
         }
 
         for rule in &program.rules {
@@ -72,14 +79,16 @@ impl RuleCompiler for DefaultRuleCompiler {
 
         let sccs = compute_sccs(&dependency_graph, &all_predicates);
         let scc_lookup = build_scc_lookup(&sccs);
-        for (head, dependency) in negative_edges {
-            if scc_lookup.get(&head) == scc_lookup.get(&dependency) {
+        for (head, dependency) in &negative_edges {
+            if scc_lookup.get(head) == scc_lookup.get(dependency) {
                 return Err(CompileError::UnstratifiedNegation {
-                    depender: predicate_label(schema, head),
-                    dependency: predicate_label(schema, dependency),
+                    depender: predicate_label(schema, *head),
+                    dependency: predicate_label(schema, *dependency),
                 });
             }
         }
+        let predicate_strata =
+            compute_predicate_strata(schema, &dependency_graph, &scc_lookup, &negative_edges)?;
 
         let phase_graph = build_phase_graph(schema, &dependency_graph, &sccs, &scc_lookup);
         let extensional_bindings = infer_extensional_bindings(schema, program)?;
@@ -92,12 +101,31 @@ impl RuleCompiler for DefaultRuleCompiler {
             materialized: program.materialized.clone(),
             rules: program.rules.clone(),
             extensional_bindings,
+            facts: program.facts.clone(),
+            predicate_strata,
         })
     }
 }
 
 fn validate_atom(schema: &Schema, atom: &Atom) -> Result<(), CompileError> {
     schema.validate_predicate_arity(&atom.predicate.id, atom.terms.len())?;
+    Ok(())
+}
+
+fn validate_fact(schema: &Schema, fact: &ExtensionalFact) -> Result<(), CompileError> {
+    schema.validate_predicate_arity(&fact.predicate.id, fact.values.len())?;
+    let signature = schema
+        .predicate(&fact.predicate.id)
+        .ok_or(SchemaError::UnknownPredicate(fact.predicate.id))?;
+    for (value, expected) in fact.values.iter().zip(&signature.fields) {
+        if !value_matches_type(value, expected) {
+            return Err(CompileError::FactTypeMismatch {
+                predicate: fact.predicate.name.clone(),
+                expected: signature.fields.clone(),
+                actual: fact.values.iter().map(value_type_of).collect(),
+            });
+        }
+    }
     Ok(())
 }
 
@@ -318,6 +346,130 @@ fn build_phase_graph(
     aether_ast::PhaseGraph { nodes, edges }
 }
 
+fn compute_predicate_strata(
+    _schema: &Schema,
+    graph: &DependencyGraph,
+    scc_lookup: &IndexMap<PredicateId, usize>,
+    negative_edges: &[(PredicateId, PredicateId)],
+) -> Result<IndexMap<PredicateId, usize>, CompileError> {
+    let mut condensed_edges: IndexMap<(usize, usize), usize> = IndexMap::new();
+    let mut scc_ids = IndexSet::new();
+    for scc_id in scc_lookup.values() {
+        scc_ids.insert(*scc_id);
+    }
+
+    for (head, dependencies) in &graph.edges {
+        let to = *scc_lookup
+            .get(head)
+            .expect("head predicate should be present in scc lookup");
+        for dependency in dependencies {
+            let from = *scc_lookup
+                .get(dependency)
+                .expect("dependency predicate should be present in scc lookup");
+            if from != to {
+                scc_ids.insert(from);
+                scc_ids.insert(to);
+                condensed_edges.entry((from, to)).or_insert(0);
+            }
+        }
+    }
+
+    for (head, dependency) in negative_edges {
+        let to = *scc_lookup
+            .get(head)
+            .expect("negative head predicate should be present in scc lookup");
+        let from = *scc_lookup
+            .get(dependency)
+            .expect("negative dependency predicate should be present in scc lookup");
+        if from != to {
+            scc_ids.insert(from);
+            scc_ids.insert(to);
+            condensed_edges
+                .entry((from, to))
+                .and_modify(|weight| *weight = (*weight).max(1))
+                .or_insert(1);
+        }
+    }
+
+    let mut outgoing: IndexMap<usize, Vec<(usize, usize)>> = scc_ids
+        .iter()
+        .copied()
+        .map(|scc_id| (scc_id, Vec::new()))
+        .collect();
+    let mut indegree: IndexMap<usize, usize> = scc_ids
+        .iter()
+        .copied()
+        .map(|scc_id| (scc_id, 0usize))
+        .collect();
+
+    for ((from, to), weight) in condensed_edges {
+        outgoing.entry(from).or_default().push((to, weight));
+        *indegree.entry(to).or_default() += 1;
+    }
+
+    let mut ready = indegree
+        .iter()
+        .filter_map(|(scc_id, degree)| (*degree == 0).then_some(*scc_id))
+        .collect::<Vec<_>>();
+    ready.sort_unstable();
+
+    let mut order = Vec::new();
+    while let Some(scc_id) = ready.first().copied() {
+        ready.remove(0);
+        order.push(scc_id);
+        if let Some(edges) = outgoing.get(&scc_id) {
+            for (to, _) in edges {
+                let degree = indegree
+                    .get_mut(to)
+                    .expect("target scc should have indegree entry");
+                *degree -= 1;
+                if *degree == 0 {
+                    ready.push(*to);
+                    ready.sort_unstable();
+                }
+            }
+        }
+    }
+
+    if order.len() != indegree.len() {
+        return Err(CompileError::UnstratifiedNegation {
+            depender: "program".into(),
+            dependency: "negative cycle".into(),
+        });
+    }
+
+    let mut scc_strata: IndexMap<usize, usize> = scc_ids
+        .iter()
+        .copied()
+        .map(|scc_id| (scc_id, 0usize))
+        .collect();
+    for scc_id in order {
+        let current = *scc_strata
+            .get(&scc_id)
+            .expect("source scc should have a stratum");
+        if let Some(edges) = outgoing.get(&scc_id) {
+            for (to, weight) in edges {
+                let target = scc_strata
+                    .get_mut(to)
+                    .expect("target scc should have a stratum");
+                *target = (*target).max(current + *weight);
+            }
+        }
+    }
+
+    Ok(scc_lookup
+        .iter()
+        .map(|(predicate, scc_id)| {
+            (
+                *predicate,
+                *scc_strata
+                    .get(scc_id)
+                    .expect("predicate scc should have a stratum"),
+            )
+        })
+        .collect())
+}
+
 fn infer_extensional_bindings(
     schema: &Schema,
     program: &RuleProgram,
@@ -384,6 +536,42 @@ fn predicate_label(schema: &Schema, predicate: PredicateId) -> String {
         .unwrap_or_else(|| format!("predicate-{}", predicate))
 }
 
+fn value_matches_type(value: &Value, expected: &ValueType) -> bool {
+    match (value, expected) {
+        (Value::Null, _) => true,
+        (Value::Bool(_), ValueType::Bool) => true,
+        (Value::I64(_), ValueType::I64) => true,
+        (Value::U64(_), ValueType::U64) => true,
+        (Value::F64(_), ValueType::F64) => true,
+        (Value::String(_), ValueType::String) => true,
+        (Value::Bytes(_), ValueType::Bytes) => true,
+        (Value::Entity(_), ValueType::Entity) => true,
+        (Value::List(values), ValueType::List(inner)) => {
+            values.iter().all(|value| value_matches_type(value, inner))
+        }
+        _ => false,
+    }
+}
+
+fn value_type_of(value: &Value) -> ValueType {
+    match value {
+        Value::Null => ValueType::String,
+        Value::Bool(_) => ValueType::Bool,
+        Value::I64(_) => ValueType::I64,
+        Value::U64(_) => ValueType::U64,
+        Value::F64(_) => ValueType::F64,
+        Value::String(_) => ValueType::String,
+        Value::Bytes(_) => ValueType::Bytes,
+        Value::Entity(_) => ValueType::Entity,
+        Value::List(values) => ValueType::List(Box::new(
+            values
+                .first()
+                .map(value_type_of)
+                .unwrap_or(ValueType::String),
+        )),
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum CompileError {
     #[error(transparent)]
@@ -396,6 +584,14 @@ pub enum CompileError {
         attribute: String,
         expected_fields: Vec<ValueType>,
         actual_fields: Vec<ValueType>,
+    },
+    #[error(
+        "fact for predicate {predicate} does not match the declared types: expected {expected:?}, found {actual:?}"
+    )]
+    FactTypeMismatch {
+        predicate: String,
+        expected: Vec<ValueType>,
+        actual: Vec<ValueType>,
     },
     #[error("rule {rule_id} uses unsafe variable {variable}")]
     UnsafeVariable {
@@ -413,8 +609,8 @@ pub enum CompileError {
 mod tests {
     use super::{CompileError, DefaultRuleCompiler, RuleCompiler};
     use aether_ast::{
-        Atom, AttributeId, Literal, PredicateId, PredicateRef, RuleAst, RuleId, RuleProgram, Term,
-        Variable,
+        Atom, AttributeId, ExtensionalFact, Literal, PredicateId, PredicateRef, RuleAst, RuleId,
+        RuleProgram, Term, Value, Variable,
     };
     use aether_schema::{AttributeClass, AttributeSchema, PredicateSignature, Schema, ValueType};
 
@@ -473,6 +669,7 @@ mod tests {
                 },
             ],
             materialized: vec![reach.id],
+            facts: Vec::new(),
         };
 
         let compiled = DefaultRuleCompiler
@@ -513,6 +710,8 @@ mod tests {
 
         assert_eq!(reach_node.recursive_scc, Some(reach_scc.id));
         assert_eq!(edge_node.recursive_scc, None);
+        assert_eq!(compiled.predicate_strata.get(&edge.id).copied(), Some(0));
+        assert_eq!(compiled.predicate_strata.get(&reach.id).copied(), Some(0));
         assert!(compiled.phase_graph.edges.iter().any(|edge_ref| {
             edge_ref.from == format!("scc-{}", edge_scc.id)
                 && edge_ref.to == format!("scc-{}", reach_scc.id)
@@ -548,6 +747,7 @@ mod tests {
                         ))],
                     }],
                     materialized: vec![task_depends_on.id],
+                    facts: Vec::new(),
                 },
             )
             .expect("compile program");
@@ -585,6 +785,7 @@ mod tests {
                     predicates: vec![task_depends_on],
                     rules: Vec::new(),
                     materialized: Vec::new(),
+                    facts: Vec::new(),
                 },
             )
             .expect_err("type-mismatched binding should fail");
@@ -616,6 +817,7 @@ mod tests {
                 body: vec![Literal::Positive(atom(edge, &["y", "z"]))],
             }],
             materialized: Vec::new(),
+            facts: Vec::new(),
         };
 
         let error = DefaultRuleCompiler
@@ -650,6 +852,7 @@ mod tests {
                 },
             ],
             materialized: Vec::new(),
+            facts: Vec::new(),
         };
 
         let error = DefaultRuleCompiler
@@ -660,5 +863,99 @@ mod tests {
             CompileError::UnstratifiedNegation { depender, dependency }
                 if depender == "q" && dependency == "p"
         ));
+    }
+
+    #[test]
+    fn stratified_negation_assigns_higher_strata() {
+        let task = predicate(1, "task", 1);
+        let task_status = predicate(2, "task_status", 2);
+        let task_complete = predicate(3, "task_complete", 1);
+        let task_ready = predicate(4, "task_ready", 1);
+        let mut schema = Schema::new("v1");
+        for signature in [
+            PredicateSignature {
+                id: task.id,
+                name: task.name.clone(),
+                fields: vec![ValueType::Entity],
+            },
+            PredicateSignature {
+                id: task_status.id,
+                name: task_status.name.clone(),
+                fields: vec![ValueType::Entity, ValueType::String],
+            },
+            PredicateSignature {
+                id: task_complete.id,
+                name: task_complete.name.clone(),
+                fields: vec![ValueType::Entity],
+            },
+            PredicateSignature {
+                id: task_ready.id,
+                name: task_ready.name.clone(),
+                fields: vec![ValueType::Entity],
+            },
+        ] {
+            schema
+                .register_predicate(signature)
+                .expect("register predicate");
+        }
+        schema
+            .register_attribute(AttributeSchema {
+                id: AttributeId::new(20),
+                name: "task.status".into(),
+                class: AttributeClass::ScalarLww,
+                value_type: ValueType::String,
+            })
+            .expect("register attribute");
+
+        let compiled = DefaultRuleCompiler
+            .compile(
+                &schema,
+                &RuleProgram {
+                    predicates: vec![
+                        task.clone(),
+                        task_status.clone(),
+                        task_complete.clone(),
+                        task_ready.clone(),
+                    ],
+                    rules: vec![
+                        RuleAst {
+                            id: RuleId::new(1),
+                            head: atom(task_complete.clone(), &["x"]),
+                            body: vec![Literal::Positive(Atom {
+                                predicate: task_status.clone(),
+                                terms: vec![
+                                    Term::Variable(Variable::new("x")),
+                                    Term::Value(Value::String("done".into())),
+                                ],
+                            })],
+                        },
+                        RuleAst {
+                            id: RuleId::new(2),
+                            head: atom(task_ready.clone(), &["x"]),
+                            body: vec![
+                                Literal::Positive(atom(task.clone(), &["x"])),
+                                Literal::Negative(atom(task_complete.clone(), &["x"])),
+                            ],
+                        },
+                    ],
+                    materialized: vec![task_ready.id],
+                    facts: vec![ExtensionalFact {
+                        predicate: task,
+                        values: vec![Value::Entity(aether_ast::EntityId::new(1))],
+                        policy: None,
+                    }],
+                },
+            )
+            .expect("compile stratified program");
+
+        assert_eq!(
+            compiled.predicate_strata.get(&task_complete.id).copied(),
+            Some(0)
+        );
+        assert_eq!(
+            compiled.predicate_strata.get(&task_ready.id).copied(),
+            Some(1)
+        );
+        assert_eq!(compiled.facts.len(), 1);
     }
 }

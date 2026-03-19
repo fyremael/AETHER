@@ -177,10 +177,31 @@ pub struct QueryAst {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ExtensionalFact {
+    pub predicate: PredicateRef,
+    pub values: Vec<Value>,
+    pub policy: Option<PolicyEnvelope>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum TemporalView {
+    #[default]
+    Current,
+    AsOf(ElementId),
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct QuerySpec {
+    pub view: TemporalView,
+    pub query: QueryAst,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct RuleProgram {
     pub predicates: Vec<PredicateRef>,
     pub rules: Vec<RuleAst>,
     pub materialized: Vec<PredicateId>,
+    pub facts: Vec<ExtensionalFact>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -205,6 +226,17 @@ pub struct DerivedTupleMetadata {
 pub struct DerivedTuple {
     pub tuple: Tuple,
     pub metadata: DerivedTupleMetadata,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct QueryRow {
+    pub values: Vec<Value>,
+    pub tuple_id: Option<TupleId>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct QueryResult {
+    pub rows: Vec<QueryRow>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

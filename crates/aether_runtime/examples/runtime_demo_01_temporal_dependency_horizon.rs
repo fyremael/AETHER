@@ -113,6 +113,7 @@ fn dependency_program() -> RuleProgram {
             },
         ],
         materialized: vec![PredicateId::new(2)],
+        facts: Vec::new(),
     }
 }
 

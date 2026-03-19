@@ -80,20 +80,24 @@ Implemented today:
 - schema registration and predicate arity validation
 - append-only in-memory journal semantics
 - deterministic `Current` and `AsOf` resolution across scalar, set, and sequence classes
-- an initial whole-document DSL parser for core `schema`, `predicates`, `rules`, and `materialize` sections
+- a whole-document DSL parser for `schema`, `predicates`, `facts`, `rules`, `materialize`, and `query` sections
 - rule safety checks
 - dependency-graph construction
 - SCC decomposition and phase-graph lowering
 - unstratified-negation rejection
-- a first real recursive runtime slice for positive monotone recursion
+- predicate-stratum computation for executable stratified negation
+- semi-naive delta execution across recursive SCCs
+- a first real recursive runtime slice for positive recursion and cross-stratum negation
 - source datom provenance threaded from resolved facts into derived tuples
 - derived tuple metadata with rule, SCC, stratum, iteration, parent tuple references, and source datom IDs
 - an in-memory explainer that reconstructs recursive tuple traces
+- a coordination acceptance slice for task readiness, claims, leases, and stale-attempt rejection
+- an in-memory kernel service over `aether_api` with end-to-end integration tests
 
 Deliberately still narrow:
 
-- the DSL parser does not yet cover queries, temporal views, policy annotations, or domain-level type aliases
-- the runtime currently rejects negation instead of evaluating full stratified negation
+- the DSL parser is still a focused initial slice rather than the full canonical language
+- bounded aggregation is not implemented yet
 - Go and Python remain boundary placeholders rather than active implementations
 - sidecar integrations are specified, not yet implemented
 
@@ -107,11 +111,11 @@ That slice looks like this:
 2. the resolver materializes current state or a prefix-constrained historical state
 3. the compiler validates rules, builds dependency structure, and records executable metadata
 4. the runtime lifts extensional relations from resolved attributes
-5. recursive rules are evaluated to a fixpoint
+5. recursive rules are evaluated with semi-naive delta execution inside SCCs and stratified negation across strata
 6. derived tuples are emitted with iteration, parent-tuple, and source-datom provenance metadata
 7. the explainer can reconstruct a tuple-local proof trace from the derived graph
 
-The initial runtime focus is monotone transitive closure, because it is the smallest slice that proves the architecture is real instead of rhetorical.
+That smallest initial proof has now widened into a first coordination workload: tasks, active claims, lease state, readiness, and stale-attempt rejection can all be derived and queried from the same kernel.
 
 ## Semantic Invariants
 
@@ -143,9 +147,9 @@ The repository follows the crate boundaries declared in `REPO_LAYOUT.md`.
 | `aether_resolver` | deterministic `Current` and `AsOf` materialization |
 | `aether_rules` | DSL parsing, rule validation, dependency graphs, SCC analysis, extensional binding inference |
 | `aether_plan` | compiled-program planning structures, phase graphs, delta-plan metadata |
-| `aether_runtime` | recursive evaluation, iteration metadata, derived tuple production |
+| `aether_runtime` | semi-naive recursive evaluation, stratified negation, iteration metadata, derived tuple production |
 | `aether_explain` | derivation and plan explanation surface |
-| `aether_api` | stable request/response boundary types for kernel-facing consumers |
+| `aether_api` | request/response boundary types plus an in-memory kernel service |
 
 ### Non-Rust boundaries
 
@@ -206,25 +210,27 @@ This matters because coordination systems age badly when their core semantics ar
 
 ## What The Runtime Does Today
 
-The runtime crate now performs a genuine fixed-point evaluation for a narrow but important class of programs.
+The runtime crate now performs a genuine recursive evaluation for a narrow but important class of programs.
 
 Supported today:
 
 - positive rule bodies
 - recursive intensional predicates
+- stratified negation across strata
 - extensional predicates lifted from resolved attributes
+- extensional facts authored directly in the DSL
 - derived tuple de-duplication
 - iteration-by-iteration convergence tracking
 - parent derived tuple linkage
 - source datom provenance on derived tuples
 - recursive tuple trace reconstruction
+- query execution over `Current` and `AsOf` views
+- coordination-style readiness and stale-attempt derivations
 
 Not yet supported in the runtime:
 
-- executable stratified negation
 - bounded aggregation
-- full semi-naive delta specialization
-- optimizer-grade plan selection
+- optimizer-grade plan selection beyond the current semi-naive slice
 
 This is intentional. The project is building from semantic bedrock upward. The right next steps are to preserve correctness while widening expressive power, not to rush into breadth and backfill meaning later.
 
@@ -241,11 +247,11 @@ The milestone sequence remains the governing roadmap.
 
 In practical terms, the most immediate work now is:
 
-- tightening the runtime from naive fixpoint evaluation toward true semi-naive delta execution
-- widening the DSL from the current core authoring surface to the full canonical language
-- completing the canonical DSL parser
+- widening the DSL from the current focused slice to the full canonical language
+- adding bounded aggregation and deeper runtime optimization
 - widening explainability from tuple traces to richer operator-facing proof surfaces
-- introducing boundary-level examples that demonstrate end-to-end kernel usage
+- hardening the API boundary from the current in-memory service to richer process-boundary integrations
+- introducing more boundary-level examples and operator-facing demonstrations
 
 ## Why The README Is Long
 

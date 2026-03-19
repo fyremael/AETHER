@@ -1,4 +1,4 @@
-use aether_ast::{AttributeId, PhaseGraph, PredicateId, RuleAst, RuleId};
+use aether_ast::{AttributeId, ExtensionalFact, PhaseGraph, PredicateId, RuleAst, RuleId};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
@@ -41,4 +41,6 @@ pub struct CompiledProgram {
     pub materialized: Vec<PredicateId>,
     pub rules: Vec<RuleAst>,
     pub extensional_bindings: IndexMap<PredicateId, AttributeId>,
+    pub facts: Vec<ExtensionalFact>,
+    pub predicate_strata: IndexMap<PredicateId, usize>,
 }

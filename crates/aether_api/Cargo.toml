@@ -10,8 +10,10 @@ aether_ast = { path = "../aether_ast" }
 aether_explain = { path = "../aether_explain" }
 aether_plan = { path = "../aether_plan" }
 aether_resolver = { path = "../aether_resolver" }
+aether_rules = { path = "../aether_rules" }
 aether_runtime = { path = "../aether_runtime" }
 aether_schema = { path = "../aether_schema" }
 aether_storage = { path = "../aether_storage" }
+indexmap.workspace = true
 serde.workspace = true
 thiserror.workspace = true

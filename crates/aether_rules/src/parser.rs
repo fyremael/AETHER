@@ -1,6 +1,6 @@
 use aether_ast::{
-    Atom, AttributeId, Literal, PredicateId, PredicateRef, RuleAst, RuleId, RuleProgram, Term,
-    Value, Variable,
+    Atom, AttributeId, ExtensionalFact, Literal, PolicyEnvelope, PredicateId, PredicateRef,
+    QueryAst, QuerySpec, RuleAst, RuleId, RuleProgram, TemporalView, Term, Value, Variable,
 };
 use aether_schema::{
     AttributeClass, AttributeSchema, PredicateSignature, Schema, SchemaError, ValueType,
@@ -16,6 +16,7 @@ pub trait DslParser {
 pub struct DslDocument {
     pub schema: Schema,
     pub program: RuleProgram,
+    pub query: Option<QuerySpec>,
 }
 
 #[derive(Default)]
@@ -38,20 +39,26 @@ fn parse_document(input: &str) -> Result<DslDocument, ParseError> {
     let rules_section = sections
         .get("rules")
         .ok_or(ParseError::MissingSection("rules"))?;
+    let facts_section = sections.get("facts");
     let materialize_section = sections.get("materialize");
+    let query_section = sections.get("query");
 
     let mut schema = parse_schema_section(schema_section)?;
     let predicate_refs = parse_predicates_section(predicates_section, &mut schema)?;
+    let facts = parse_facts_section(facts_section, &predicate_refs)?;
     let rules = parse_rules_section(rules_section, &predicate_refs)?;
     let materialized = parse_materialize_section(materialize_section, &predicate_refs)?;
+    let query = parse_query_section(query_section, &predicate_refs)?;
 
     Ok(DslDocument {
         program: RuleProgram {
             predicates: predicate_refs.values().cloned().collect(),
             rules,
             materialized,
+            facts,
         },
         schema,
+        query,
     })
 }
 
@@ -128,7 +135,8 @@ fn parse_section_header(line: usize, header: &str) -> Result<(String, Option<Str
             header: header.into(),
         })?;
     let name = match name {
-        "schema" | "predicates" | "rules" | "materialize" => name.to_owned(),
+        "schema" | "predicates" | "rules" | "materialize" | "facts" | "query" => name.to_owned(),
+        "queries" => "query".to_owned(),
         "materialized" => "materialize".to_owned(),
         other => {
             return Err(ParseError::UnknownSection {
@@ -265,6 +273,54 @@ fn parse_rules_section(
     Ok(rules)
 }
 
+fn parse_facts_section(
+    section: Option<&Section>,
+    predicate_refs: &IndexMap<String, PredicateRef>,
+) -> Result<Vec<ExtensionalFact>, ParseError> {
+    let Some(section) = section else {
+        return Ok(Vec::new());
+    };
+
+    let mut facts = Vec::new();
+    for (line, entry) in &section.entries {
+        if entry.is_empty() {
+            continue;
+        }
+
+        let (call, annotation_text) = split_call_and_suffix(*line, entry)?;
+        let (name, args) = parse_call(*line, call)?;
+        let predicate =
+            predicate_refs
+                .get(name)
+                .ok_or_else(|| ParseError::UnknownPredicateName {
+                    line: *line,
+                    name: name.into(),
+                })?;
+        if predicate.arity != args.len() {
+            return Err(ParseError::PredicateArityMismatch {
+                line: *line,
+                predicate: predicate.name.clone(),
+                expected: predicate.arity,
+                actual: args.len(),
+            });
+        }
+
+        let values = args
+            .iter()
+            .map(|token| parse_fact_value(*line, token))
+            .collect::<Result<Vec<_>, _>>()?;
+        let policy = parse_policy_annotations(*line, annotation_text)?;
+
+        facts.push(ExtensionalFact {
+            predicate: predicate.clone(),
+            values,
+            policy,
+        });
+    }
+
+    Ok(facts)
+}
+
 fn parse_materialize_section(
     section: Option<&Section>,
     predicate_refs: &IndexMap<String, PredicateRef>,
@@ -295,6 +351,68 @@ fn parse_materialize_section(
     }
 
     Ok(materialized)
+}
+
+fn parse_query_section(
+    section: Option<&Section>,
+    predicate_refs: &IndexMap<String, PredicateRef>,
+) -> Result<Option<QuerySpec>, ParseError> {
+    let Some(section) = section else {
+        return Ok(None);
+    };
+
+    let mut view = TemporalView::Current;
+    let mut goals = Vec::new();
+    let mut keep = Vec::new();
+
+    for (line, entry) in &section.entries {
+        if let Some(rest) = entry.strip_prefix("as_of ") {
+            let Some(element) = rest.trim().strip_prefix('e') else {
+                return Err(ParseError::InvalidQueryEntry {
+                    line: *line,
+                    entry: entry.clone(),
+                });
+            };
+            let element = element
+                .parse::<u64>()
+                .map_err(|_| ParseError::InvalidQueryEntry {
+                    line: *line,
+                    entry: entry.clone(),
+                })?;
+            view = TemporalView::AsOf(aether_ast::ElementId::new(element));
+            continue;
+        }
+        if entry == "current" {
+            view = TemporalView::Current;
+            continue;
+        }
+        if let Some(rest) = entry
+            .strip_prefix("goal ")
+            .or_else(|| entry.strip_prefix("find "))
+        {
+            goals.push(parse_atom(*line, rest.trim(), predicate_refs)?);
+            continue;
+        }
+        if let Some(rest) = entry.strip_prefix("keep ") {
+            keep.extend(
+                split_top_level(rest.trim(), ',', *line)?
+                    .into_iter()
+                    .filter(|name| !name.is_empty())
+                    .map(Variable::new),
+            );
+            continue;
+        }
+
+        return Err(ParseError::InvalidQueryEntry {
+            line: *line,
+            entry: entry.clone(),
+        });
+    }
+
+    Ok(Some(QuerySpec {
+        view,
+        query: QueryAst { goals, keep },
+    }))
 }
 
 fn parse_attribute_spec(
@@ -474,6 +592,31 @@ fn parse_term(line: usize, token: &str) -> Result<Term, ParseError> {
     Ok(Term::Variable(Variable::new(token)))
 }
 
+fn parse_fact_value(line: usize, token: &str) -> Result<Value, ParseError> {
+    let token = token.trim();
+    if let Some(inner) = token
+        .strip_prefix("entity(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
+        let value = inner
+            .trim()
+            .parse::<u64>()
+            .map_err(|_| ParseError::InvalidTerm {
+                line,
+                text: token.into(),
+            })?;
+        return Ok(Value::Entity(aether_ast::EntityId::new(value)));
+    }
+
+    match parse_term(line, token)? {
+        Term::Value(value) => Ok(value),
+        Term::Variable(_) => Err(ParseError::InvalidFactValue {
+            line,
+            text: token.into(),
+        }),
+    }
+}
+
 fn parse_string_literal(line: usize, token: &str) -> Result<String, ParseError> {
     if token.len() < 2 || !token.ends_with('"') {
         return Err(ParseError::InvalidTerm {
@@ -619,6 +762,85 @@ fn trim_statement(line: &str) -> &str {
     line.trim_end_matches([';', '.'])
 }
 
+fn split_call_and_suffix(line: usize, entry: &str) -> Result<(&str, &str), ParseError> {
+    let mut in_string = false;
+    let mut paren_depth = 0usize;
+
+    for (index, ch) in entry.char_indices() {
+        match ch {
+            '"' => in_string = !in_string,
+            '(' if !in_string => paren_depth += 1,
+            ')' if !in_string => {
+                if paren_depth == 0 {
+                    return Err(ParseError::UnbalancedDelimiter { line });
+                }
+                paren_depth -= 1;
+                if paren_depth == 0 {
+                    return Ok((&entry[..=index], entry[index + 1..].trim()));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Err(ParseError::InvalidCall {
+        line,
+        text: entry.into(),
+    })
+}
+
+fn parse_policy_annotations(line: usize, rest: &str) -> Result<Option<PolicyEnvelope>, ParseError> {
+    if rest.is_empty() {
+        return Ok(None);
+    }
+
+    let mut capability = None;
+    let mut visibility = None;
+    let mut remaining = rest.trim();
+
+    while !remaining.is_empty() {
+        let Some(annotation) = remaining.strip_prefix('@') else {
+            return Err(ParseError::InvalidPolicyAnnotation {
+                line,
+                text: rest.into(),
+            });
+        };
+        let (call, suffix) = split_call_and_suffix(line, annotation)?;
+        let (name, args) = parse_call(line, call)?;
+        if args.len() != 1 {
+            return Err(ParseError::InvalidPolicyAnnotation {
+                line,
+                text: call.into(),
+            });
+        }
+        let value = parse_fact_value(line, &args[0])?;
+        let Value::String(value) = value else {
+            return Err(ParseError::InvalidPolicyAnnotation {
+                line,
+                text: call.into(),
+            });
+        };
+
+        match name {
+            "capability" => capability = Some(value),
+            "visibility" => visibility = Some(value),
+            _ => {
+                return Err(ParseError::InvalidPolicyAnnotation {
+                    line,
+                    text: call.into(),
+                })
+            }
+        }
+
+        remaining = suffix.trim();
+    }
+
+    Ok(Some(PolicyEnvelope {
+        capability,
+        visibility,
+    }))
+}
+
 #[derive(Debug, Error)]
 pub enum ParseError {
     #[error("line {line}: unexpected top-level content: {content}")]
@@ -652,6 +874,12 @@ pub enum ParseError {
     InvalidType { line: usize, text: String },
     #[error("line {line}: invalid term {text}")]
     InvalidTerm { line: usize, text: String },
+    #[error("line {line}: invalid fact value {text}")]
+    InvalidFactValue { line: usize, text: String },
+    #[error("line {line}: invalid query entry {entry}")]
+    InvalidQueryEntry { line: usize, entry: String },
+    #[error("line {line}: invalid policy annotation {text}")]
+    InvalidPolicyAnnotation { line: usize, text: String },
     #[error("line {line}: duplicate materialized predicate {name}")]
     DuplicateMaterializedPredicate { line: usize, name: String },
     #[error("line {line}: unbalanced delimiter in DSL input")]
@@ -664,7 +892,9 @@ pub enum ParseError {
 mod tests {
     use super::{DefaultDslParser, DslParser, ParseError};
     use crate::{DefaultRuleCompiler, RuleCompiler};
-    use aether_ast::{Literal, PredicateId, Term, Value};
+    use aether_ast::{
+        Atom, Literal, PredicateId, PredicateRef, QueryAst, QuerySpec, TemporalView, Term, Value,
+    };
     use aether_schema::{AttributeClass, ValueType};
 
     #[test]
@@ -713,6 +943,7 @@ mod tests {
         );
         assert_eq!(document.program.rules.len(), 2);
         assert_eq!(document.program.materialized, vec![PredicateId::new(2)]);
+        assert!(document.query.is_none());
 
         let compiled = DefaultRuleCompiler
             .compile(&document.schema, &document.program)
@@ -760,6 +991,65 @@ mod tests {
                 Term::Variable(aether_ast::Variable::new("x")),
                 Term::Value(Value::String("blocked".into())),
             ]
+        );
+    }
+
+    #[test]
+    fn parses_facts_queries_as_of_and_policy_annotations() {
+        let document = DefaultDslParser
+            .parse_document(
+                r#"
+                schema v2 {
+                  attr task.status: ScalarLWW<String>
+                }
+
+                predicates {
+                  execution_attempt(Entity, String, U64)
+                  task_ready(Entity)
+                }
+
+                facts {
+                  execution_attempt(entity(1), "worker-a", 1) @capability("executor") @visibility("ops")
+                }
+
+                rules {
+                  task_ready(x) <- task_ready(x)
+                }
+
+                query {
+                  as_of e5
+                  goal task_ready(x)
+                  keep x
+                }
+                "#,
+            )
+            .expect("parse document with facts and query");
+
+        assert_eq!(document.schema.version, "v2");
+        assert_eq!(document.program.facts.len(), 1);
+        assert_eq!(
+            document.program.facts[0].policy,
+            Some(aether_ast::PolicyEnvelope {
+                capability: Some("executor".into()),
+                visibility: Some("ops".into()),
+            })
+        );
+        assert_eq!(
+            document.query,
+            Some(QuerySpec {
+                view: TemporalView::AsOf(aether_ast::ElementId::new(5)),
+                query: QueryAst {
+                    goals: vec![Atom {
+                        predicate: PredicateRef {
+                            id: PredicateId::new(2),
+                            name: "task_ready".into(),
+                            arity: 1,
+                        },
+                        terms: vec![Term::Variable(aether_ast::Variable::new("x"))],
+                    }],
+                    keep: vec![aether_ast::Variable::new("x")],
+                },
+            })
         );
     }
 
