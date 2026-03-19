@@ -1,0 +1,12 @@
+<svg width="220" height="200" viewBox="0 0 220 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="220" height="200" rx="26" fill="#FFF9EE"/>
+  <circle cx="110" cy="82" r="46" fill="#F6C773"/>
+  <path d="M78 78C78 61 92 47 109 47C126 47 140 61 140 78V116H78V78Z" fill="#FDF8EE"/>
+  <circle cx="98" cy="78" r="5" fill="#1C1915"/>
+  <circle cx="120" cy="78" r="5" fill="#1C1915"/>
+  <path d="M97 95C100 100 104 102 109 102C114 102 118 100 121 95" stroke="#B45309" stroke-width="4" stroke-linecap="round"/>
+  <rect x="58" y="123" width="104" height="36" rx="10" fill="#B45309"/>
+  <path d="M76 123H144V159H76V123Z" fill="#FFE3B1"/>
+  <path d="M110 123V159" stroke="#B45309" stroke-width="3"/>
+  <text x="110" y="182" text-anchor="middle" font-family="Aptos, Segoe UI, sans-serif" font-size="17" font-weight="700" fill="#6D4D22">The Archivist</text>
+</svg>

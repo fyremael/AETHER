@@ -1,0 +1,14 @@
+<svg width="220" height="200" viewBox="0 0 220 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="220" height="200" rx="26" fill="#F7FBFA"/>
+  <circle cx="110" cy="82" r="44" fill="#9FD9D4"/>
+  <path d="M82 78C82 62 95 49 111 49C127 49 140 62 140 78V114H82V78Z" fill="#FDF8EE"/>
+  <circle cx="100" cy="78" r="5" fill="#1C1915"/>
+  <circle cx="120" cy="78" r="5" fill="#1C1915"/>
+  <path d="M99 94C102 98 106 101 110 101C114 101 118 98 121 94" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+  <path d="M50 136L72 122L96 132L123 119L150 131L170 118V154L148 168L124 158L97 171L70 158L50 171V136Z" fill="#FDF8EE" stroke="#0F766E" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M72 122V158" stroke="#0F766E" stroke-width="3"/>
+  <path d="M96 132V171" stroke="#0F766E" stroke-width="3"/>
+  <path d="M123 119V158" stroke="#0F766E" stroke-width="3"/>
+  <path d="M150 131V168" stroke="#0F766E" stroke-width="3"/>
+  <text x="110" y="186" text-anchor="middle" font-family="Aptos, Segoe UI, sans-serif" font-size="17" font-weight="700" fill="#285F5A">The Cartographer</text>
+</svg>

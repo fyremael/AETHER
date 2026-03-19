@@ -12,25 +12,117 @@
   </head>
   <body>
     <div class="page-shell">
-      <header class="hero">
-        <p class="eyebrow">AETHER Documentation</p>
-        <h1>Semantic kernel docs with an actual center of gravity.</h1>
-        <p class="lede">
-          AETHER is building a replayable, recursive, explainable coordination
-          kernel. This site is the public documentation front door: architecture,
-          handbook, demos, and generated API reference in one place.
-        </p>
-        <div class="hero-actions">
-          <a class="button button-primary" href="./api/index.html">Open API Reference</a>
-          <a
-            class="button button-secondary"
-            href="https://github.com/fyremael/AETHER/blob/main/examples/demo-03-coordination-situation-room.md"
-            >Read Flagship Demo</a
-          >
+      <header class="hero hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">AETHER Documentation</p>
+          <h1>Semantic kernel docs with an actual center of gravity.</h1>
+          <p class="lede">
+            AETHER is building a replayable, recursive, explainable coordination
+            kernel. This site is the public documentation front door: architecture,
+            handbook, demos, and generated API reference in one place.
+          </p>
+          <div class="badge-row">
+            <span>Append-only journal</span>
+            <span>Current / AsOf replay</span>
+            <span>Semi-naive runtime</span>
+            <span>Proof traces</span>
+          </div>
+          <div class="hero-actions">
+            <a class="button button-primary" href="./api/index.html">Open API Reference</a>
+            <a
+              class="button button-secondary"
+              href="https://github.com/fyremael/AETHER/blob/main/examples/demo-03-coordination-situation-room.md"
+              >Read Flagship Demo</a
+            >
+          </div>
         </div>
+        <figure class="hero-visual">
+          <img
+            src="./assets/minderling-hero.svg"
+            alt="Four Aether minderlings orbiting a semantic core labeled archive, resolve, derive, and explain"
+          />
+          <figcaption>
+            Four Aether minderlings, one semantic core: archive, resolve,
+            derive, explain.
+          </figcaption>
+        </figure>
       </header>
 
       <main>
+        <section class="section teaching-band">
+          <div class="section-heading">
+            <p class="kicker">Pedagogy</p>
+            <h2>How AETHER teaches itself to the reader</h2>
+            <p>
+              The docs are meant to do more than index files. They teach the
+              system in the order the system itself thinks.
+            </p>
+          </div>
+          <div class="lesson-grid">
+            <article class="lesson-card">
+              <span class="lesson-step">1</span>
+              <h3>Archive</h3>
+              <p>The journal records immutable history before anything else is inferred from it.</p>
+            </article>
+            <article class="lesson-card">
+              <span class="lesson-step">2</span>
+              <h3>Resolve</h3>
+              <p>The resolver turns raw history into semantic state at `Current` or an exact `AsOf` cut.</p>
+            </article>
+            <article class="lesson-card">
+              <span class="lesson-step">3</span>
+              <h3>Derive</h3>
+              <p>The runtime composes recursive and stratified truths from the resolved state.</p>
+            </article>
+            <article class="lesson-card">
+              <span class="lesson-step">4</span>
+              <h3>Explain</h3>
+              <p>The explainer shows why the answer is true, not just that the system emitted it.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-heading">
+            <p class="kicker">Meet The Minderlings</p>
+            <h2>Mascots for the mental model</h2>
+            <p>
+              The Aether minderlings are not just decoration. They give readers
+              a memorable hook for the four jobs the kernel must perform cleanly.
+            </p>
+          </div>
+          <div class="minderling-grid">
+            <article class="minderling-card">
+              <img src="./assets/minderling-archivist.svg" alt="The Archivist minderling with an open ledger" />
+              <div>
+                <h3>The Archivist</h3>
+                <p>Guards append-only history and reminds the reader that the journal comes first.</p>
+              </div>
+            </article>
+            <article class="minderling-card">
+              <img src="./assets/minderling-cartographer.svg" alt="The Cartographer minderling holding a folded map" />
+              <div>
+                <h3>The Cartographer</h3>
+                <p>Represents `Current` and `AsOf` resolution across the shape of time.</p>
+              </div>
+            </article>
+            <article class="minderling-card">
+              <img src="./assets/minderling-weaver.svg" alt="The Weaver minderling pulling together strands of inference" />
+              <div>
+                <h3>The Weaver</h3>
+                <p>Embodies recursive closure, SCC iteration, and the runtime's job of composing new truths.</p>
+              </div>
+            </article>
+            <article class="minderling-card">
+              <img src="./assets/minderling-lantern.svg" alt="The Lantern minderling carrying a glowing light" />
+              <div>
+                <h3>The Lantern</h3>
+                <p>Signals proof traces, provenance, and the obligation to show why an answer should be trusted.</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
         <section class="section">
           <div class="section-heading">
             <p class="kicker">Start Here</p>
@@ -94,6 +186,49 @@
               </p>
               <a href="https://github.com/fyremael/AETHER/blob/main/docs/OPERATIONS.md">Open operator guide</a>
             </article>
+          </div>
+        </section>
+
+        <section class="section story-band">
+          <div class="section-heading">
+            <p class="kicker">Best Showcase</p>
+            <h2>The current strongest narrative run</h2>
+            <p>
+              If you need one demonstration that proves progress rather than
+              merely claiming it, start with Demo 03.
+            </p>
+          </div>
+          <div class="showcase-layout">
+            <div class="showcase-card">
+              <h3>What Demo 03 teaches</h3>
+              <ul class="showcase-list">
+                <li>recursive dependency closure before completion lands</li>
+                <li>claim windows opening at a precise semantic cut</li>
+                <li>lease handoff across epochs</li>
+                <li>stale attempt fencing</li>
+                <li>proof traces for the current authorized answer</li>
+              </ul>
+            </div>
+            <div class="showcase-card accent-card">
+              <p class="card-label">Operator Path</p>
+              <h3>Run the flagship showcase</h3>
+              <p>
+                Use the one-click Windows launcher or the direct Rust example,
+                then keep the generated report as a presentation artifact.
+              </p>
+              <div class="hero-actions stacked-actions">
+                <a
+                  class="button button-primary"
+                  href="https://github.com/fyremael/AETHER/blob/main/examples/demo-03-coordination-situation-room.md"
+                  >Read Demo 03</a
+                >
+                <a
+                  class="button button-secondary"
+                  href="https://github.com/fyremael/AETHER/blob/main/docs/OPERATIONS.md"
+                  >Open Operator Guide</a
+                >
+              </div>
+            </div>
           </div>
         </section>
 

@@ -1,0 +1,56 @@
+<svg width="720" height="520" viewBox="0 0 720 520" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="720" height="520" rx="36" fill="#FFF8EE"/>
+  <circle cx="360" cy="260" r="142" fill="#F6E5C9"/>
+  <circle cx="360" cy="260" r="118" fill="#FDF8EE" stroke="#EACB92" stroke-width="2"/>
+  <circle cx="360" cy="260" r="76" fill="#0F766E"/>
+  <circle cx="360" cy="260" r="52" fill="#15A39A"/>
+  <circle cx="360" cy="260" r="24" fill="#FDF8EE"/>
+  <circle cx="360" cy="260" r="6" fill="#B45309"/>
+  <path d="M135 177C184 127 252 97 334 94" stroke="#C28539" stroke-width="3" stroke-linecap="round" stroke-dasharray="9 10"/>
+  <path d="M385 95C477 101 552 142 602 214" stroke="#C28539" stroke-width="3" stroke-linecap="round" stroke-dasharray="9 10"/>
+  <path d="M585 316C545 384 474 430 391 438" stroke="#C28539" stroke-width="3" stroke-linecap="round" stroke-dasharray="9 10"/>
+  <path d="M322 438C241 432 173 395 129 336" stroke="#C28539" stroke-width="3" stroke-linecap="round" stroke-dasharray="9 10"/>
+
+  <g transform="translate(92 130)">
+    <circle cx="66" cy="62" r="50" fill="#F6C773"/>
+    <path d="M36 54C36 37 49 24 66 24C83 24 96 37 96 54V88H36V54Z" fill="#FCEED4"/>
+    <circle cx="56" cy="54" r="6" fill="#1C1915"/>
+    <circle cx="76" cy="54" r="6" fill="#1C1915"/>
+    <path d="M55 71C58 76 62 79 66 79C70 79 74 76 77 71" stroke="#B45309" stroke-width="4" stroke-linecap="round"/>
+    <rect x="22" y="96" width="88" height="18" rx="9" fill="#B45309"/>
+    <text x="66" y="144" text-anchor="middle" font-family="Aptos, Segoe UI, sans-serif" font-size="18" font-weight="700" fill="#6D4D22">Archive</text>
+  </g>
+
+  <g transform="translate(525 112)">
+    <circle cx="52" cy="52" r="44" fill="#9FD9D4"/>
+    <path d="M23 46L52 25L81 46V80C81 89 74 96 65 96H39C30 96 23 89 23 80V46Z" fill="#FDF8EE"/>
+    <circle cx="42" cy="55" r="5" fill="#1C1915"/>
+    <circle cx="62" cy="55" r="5" fill="#1C1915"/>
+    <path d="M41 71C44 75 48 77 52 77C56 77 60 75 63 71" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+    <path d="M16 16L88 88" stroke="#0F766E" stroke-width="4" stroke-linecap="round" opacity="0.35"/>
+    <path d="M88 16L16 88" stroke="#0F766E" stroke-width="4" stroke-linecap="round" opacity="0.35"/>
+    <text x="52" y="128" text-anchor="middle" font-family="Aptos, Segoe UI, sans-serif" font-size="18" font-weight="700" fill="#285F5A">Resolve</text>
+  </g>
+
+  <g transform="translate(502 322)">
+    <circle cx="62" cy="56" r="46" fill="#F6C773"/>
+    <path d="M33 48C33 33 45 21 60 21C75 21 87 33 87 48V82H33V48Z" fill="#FDF8EE"/>
+    <circle cx="50" cy="50" r="5" fill="#1C1915"/>
+    <circle cx="70" cy="50" r="5" fill="#1C1915"/>
+    <path d="M49 67C52 71 56 73 60 73C64 73 68 71 71 67" stroke="#B45309" stroke-width="4" stroke-linecap="round"/>
+    <path d="M21 92C40 74 53 65 60 65C67 65 80 74 99 92" stroke="#0F766E" stroke-width="5" stroke-linecap="round"/>
+    <path d="M27 100C46 82 56 76 60 76C64 76 74 82 93 100" stroke="#0F766E" stroke-width="3" stroke-linecap="round" opacity="0.65"/>
+    <text x="62" y="132" text-anchor="middle" font-family="Aptos, Segoe UI, sans-serif" font-size="18" font-weight="700" fill="#6D4D22">Derive</text>
+  </g>
+
+  <g transform="translate(116 334)">
+    <circle cx="54" cy="50" r="44" fill="#9FD9D4"/>
+    <path d="M26 44C26 29 38 17 53 17C68 17 80 29 80 44V78H26V44Z" fill="#FDF8EE"/>
+    <circle cx="44" cy="46" r="5" fill="#1C1915"/>
+    <circle cx="64" cy="46" r="5" fill="#1C1915"/>
+    <path d="M43 62C46 66 50 68 54 68C58 68 62 66 65 62" stroke="#0F766E" stroke-width="4" stroke-linecap="round"/>
+    <path d="M91 38H106V70H91L79 84V24L91 38Z" fill="#FFE19E" stroke="#B45309" stroke-width="3" stroke-linejoin="round"/>
+    <circle cx="98" cy="54" r="7" fill="#B45309"/>
+    <text x="54" y="122" text-anchor="middle" font-family="Aptos, Segoe UI, sans-serif" font-size="18" font-weight="700" fill="#285F5A">Explain</text>
+  </g>
+</svg>
