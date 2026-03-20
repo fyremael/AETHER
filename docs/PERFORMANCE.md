@@ -110,6 +110,22 @@ By default, the drift comparison applies these budgets:
 
 The example exits with code `2` when any workload crosses a fail-level threshold. That behavior is intentional so the same tool can become a future CI gate.
 
+### Pilot launch validation
+
+Windows operator path:
+
+```text
+double-click scripts/run-pilot-launch-validation.cmd
+```
+
+Technical path:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1
+```
+
+That validation pack runs the pilot report, performance report, drift comparison, release-mode `aether_api` tests, the ignored pilot soak suite, and the ignored performance stress suite, then writes a transcript to `artifacts/pilot/launch/`.
+
 ### Criterion benchmarks
 
 ```bash

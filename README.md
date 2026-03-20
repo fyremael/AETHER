@@ -104,6 +104,7 @@ Implemented today:
 - a release-mode performance report, Criterion benchmark suite, and ignored stress workloads for early regression tracking
 - a live console performance dashboard for real-time and collected instrument views
 - machine-readable performance baseline capture and point-in-time drift reporting for the pilot path
+- a one-command pilot launch validation pack with soak, stress, and artifact capture
 
 Deliberately still narrow:
 
@@ -274,6 +275,7 @@ In practical terms, the most immediate work now is:
 - widening explainability from tuple traces to richer operator-facing proof and incident surfaces
 - hardening the API boundary from the current authenticated, audited, and reportable pilot service to richer operator-facing and production-credible integrations
 - introducing more boundary-level examples and operator-facing demonstrations
+- post-launch service and operational hardening beyond the current single-node pilot boundary
 
 ## Why The README Is Long
 
@@ -296,6 +298,7 @@ That clarity is part of the implementation.
 - `docs/DEVELOPER_WORKFLOW.md` explains the engineering loop and definition of done.
 - `docs/OPERATIONS.md` explains the operator path, demo catalog, and report workflow.
 - `docs/PERFORMANCE.md` explains the benchmark harness, stress tests, and performance-report path.
+- `docs/PILOT_LAUNCH.md` defines the current launch-readiness contract and validation pack for the design-partner pilot.
 - `docs/GLOSSARY.md` defines canonical project vocabulary.
 - `docs/DOCUMENTATION_STANDARD.md` defines the documentation quality bar and update rules.
 - `SPEC.md` defines the system objective, architecture, data model, temporal model, and milestones.

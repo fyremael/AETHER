@@ -40,6 +40,12 @@ If you need to check whether the latest build regressed against the current acce
 double-click scripts/run-performance-drift.cmd
 ```
 
+If you need the full launch candidate validation pack for the current design-partner pilot, run:
+
+```text
+double-click scripts/run-pilot-launch-validation.cmd
+```
+
 If you need the current durable pilot service rather than a demo, run:
 
 ```bash
@@ -167,6 +173,15 @@ Each run produces:
 - `latest.md`
 - `latest.json`
 
+Pilot launch-validation transcripts are written to:
+
+- `artifacts/pilot/launch/`
+
+Each run produces:
+
+- a timestamped text transcript
+- `latest.txt`
+
 For the full engineering-facing performance suite, also run:
 
 ```bash
@@ -177,6 +192,7 @@ cargo test -p aether_api --test performance_stress --release -- --ignored --noca
 Use the dashboard when people want to watch the measurements arrive in real time. Use the markdown report when you need to hand someone a saved artifact afterward.
 
 Use the pilot report when someone asks, “Why is this worker authorized or fenced right now?” Use the drift report when someone asks, “Did this change materially slow the pilot path down?”
+Use the launch validation pack when someone asks, “Is this exact pilot candidate ready to go?”
 
 ## How To Present The Output
 
@@ -212,5 +228,6 @@ Run Demo 03 and keep the report from that run. It is the best current summary of
 
 - `examples/README.md` for the example catalog
 - `scripts/README.md` for launcher details
+- `docs/PILOT_LAUNCH.md` for the launch-readiness contract and full validation pack
 - `docs/PERFORMANCE.md` for the benchmark harness and interpretation guidance
 - `examples/demo-03-coordination-situation-room.md` for the flagship narrative

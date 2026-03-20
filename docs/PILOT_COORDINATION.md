@@ -49,6 +49,8 @@ Implemented:
 - performance baseline capture for the pilot path
 - performance drift comparison with warning and fail thresholds
 - repeated authenticated restart-cycle drills that preserve both semantic answers and persisted audit context
+- ignored release-mode soak and misuse drills for the authenticated pilot HTTP path
+- a one-command launch validation pack that produces the current pilot report, performance report, drift check, soak output, and stress output
 
 Those tests intentionally freeze the current answers for:
 
@@ -122,16 +124,18 @@ The pilot is only ready for external design-partner use when all of these are tr
 
 The current implementation closes those original gates for the present single-node pilot.
 
+The current launch validation path is documented in `docs/PILOT_LAUNCH.md`.
+
 ## Next Required Work
 
-The next pilot-critical steps are:
+The next pilot-critical steps after launch are:
 
-- optional CI adoption of the drift report once the local baseline discipline settles
-- longer-run soak drills beyond the current restart-cycle coverage
+- optional CI or scheduled automation adoption of the launch validation pack
+- longer-duration soak drills beyond the current launch window
 - richer operator-intent and semantic-diff context on top of the current audit fields
 - service-hardening work beyond the current bearer-token and single-node posture
 
-Those are the next things to do. They are not optional polish. They are what turns a credible pilot slice into a pilot operators can trust under repetition.
+Those are the next things to do. They are the post-launch hardening road for the pilot, not blockers for the current single-node design-partner launch.
 
 ## Non-Goals
 

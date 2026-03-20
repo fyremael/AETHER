@@ -30,6 +30,8 @@ Completed:
 - live console dashboard added for real-time and collected instrument views over the performance suite
 - machine-readable performance baseline capture and point-in-time drift reporting implemented for the pilot path
 - authenticated HTTP restart-cycle drills added to preserve semantic answers and persisted audit context across repeated service restarts
+- ignored release-mode soak and misuse drills added for the authenticated pilot HTTP path
+- a one-command pilot launch validation pack added to produce the current report, drift, soak, and stress evidence set
 - documentation portal, architecture guide, developer workflow guide, operator guide, glossary, and documentation standards now exist
 - GitHub Pages publishing pipeline added for the documentation portal and generated Rust API reference
 - unit tests added across the Rust core crates
@@ -48,9 +50,10 @@ Not yet completed:
 
 ## Immediate focus
 
-The most immediate work now sits across the active coordination pilot slice and late `M4`:
+The most immediate work now sits just beyond the launch-ready pilot slice and late `M4`:
 
-- add longer-run restart, soak, and misuse drills beyond the current restart-cycle coverage
+- extend launch validation from local/manual execution into CI or scheduled automation when the team is ready
+- add longer-duration soak coverage beyond the current launch validation window
 - decide how far to widen audit context from the current semantic cut/query/tuple fields into fuller operator intent and semantic diffs
 - decide when the current drift comparison should graduate into CI enforcement
 - extend the DSL from the current focused authoring surface to the full canonical language

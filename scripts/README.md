@@ -14,6 +14,7 @@ For non-technical operators on Windows:
 - double-click `run-demo-02.cmd` to run the multi-worker lease handoff demonstration
 - double-click `run-demo-03.cmd` to run the flagship coordination situation-room showcase
 - double-click `run-pilot-report.cmd` to generate the current coordination pilot report artifacts
+- double-click `run-pilot-launch-validation.cmd` to run the full launch-candidate validation pack
 - double-click `run-performance-dashboard.cmd` to watch the live console performance dashboard
 - double-click `run-performance-report.cmd` to generate the current release-mode performance report
 - double-click `run-performance-baseline.cmd` to capture the current accepted performance baseline
@@ -25,6 +26,7 @@ For technical users or automation:
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-demo.ps1 -Demo 02`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-demo.ps1 -Demo 03`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-report.ps1`
+- run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-dashboard.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-report.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-baseline.ps1`
@@ -39,5 +41,7 @@ For technical users or automation:
 Demo reports are written to `artifacts/demos/`.
 
 Pilot reports are written to `artifacts/pilot/reports/`.
+
+Pilot launch-validation transcripts are written to `artifacts/pilot/launch/`.
 
 Performance reports, baselines, and drift captures are written to `artifacts/performance/`.
