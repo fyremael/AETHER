@@ -101,6 +101,8 @@ cargo run -p aether_api --example performance_drift_report --release -- artifact
 
 The PowerShell runner writes a timestamped markdown capture plus `latest-drift.md` to `artifacts/performance/`.
 
+For reproducible review on a fresh machine, the repository also carries a tracked accepted baseline at `fixtures/performance/accepted-baseline.windows-x86_64.json`.
+
 By default, the drift comparison applies these budgets:
 
 - throughput regression warning at `15%`
@@ -125,6 +127,8 @@ powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1
 ```
 
 That validation pack runs the pilot report, performance report, drift comparison, release-mode `aether_api` tests, the ignored pilot soak suite, and the ignored performance stress suite, then writes a transcript to `artifacts/pilot/launch/`.
+
+By default it prefers `artifacts/performance/baseline.json` when present and otherwise falls back to `fixtures/performance/accepted-baseline.windows-x86_64.json`. Pass `-BaselinePath <path>` when you need to pin the comparison to a different accepted reference.
 
 ### Criterion benchmarks
 

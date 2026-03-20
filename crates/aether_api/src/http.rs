@@ -774,7 +774,10 @@ fn summarize_document_dsl(dsl: &str) -> DocumentAuditSummary {
         }
 
         if summary.query_goal.is_none() {
-            if let Some(goal) = trimmed.strip_prefix("goal ") {
+            if let Some(goal) = trimmed
+                .strip_prefix("goal ")
+                .or_else(|| trimmed.strip_prefix("find "))
+            {
                 summary.query_goal = Some(goal.trim().to_string());
             }
         }

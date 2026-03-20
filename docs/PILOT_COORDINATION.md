@@ -112,6 +112,8 @@ Compare the current build against that baseline:
 cargo run -p aether_api --example performance_drift_report --release -- artifacts/performance/baseline.json
 ```
 
+For reproducible QA and launch validation on a fresh machine, the repo also carries `fixtures/performance/accepted-baseline.windows-x86_64.json` as a tracked accepted reference.
+
 ## Exit Gates
 
 The pilot is only ready for external design-partner use when all of these are true:

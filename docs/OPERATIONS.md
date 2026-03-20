@@ -40,6 +40,8 @@ If you need to check whether the latest build regressed against the current acce
 double-click scripts/run-performance-drift.cmd
 ```
 
+That comparison usually uses the current local baseline in `artifacts/performance/baseline.json`. For reproducible review on a fresh machine, the repo also includes `fixtures/performance/accepted-baseline.windows-x86_64.json`.
+
 If you need the full launch candidate validation pack for the current design-partner pilot, run:
 
 ```text
@@ -181,6 +183,8 @@ Each run produces:
 
 - a timestamped text transcript
 - `latest.txt`
+
+The launch transcript also records which accepted baseline was used: explicit override, local artifact, or tracked fixture.
 
 For the full engineering-facing performance suite, also run:
 

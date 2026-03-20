@@ -427,6 +427,51 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
 }
 
 #[tokio::test]
+async fn authenticated_http_service_audits_query_goal_for_find_alias() {
+    let audit = TestAuditPath::new("find-audit");
+    let options = HttpKernelOptions::new()
+        .with_auth(pilot_auth())
+        .with_audit_log_path(audit.path().to_path_buf());
+    let (base_url, server) = spawn_server_with_options(InMemoryKernelService::new(), options).await;
+    let client = Client::new();
+
+    let append = client
+        .post(format!("{base_url}/v1/append"))
+        .bearer_auth("pilot-operator-token")
+        .json(&AppendRequest {
+            datoms: coordination_history(),
+        })
+        .send()
+        .await
+        .expect("authorized append request");
+    assert!(append.status().is_success());
+
+    let run = client
+        .post(format!("{base_url}/v1/documents/run"))
+        .bearer_auth("pilot-operator-token")
+        .json(&RunDocumentRequest {
+            dsl: coordination_dsl(
+                "current",
+                "find execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
+            ),
+        })
+        .send()
+        .await
+        .expect("authorized run request");
+    assert!(run.status().is_success());
+
+    let persisted = read_audit_entries(audit.path());
+    assert!(persisted.iter().any(|entry| {
+        entry.path == "/v1/documents/run"
+            && entry.context.temporal_view.as_deref() == Some("current")
+            && entry.context.query_goal.as_deref() == Some("execution_authorized(t, worker, epoch)")
+            && entry.context.row_count == Some(1)
+    }));
+
+    stop_server(server).await;
+}
+
+#[tokio::test]
 async fn authenticated_http_service_persists_semantic_audit_context_across_restarts() {
     let temp = TestDbPath::new("http-audit-restart");
     let audit = TestAuditPath::new("audit-restart");

@@ -27,6 +27,7 @@ For technical users or automation:
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-demo.ps1 -Demo 03`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-report.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1`
+- run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1 -BaselinePath <accepted-baseline-path>`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-dashboard.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-report.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-baseline.ps1`
@@ -45,3 +46,5 @@ Pilot reports are written to `artifacts/pilot/reports/`.
 Pilot launch-validation transcripts are written to `artifacts/pilot/launch/`.
 
 Performance reports, baselines, and drift captures are written to `artifacts/performance/`.
+
+The launch-validation runner prefers `artifacts/performance/baseline.json`, falls back to `fixtures/performance/accepted-baseline.windows-x86_64.json`, and records the chosen source in the transcript.

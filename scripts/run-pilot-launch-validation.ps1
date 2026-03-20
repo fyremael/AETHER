@@ -1,5 +1,6 @@
 param(
-    [switch]$PauseOnExit
+    [switch]$PauseOnExit,
+    [string]$BaselinePath
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,7 +11,8 @@ $outputTimestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $reportDir = Join-Path $repoRoot "artifacts\pilot\launch"
 $reportPath = Join-Path $reportDir "pilot-launch-validation-$outputTimestamp.txt"
 $latestPath = Join-Path $reportDir "latest.txt"
-$baselinePath = Join-Path $repoRoot "artifacts\performance\baseline.json"
+$localBaselinePath = Join-Path $repoRoot "artifacts\performance\baseline.json"
+$fixtureBaselinePath = Join-Path $repoRoot "fixtures\performance\accepted-baseline.windows-x86_64.json"
 $transcript = [System.Collections.Generic.List[string]]::new()
 
 function Close-Runner([int]$ExitCode) {
@@ -25,19 +27,69 @@ function Add-TranscriptLine([string]$Line) {
     $script:transcript.Add($Line)
 }
 
-function Invoke-Step([string]$Label, [string]$CommandText) {
+function Format-CommandText([string]$Command, [string[]]$Arguments) {
+    $parts = [System.Collections.Generic.List[string]]::new()
+    $parts.Add($Command)
+    foreach ($argument in $Arguments) {
+        if ($argument -match '[\s"]') {
+            $escaped = $argument.Replace('"', '\"')
+            $parts.Add("`"$escaped`"")
+        } else {
+            $parts.Add($argument)
+        }
+    }
+    $parts -join " "
+}
+
+function Resolve-BaselineReference {
+    param(
+        [string]$ExplicitPath,
+        [string]$LocalPath,
+        [string]$FixturePath
+    )
+
+    if ($ExplicitPath) {
+        if (-not (Test-Path $ExplicitPath)) {
+            throw "Explicit baseline path not found: $ExplicitPath"
+        }
+        return [pscustomobject]@{
+            Path = (Resolve-Path $ExplicitPath).Path
+            Source = "explicit override"
+        }
+    }
+
+    if (Test-Path $LocalPath) {
+        return [pscustomobject]@{
+            Path = (Resolve-Path $LocalPath).Path
+            Source = "local artifact"
+        }
+    }
+
+    if (Test-Path $FixturePath) {
+        return [pscustomobject]@{
+            Path = (Resolve-Path $FixturePath).Path
+            Source = "tracked fixture"
+        }
+    }
+
+    throw "No performance baseline was found. Provide -BaselinePath, capture a local baseline in artifacts/performance/baseline.json, or restore fixtures/performance/accepted-baseline.windows-x86_64.json."
+}
+
+function Invoke-Step([string]$Label, [string]$Command, [string[]]$Arguments) {
+    $commandText = Format-CommandText $Command $Arguments
+
     Write-Host ""
     Write-Host "[$Label]" -ForegroundColor Cyan
-    Write-Host "Running: $CommandText"
+    Write-Host "Running: $commandText"
 
     Add-TranscriptLine("## $Label")
     Add-TranscriptLine("")
-    Add-TranscriptLine("Command: $CommandText")
+    Add-TranscriptLine("Command: $commandText")
     Add-TranscriptLine("")
     Add-TranscriptLine('```text')
 
-    $outputLines = & cmd.exe /d /c "$CommandText 2>&1"
-    $exitCode = $LASTEXITCODE
+    $outputLines = & $Command @Arguments 2>&1
+    $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
 
     foreach ($line in $outputLines) {
         $text = $line.ToString()
@@ -66,9 +118,13 @@ if (-not $cargo) {
     Close-Runner 1
 }
 
-if (-not (Test-Path $baselinePath)) {
-    Write-Host "No performance baseline exists yet." -ForegroundColor Red
-    Write-Host "Run scripts/run-performance-baseline.cmd before launch validation."
+$cargoPath = $cargo.Source
+
+try {
+    $baseline = Resolve-BaselineReference -ExplicitPath $BaselinePath -LocalPath $localBaselinePath -FixturePath $fixtureBaselinePath
+} catch {
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host "Capture a local baseline with scripts/run-performance-baseline.cmd or pass -BaselinePath explicitly."
     Close-Runner 1
 }
 
@@ -78,19 +134,23 @@ Add-TranscriptLine("AETHER Pilot Launch Validation")
 Add-TranscriptLine("==============================")
 Add-TranscriptLine("Generated: $timestamp")
 Add-TranscriptLine("Repository: $repoRoot")
-Add-TranscriptLine("Baseline: $baselinePath")
+Add-TranscriptLine("Baseline: $($baseline.Path)")
+Add-TranscriptLine("Baseline source: $($baseline.Source)")
 Add-TranscriptLine("")
+
+Write-Host "Baseline: $($baseline.Path) [$($baseline.Source)]"
+Write-Host ""
 
 $failed = $false
 $failureMessage = $null
 
 try {
-    Invoke-Step "Pilot report" "cargo run -p aether_api --example pilot_coordination_report --release"
-    Invoke-Step "Performance report" "cargo run -p aether_api --example performance_report --release"
-    Invoke-Step "Performance drift" "cargo run -p aether_api --example performance_drift_report --release -- $baselinePath"
-    Invoke-Step "Release API tests" "cargo test -p aether_api --release"
-    Invoke-Step "Pilot soak suite" "cargo test -p aether_api --test pilot_soak --release -- --ignored --nocapture"
-    Invoke-Step "Performance stress suite" "cargo test -p aether_api --test performance_stress --release -- --ignored --nocapture"
+    Invoke-Step "Pilot report" $cargoPath @("run", "-p", "aether_api", "--example", "pilot_coordination_report", "--release")
+    Invoke-Step "Performance report" $cargoPath @("run", "-p", "aether_api", "--example", "performance_report", "--release")
+    Invoke-Step "Performance drift" $cargoPath @("run", "-p", "aether_api", "--example", "performance_drift_report", "--release", "--", $baseline.Path)
+    Invoke-Step "Release API tests" $cargoPath @("test", "-p", "aether_api", "--release")
+    Invoke-Step "Pilot soak suite" $cargoPath @("test", "-p", "aether_api", "--test", "pilot_soak", "--release", "--", "--ignored", "--nocapture")
+    Invoke-Step "Performance stress suite" $cargoPath @("test", "-p", "aether_api", "--test", "performance_stress", "--release", "--", "--ignored", "--nocapture")
 } catch {
     $failed = $true
     $failureMessage = $_.Exception.Message

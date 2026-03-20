@@ -212,6 +212,8 @@ cargo bench -p aether_api
 cargo test -p aether_api --test performance_stress --release -- --ignored --nocapture
 ```
 
+For reproducible launch review on a fresh machine, the repo also carries a tracked accepted baseline at `fixtures/performance/accepted-baseline.windows-x86_64.json`.
+
 The workspace is currently verified under:
 
 - Windows stable MSVC toolchain

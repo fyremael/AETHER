@@ -50,7 +50,7 @@ That validation pack performs these steps in order:
 
 1. generate the current coordination pilot report
 2. generate the current release-mode performance report
-3. compare the current build to `artifacts/performance/baseline.json`
+3. compare the current build to the selected accepted baseline
 4. run release-mode `aether_api` tests
 5. run the ignored pilot soak suite
 6. run the ignored performance stress suite
@@ -62,19 +62,19 @@ The validation transcript is written to:
 
 ## Required Inputs
 
-The launch validation expects an existing performance baseline:
+The launch validation resolves its baseline in this order:
 
-```text
-artifacts/performance/baseline.json
-```
+1. an explicit `-BaselinePath`
+2. `artifacts/performance/baseline.json`
+3. `fixtures/performance/accepted-baseline.windows-x86_64.json`
 
-If it does not exist yet, capture it first:
+If you want the current local checkpoint to be the reference point, capture it first:
 
 ```bash
 cargo run -p aether_api --example capture_performance_baseline --release
 ```
 
-That requirement is intentional. A launch candidate without a reference baseline is not ready for a drift check.
+The tracked fixture baseline makes the launch path reproducible on a fresh QA machine or CI worker. The transcript records both the resolved baseline path and whether it came from an explicit override, a local artifact, or the tracked fixture.
 
 ## Expected Output Pack
 
