@@ -16,10 +16,16 @@ use thiserror::Error;
 pub mod http;
 #[doc(hidden)]
 pub mod perf;
+pub mod report;
 
 pub use http::{
     http_router, http_router_with_options, AuditEntry, AuditLogResponse, AuthScope, HealthResponse,
     HttpAccessToken, HttpAuthConfig, HttpKernelOptions, HttpKernelState,
+};
+pub use report::{
+    build_coordination_pilot_report, coordination_pilot_seed_history,
+    render_coordination_pilot_report_markdown, CoordinationPilotReport, ReportRow, TraceSummary,
+    TraceTupleSummary,
 };
 
 pub trait KernelService {

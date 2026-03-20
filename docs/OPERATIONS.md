@@ -28,6 +28,18 @@ If you need a live visual readout while the suite is running, launch the dashboa
 double-click scripts/run-performance-dashboard.cmd
 ```
 
+If you need a saved coordination incident/explain artifact for the pilot workload, run:
+
+```text
+double-click scripts/run-pilot-report.cmd
+```
+
+If you need to check whether the latest build regressed against the current accepted baseline, run:
+
+```text
+double-click scripts/run-performance-drift.cmd
+```
+
 If you need the current durable pilot service rather than a demo, run:
 
 ```bash
@@ -127,10 +139,30 @@ Performance reports are written to:
 
 - `artifacts/performance/`
 
-Each run produces:
+The release-mode report produces:
 
 - a timestamped markdown report
 - `latest.md`, which points to the most recent performance output
+
+The baseline capture produces:
+
+- `baseline.json`, which becomes the current local drift reference
+
+The drift runner produces:
+
+- a timestamped markdown drift report
+- `latest-drift.md`, which points to the most recent drift capture
+
+Pilot coordination reports are written to:
+
+- `artifacts/pilot/reports/`
+
+Each run produces:
+
+- a timestamped markdown report
+- a timestamped JSON report
+- `latest.md`
+- `latest.json`
 
 For the full engineering-facing performance suite, also run:
 
@@ -140,6 +172,8 @@ cargo test -p aether_api --test performance_stress --release -- --ignored --noca
 ```
 
 Use the dashboard when people want to watch the measurements arrive in real time. Use the markdown report when you need to hand someone a saved artifact afterward.
+
+Use the pilot report when someone asks, “Why is this worker authorized or fenced right now?” Use the drift report when someone asks, “Did this change materially slow the pilot path down?”
 
 ## How To Present The Output
 

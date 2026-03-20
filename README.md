@@ -100,8 +100,10 @@ Implemented today:
 - a durable coordination-pilot HTTP service example over a SQLite journal
 - bearer-token authentication and endpoint-scope enforcement on the pilot HTTP path
 - auditable pilot request logging with persisted JSONL output
+- operator-grade coordination pilot report generation in markdown and JSON
 - a release-mode performance report, Criterion benchmark suite, and ignored stress workloads for early regression tracking
 - a live console performance dashboard for real-time and collected instrument views
+- machine-readable performance baseline capture and point-in-time drift reporting for the pilot path
 
 Deliberately still narrow:
 
@@ -203,6 +205,8 @@ For performance tracking:
 ```bash
 cargo run -p aether_api --example performance_dashboard --release
 cargo run -p aether_api --example performance_report --release
+cargo run -p aether_api --example capture_performance_baseline --release
+cargo run -p aether_api --example performance_drift_report --release -- artifacts/performance/baseline.json
 cargo bench -p aether_api
 cargo test -p aether_api --test performance_stress --release -- --ignored --nocapture
 ```
@@ -268,7 +272,7 @@ In practical terms, the most immediate work now is:
 - widening the DSL from the current focused slice to the full canonical language
 - adding bounded aggregation and deeper runtime optimization
 - widening explainability from tuple traces to richer operator-facing proof and incident surfaces
-- hardening the API boundary from the current authenticated-and-audited pilot service to richer operator-facing and production-credible integrations
+- hardening the API boundary from the current authenticated, audited, and reportable pilot service to richer operator-facing and production-credible integrations
 - introducing more boundary-level examples and operator-facing demonstrations
 
 ## Why The README Is Long

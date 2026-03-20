@@ -44,6 +44,10 @@ Implemented:
 - bearer-token authentication with endpoint scope enforcement on the pilot HTTP path
 - auditable request logging with in-memory inspection and JSONL persistence on the pilot HTTP path
 - a dedicated durable HTTP service example at `crates/aether_api/examples/pilot_http_kernel_service.rs`
+- operator-grade coordination report generation in markdown and JSON
+- durable pilot seed fixtures shared between service tests and report generation
+- performance baseline capture for the pilot path
+- performance drift comparison with warning and fail thresholds
 
 Those tests intentionally freeze the current answers for:
 
@@ -81,6 +85,30 @@ pilot-operator-token
 
 Override it with the `AETHER_PILOT_TOKEN` environment variable before starting the service.
 
+Generate an operator-facing pilot report:
+
+```bash
+cargo run -p aether_api --example pilot_coordination_report --release
+```
+
+Windows operators can double-click:
+
+```text
+scripts/run-pilot-report.cmd
+```
+
+Capture the current local performance baseline:
+
+```bash
+cargo run -p aether_api --example capture_performance_baseline --release
+```
+
+Compare the current build against that baseline:
+
+```bash
+cargo run -p aether_api --example performance_drift_report --release -- artifacts/performance/baseline.json
+```
+
 ## Exit Gates
 
 The pilot is only ready for external design-partner use when all of these are true:
@@ -91,17 +119,18 @@ The pilot is only ready for external design-partner use when all of these are tr
 4. benchmark baselines exist for the durable pilot paths and drift is tracked over time
 5. operator-grade explain and incident-report artifacts exist for the pilot workloads
 
-This slice closes the first three gates. The remaining gates stay open.
+The current implementation closes those original gates for the present single-node pilot.
 
 ## Next Required Work
 
 The next pilot-critical steps are:
 
-- operator-grade explain and incident-report artifacts
-- baseline capture plus benchmark drift budgets for the durable service path
 - richer audit context for semantic cuts and operator actions
+- restart and soak drills over longer pilot runs
+- optional CI adoption of the drift report once the local baseline discipline settles
+- service-hardening work beyond the current bearer-token and single-node posture
 
-Those are the next things to do. They are not optional polish.
+Those are the next things to do. They are not optional polish. They are what turns a credible pilot slice into a pilot operators can trust under repetition.
 
 ## Non-Goals
 

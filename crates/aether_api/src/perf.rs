@@ -11,6 +11,7 @@ use aether_rules::{DefaultRuleCompiler, RuleCompiler};
 use aether_runtime::{DerivedSet, RuleRuntime, RuntimeIteration, SemiNaiveRuntime};
 use aether_schema::{AttributeClass, AttributeSchema, PredicateSignature, Schema, ValueType};
 use aether_storage::{InMemoryJournal, Journal};
+use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
 use std::hint::black_box;
 use std::mem::size_of;
@@ -18,7 +19,7 @@ use std::time::{Duration, Instant};
 
 pub const DEFAULT_REPORT_SAMPLES: usize = 5;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LatencyStats {
     pub samples: usize,
     pub mean: Duration,
@@ -26,30 +27,111 @@ pub struct LatencyStats {
     pub max: Duration,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PerfMeasurement {
-    pub workload: &'static str,
+    pub workload: String,
     pub scale: String,
     pub units: usize,
-    pub unit_label: &'static str,
+    pub unit_label: String,
     pub latency: LatencyStats,
     pub throughput_per_second: f64,
     pub notes: Vec<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FootprintEstimate {
-    pub workload: &'static str,
+    pub workload: String,
     pub scale: String,
     pub estimated_bytes: usize,
     pub notes: Vec<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PerfReport {
     pub samples_per_workload: usize,
     pub measurements: Vec<PerfMeasurement>,
     pub footprints: Vec<FootprintEstimate>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PerfBaseline {
+    pub label: String,
+    pub generated_at: String,
+    pub report: PerfReport,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PerfDriftBudget {
+    pub warn_throughput_regression_pct: f64,
+    pub fail_throughput_regression_pct: f64,
+    pub warn_footprint_growth_pct: f64,
+    pub fail_footprint_growth_pct: f64,
+}
+
+impl Default for PerfDriftBudget {
+    fn default() -> Self {
+        Self {
+            // Local throughput is materially noisier than structural footprint,
+            // so the pilot defaults keep warnings sensitive while reserving fail
+            // for larger regressions that are more likely to be meaningful.
+            warn_throughput_regression_pct: 15.0,
+            fail_throughput_regression_pct: 30.0,
+            warn_footprint_growth_pct: 10.0,
+            fail_footprint_growth_pct: 20.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DriftSeverity {
+    Ok,
+    Warn,
+    Fail,
+    MissingBaseline,
+}
+
+impl DriftSeverity {
+    fn merge(self, other: Self) -> Self {
+        use DriftSeverity::{Fail, MissingBaseline, Ok, Warn};
+        match (self, other) {
+            (Fail, _) | (_, Fail) => Fail,
+            (Warn, _) | (_, Warn) => Warn,
+            (MissingBaseline, _) | (_, MissingBaseline) => MissingBaseline,
+            (Ok, Ok) => Ok,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PerfMeasurementDrift {
+    pub workload: String,
+    pub scale: String,
+    pub unit_label: String,
+    pub baseline_throughput_per_second: Option<f64>,
+    pub current_throughput_per_second: f64,
+    pub throughput_delta_pct: Option<f64>,
+    pub severity: DriftSeverity,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PerfFootprintDrift {
+    pub workload: String,
+    pub scale: String,
+    pub baseline_estimated_bytes: Option<usize>,
+    pub current_estimated_bytes: usize,
+    pub estimated_bytes_delta_pct: Option<f64>,
+    pub severity: DriftSeverity,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PerfDriftReport {
+    pub baseline_label: String,
+    pub generated_at: String,
+    pub budgets: PerfDriftBudget,
+    pub measurements: Vec<PerfMeasurementDrift>,
+    pub footprints: Vec<PerfFootprintDrift>,
+    pub overall: DriftSeverity,
 }
 
 #[derive(Clone, Debug)]
@@ -659,7 +741,7 @@ pub fn estimate_runtime_footprint(chain_len: usize) -> Result<FootprintEstimate,
     let derived = SemiNaiveRuntime.evaluate(&fixture.state, &fixture.program)?;
 
     Ok(FootprintEstimate {
-        workload: "Derived-set footprint estimate",
+        workload: "Derived-set footprint estimate".into(),
         scale: format!("chain {}", format_count(chain_len)),
         estimated_bytes: estimate_derived_set_bytes(&derived),
         notes: vec![
@@ -679,7 +761,7 @@ pub fn estimate_trace_footprint(chain_len: usize) -> Result<FootprintEstimate, A
         InMemoryExplainer::from_derived_set(&fixture.derived).explain_tuple(&fixture.tuple_id)?;
 
     Ok(FootprintEstimate {
-        workload: "Derivation-trace footprint estimate",
+        workload: "Derivation-trace footprint estimate".into(),
         scale: format!("chain {}", format_count(chain_len)),
         estimated_bytes: estimate_derivation_trace_bytes(&trace),
         notes: vec![
@@ -814,6 +896,172 @@ pub fn render_markdown_report(report: &PerfReport) -> String {
     output
 }
 
+pub fn compare_perf_reports(
+    current: &PerfReport,
+    baseline: &PerfBaseline,
+    budgets: &PerfDriftBudget,
+    generated_at: impl Into<String>,
+) -> PerfDriftReport {
+    let baseline_measurements = baseline
+        .report
+        .measurements
+        .iter()
+        .map(|measurement| {
+            (
+                perf_key(&measurement.workload, &measurement.scale),
+                measurement.throughput_per_second,
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let baseline_footprints = baseline
+        .report
+        .footprints
+        .iter()
+        .map(|footprint| {
+            (
+                perf_key(&footprint.workload, &footprint.scale),
+                footprint.estimated_bytes,
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+
+    let mut overall = DriftSeverity::Ok;
+    let measurements = current
+        .measurements
+        .iter()
+        .map(|measurement| {
+            let baseline_value = baseline_measurements
+                .get(&perf_key(&measurement.workload, &measurement.scale))
+                .copied();
+            let throughput_delta_pct = baseline_value
+                .map(|baseline| percent_delta(baseline, measurement.throughput_per_second));
+            let severity = match throughput_delta_pct {
+                Some(delta) if delta <= -budgets.fail_throughput_regression_pct => {
+                    DriftSeverity::Fail
+                }
+                Some(delta) if delta <= -budgets.warn_throughput_regression_pct => {
+                    DriftSeverity::Warn
+                }
+                Some(_) => DriftSeverity::Ok,
+                None => DriftSeverity::MissingBaseline,
+            };
+            overall = overall.merge(severity);
+
+            PerfMeasurementDrift {
+                workload: measurement.workload.clone(),
+                scale: measurement.scale.clone(),
+                unit_label: measurement.unit_label.clone(),
+                baseline_throughput_per_second: baseline_value,
+                current_throughput_per_second: measurement.throughput_per_second,
+                throughput_delta_pct,
+                severity,
+            }
+        })
+        .collect();
+
+    let footprints = current
+        .footprints
+        .iter()
+        .map(|footprint| {
+            let baseline_value = baseline_footprints
+                .get(&perf_key(&footprint.workload, &footprint.scale))
+                .copied();
+            let estimated_bytes_delta_pct = baseline_value
+                .map(|baseline| percent_delta(baseline as f64, footprint.estimated_bytes as f64));
+            let severity = match estimated_bytes_delta_pct {
+                Some(delta) if delta >= budgets.fail_footprint_growth_pct => DriftSeverity::Fail,
+                Some(delta) if delta >= budgets.warn_footprint_growth_pct => DriftSeverity::Warn,
+                Some(_) => DriftSeverity::Ok,
+                None => DriftSeverity::MissingBaseline,
+            };
+            overall = overall.merge(severity);
+
+            PerfFootprintDrift {
+                workload: footprint.workload.clone(),
+                scale: footprint.scale.clone(),
+                baseline_estimated_bytes: baseline_value,
+                current_estimated_bytes: footprint.estimated_bytes,
+                estimated_bytes_delta_pct,
+                severity,
+            }
+        })
+        .collect();
+
+    PerfDriftReport {
+        baseline_label: baseline.label.clone(),
+        generated_at: generated_at.into(),
+        budgets: budgets.clone(),
+        measurements,
+        footprints,
+        overall,
+    }
+}
+
+pub fn render_markdown_drift_report(report: &PerfDriftReport) -> String {
+    let mut output = String::new();
+    let _ = writeln!(output, "# AETHER Performance Drift Report");
+    let _ = writeln!(output);
+    let _ = writeln!(output, "- Generated at: `{}`", report.generated_at);
+    let _ = writeln!(output, "- Baseline: `{}`", report.baseline_label);
+    let _ = writeln!(output, "- Overall: `{}`", format_severity(report.overall));
+    let _ = writeln!(output);
+
+    let _ = writeln!(output, "## Throughput Drift");
+    let _ = writeln!(output);
+    let _ = writeln!(
+        output,
+        "| Workload | Scale | Baseline | Current | Delta | Severity |"
+    );
+    let _ = writeln!(output, "| --- | --- | ---: | ---: | ---: | --- |");
+    for measurement in &report.measurements {
+        let _ = writeln!(
+            output,
+            "| {} | {} | {} | {} | {} | {} |",
+            measurement.workload,
+            measurement.scale,
+            measurement
+                .baseline_throughput_per_second
+                .map(format_rate)
+                .unwrap_or_else(|| "-".into()),
+            format_rate(measurement.current_throughput_per_second),
+            measurement
+                .throughput_delta_pct
+                .map(format_pct)
+                .unwrap_or_else(|| "-".into()),
+            format_severity(measurement.severity),
+        );
+    }
+
+    let _ = writeln!(output);
+    let _ = writeln!(output, "## Footprint Drift");
+    let _ = writeln!(output);
+    let _ = writeln!(
+        output,
+        "| Workload | Scale | Baseline bytes | Current bytes | Delta | Severity |"
+    );
+    let _ = writeln!(output, "| --- | --- | ---: | ---: | ---: | --- |");
+    for footprint in &report.footprints {
+        let _ = writeln!(
+            output,
+            "| {} | {} | {} | {} | {} | {} |",
+            footprint.workload,
+            footprint.scale,
+            footprint
+                .baseline_estimated_bytes
+                .map(format_count)
+                .unwrap_or_else(|| "-".into()),
+            format_count(footprint.current_estimated_bytes),
+            footprint
+                .estimated_bytes_delta_pct
+                .map(format_pct)
+                .unwrap_or_else(|| "-".into()),
+            format_severity(footprint.severity),
+        );
+    }
+
+    output
+}
+
 pub fn expected_transitive_pairs(chain_len: usize) -> usize {
     chain_len.saturating_mul(chain_len.saturating_sub(1)) / 2
 }
@@ -925,10 +1173,10 @@ where
     };
 
     let measurement = PerfMeasurement {
-        workload: plan.workload,
+        workload: plan.workload.into(),
         scale: plan.scale,
         units: plan.units,
-        unit_label: plan.unit_label,
+        unit_label: plan.unit_label.into(),
         latency: LatencyStats {
             samples,
             mean,
@@ -1224,6 +1472,10 @@ fn format_rate(value: f64) -> String {
     }
 }
 
+fn format_pct(value: f64) -> String {
+    format!("{value:+.2}%")
+}
+
 fn format_count(value: usize) -> String {
     let digits = value.to_string();
     let mut output = String::with_capacity(digits.len() + digits.len() / 3);
@@ -1236,8 +1488,147 @@ fn format_count(value: usize) -> String {
     output
 }
 
+fn format_severity(severity: DriftSeverity) -> &'static str {
+    match severity {
+        DriftSeverity::Ok => "ok",
+        DriftSeverity::Warn => "warn",
+        DriftSeverity::Fail => "fail",
+        DriftSeverity::MissingBaseline => "missing-baseline",
+    }
+}
+
+fn perf_key(workload: &str, scale: &str) -> String {
+    format!("{workload}|{scale}")
+}
+
+fn percent_delta(baseline: f64, current: f64) -> f64 {
+    if baseline == 0.0 {
+        0.0
+    } else {
+        ((current - baseline) / baseline) * 100.0
+    }
+}
+
 fn emit_event(observer: &mut Option<&mut dyn FnMut(PerfEvent)>, event: PerfEvent) {
     if let Some(observer) = observer.as_deref_mut() {
         observer(event);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        compare_perf_reports, DriftSeverity, FootprintEstimate, LatencyStats, PerfBaseline,
+        PerfDriftBudget, PerfMeasurement, PerfReport,
+    };
+    use std::time::Duration;
+
+    #[test]
+    fn drift_report_flags_throughput_regressions_and_footprint_growth() {
+        let baseline = PerfBaseline {
+            label: "pilot-baseline".into(),
+            generated_at: "2026-03-19 00:00:00".into(),
+            report: PerfReport {
+                samples_per_workload: 5,
+                measurements: vec![PerfMeasurement {
+                    workload: "Kernel service coordination run".into(),
+                    scale: "128 tasks".into(),
+                    units: 164,
+                    unit_label: "rows/s".into(),
+                    latency: LatencyStats {
+                        samples: 5,
+                        mean: Duration::from_millis(3),
+                        min: Duration::from_millis(2),
+                        max: Duration::from_millis(4),
+                    },
+                    throughput_per_second: 50_000.0,
+                    notes: Vec::new(),
+                }],
+                footprints: vec![FootprintEstimate {
+                    workload: "Derived-set footprint estimate".into(),
+                    scale: "chain 128".into(),
+                    estimated_bytes: 1_000,
+                    notes: Vec::new(),
+                }],
+            },
+        };
+        let current = PerfReport {
+            samples_per_workload: 5,
+            measurements: vec![PerfMeasurement {
+                workload: "Kernel service coordination run".into(),
+                scale: "128 tasks".into(),
+                units: 164,
+                unit_label: "rows/s".into(),
+                latency: LatencyStats {
+                    samples: 5,
+                    mean: Duration::from_millis(5),
+                    min: Duration::from_millis(4),
+                    max: Duration::from_millis(6),
+                },
+                throughput_per_second: 35_000.0,
+                notes: Vec::new(),
+            }],
+            footprints: vec![FootprintEstimate {
+                workload: "Derived-set footprint estimate".into(),
+                scale: "chain 128".into(),
+                estimated_bytes: 1_250,
+                notes: Vec::new(),
+            }],
+        };
+
+        let drift = compare_perf_reports(
+            &current,
+            &baseline,
+            &PerfDriftBudget::default(),
+            "2026-03-20 00:00:00",
+        );
+
+        assert_eq!(drift.measurements[0].severity, DriftSeverity::Fail);
+        assert_eq!(drift.footprints[0].severity, DriftSeverity::Fail);
+        assert_eq!(drift.overall, DriftSeverity::Fail);
+    }
+
+    #[test]
+    fn drift_report_marks_missing_baseline_entries() {
+        let baseline = PerfBaseline {
+            label: "pilot-baseline".into(),
+            generated_at: "2026-03-19 00:00:00".into(),
+            report: PerfReport {
+                samples_per_workload: 5,
+                measurements: Vec::new(),
+                footprints: Vec::new(),
+            },
+        };
+        let current = PerfReport {
+            samples_per_workload: 5,
+            measurements: vec![PerfMeasurement {
+                workload: "Resolver current throughput".into(),
+                scale: "1,000 entities".into(),
+                units: 1_000,
+                unit_label: "entities/s".into(),
+                latency: LatencyStats {
+                    samples: 5,
+                    mean: Duration::from_millis(3),
+                    min: Duration::from_millis(2),
+                    max: Duration::from_millis(4),
+                },
+                throughput_per_second: 300_000.0,
+                notes: Vec::new(),
+            }],
+            footprints: Vec::new(),
+        };
+
+        let drift = compare_perf_reports(
+            &current,
+            &baseline,
+            &PerfDriftBudget::default(),
+            "2026-03-20 00:00:00",
+        );
+
+        assert_eq!(
+            drift.measurements[0].severity,
+            DriftSeverity::MissingBaseline
+        );
+        assert_eq!(drift.overall, DriftSeverity::MissingBaseline);
     }
 }

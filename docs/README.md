@@ -49,7 +49,7 @@ Read:
 3. `docs/KNOWN_LIMITATIONS.md`
 4. `docs/PERFORMANCE.md`
 
-Those documents explain which demo to run, what output to expect, and where reports are written.
+Those documents explain the durable pilot contract, report artifacts, drift workflow, and the remaining hardening gaps.
 
 ### If you need performance numbers
 
@@ -59,7 +59,7 @@ Read:
 2. `scripts/README.md`
 3. `TESTPLAN.md`
 
-That path explains the operator-facing report, the benchmark harness, the stress workloads, and the target interpretation.
+That path explains the operator-facing report, baseline capture, drift comparison, the benchmark harness, the stress workloads, and the target interpretation.
 
 ### If you need the long-range picture
 

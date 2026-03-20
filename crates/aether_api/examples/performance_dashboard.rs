@@ -203,7 +203,7 @@ impl DashboardState {
             for measurement in &self.completed {
                 output.push_str(&format!(
                     "{:<28} {:<16} {:>10} {:>14} {}\n",
-                    fit(measurement.workload, 28),
+                    fit(&measurement.workload, 28),
                     fit(&measurement.scale, 16),
                     format_duration(measurement.latency.mean),
                     format!(
