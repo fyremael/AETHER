@@ -98,6 +98,8 @@ Implemented today:
 - an in-memory kernel service over `aether_api` with end-to-end integration tests
 - a minimal HTTP JSON kernel service boundary over `aether_api`
 - a durable coordination-pilot HTTP service example over a SQLite journal
+- bearer-token authentication and endpoint-scope enforcement on the pilot HTTP path
+- auditable pilot request logging with persisted JSONL output
 - a release-mode performance report, Criterion benchmark suite, and ignored stress workloads for early regression tracking
 - a live console performance dashboard for real-time and collected instrument views
 
@@ -266,7 +268,7 @@ In practical terms, the most immediate work now is:
 - widening the DSL from the current focused slice to the full canonical language
 - adding bounded aggregation and deeper runtime optimization
 - widening explainability from tuple traces to richer operator-facing proof and incident surfaces
-- hardening the API boundary from the current durable-but-minimal HTTP service to authenticated and audited pilot integrations
+- hardening the API boundary from the current authenticated-and-audited pilot service to richer operator-facing and production-credible integrations
 - introducing more boundary-level examples and operator-facing demonstrations
 
 ## Why The README Is Long

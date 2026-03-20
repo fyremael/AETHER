@@ -1,5 +1,6 @@
 use aether_api::{
-    http_router, AppendRequest, ExplainTupleRequest, HealthResponse, HistoryResponse,
+    http_router, http_router_with_options, AppendRequest, AuditLogResponse, AuthScope,
+    ExplainTupleRequest, HealthResponse, HistoryResponse, HttpAuthConfig, HttpKernelOptions,
     InMemoryKernelService, KernelService, ParseDocumentRequest, ParseDocumentResponse,
     RunDocumentRequest, RunDocumentResponse, SqliteKernelService,
 };
@@ -296,6 +297,122 @@ async fn http_service_preserves_coordination_history_across_sqlite_restart() {
     stop_server(server).await;
 }
 
+#[tokio::test]
+async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() {
+    let audit = TestAuditPath::new("auth-audit");
+    let options = HttpKernelOptions::new()
+        .with_auth(pilot_auth())
+        .with_audit_log_path(audit.path().to_path_buf());
+    let (base_url, server) = spawn_server_with_options(InMemoryKernelService::new(), options).await;
+    let client = Client::new();
+
+    let unauthorized = client
+        .get(format!("{base_url}/v1/history"))
+        .send()
+        .await
+        .expect("unauthorized history request");
+    assert_eq!(unauthorized.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let forbidden = client
+        .post(format!("{base_url}/v1/append"))
+        .bearer_auth("pilot-query-token")
+        .json(&AppendRequest {
+            datoms: coordination_history(),
+        })
+        .send()
+        .await
+        .expect("forbidden append request");
+    assert_eq!(forbidden.status(), reqwest::StatusCode::FORBIDDEN);
+
+    let append = client
+        .post(format!("{base_url}/v1/append"))
+        .bearer_auth("pilot-operator-token")
+        .json(&AppendRequest {
+            datoms: coordination_history(),
+        })
+        .send()
+        .await
+        .expect("authorized append request");
+    assert!(append.status().is_success());
+
+    let current = client
+        .post(format!("{base_url}/v1/documents/run"))
+        .bearer_auth("pilot-operator-token")
+        .json(&RunDocumentRequest {
+            dsl: coordination_dsl(
+                "current",
+                "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
+            ),
+        })
+        .send()
+        .await
+        .expect("authorized run request");
+    assert!(current.status().is_success());
+    let current_rows = current
+        .json::<RunDocumentResponse>()
+        .await
+        .expect("current response")
+        .query
+        .expect("current query result")
+        .rows;
+
+    let explain = client
+        .post(format!("{base_url}/v1/explain/tuple"))
+        .bearer_auth("pilot-operator-token")
+        .json(&ExplainTupleRequest {
+            tuple_id: current_rows[0].tuple_id.expect("tuple id"),
+        })
+        .send()
+        .await
+        .expect("authorized explain request");
+    assert!(explain.status().is_success());
+
+    let audit_response = client
+        .get(format!("{base_url}/v1/audit"))
+        .bearer_auth("pilot-operator-token")
+        .send()
+        .await
+        .expect("audit request");
+    assert!(audit_response.status().is_success());
+    let audit_entries = audit_response
+        .json::<AuditLogResponse>()
+        .await
+        .expect("audit response")
+        .entries;
+    assert!(audit_entries.iter().any(|entry| {
+        entry.principal == "anonymous"
+            && entry.path == "/v1/history"
+            && entry.status == reqwest::StatusCode::UNAUTHORIZED.as_u16()
+    }));
+    assert!(audit_entries.iter().any(|entry| {
+        entry.principal == "query-client"
+            && entry.path == "/v1/append"
+            && entry.status == reqwest::StatusCode::FORBIDDEN.as_u16()
+    }));
+    assert!(audit_entries.iter().any(|entry| {
+        entry.principal == "pilot-operator"
+            && entry.path == "/v1/append"
+            && entry.status == reqwest::StatusCode::OK.as_u16()
+    }));
+    assert!(audit_entries.iter().any(|entry| {
+        entry.principal == "pilot-operator"
+            && entry.path == "/v1/documents/run"
+            && entry.status == reqwest::StatusCode::OK.as_u16()
+    }));
+    assert!(audit_entries.iter().any(|entry| {
+        entry.principal == "pilot-operator"
+            && entry.path == "/v1/explain/tuple"
+            && entry.status == reqwest::StatusCode::OK.as_u16()
+    }));
+
+    let audit_contents =
+        std::fs::read_to_string(audit.path()).expect("read persisted audit log contents");
+    assert!(audit_contents.contains("\"path\":\"/v1/append\""));
+    assert!(audit_contents.contains("\"path\":\"/v1/documents/run\""));
+
+    stop_server(server).await;
+}
+
 async fn run_document(client: &Client, base_url: &str, dsl: String) -> RunDocumentResponse {
     let response = client
         .post(format!("{base_url}/v1/documents/run"))
@@ -313,12 +430,24 @@ async fn run_document(client: &Client, base_url: &str, dsl: String) -> RunDocume
 async fn spawn_server(
     service: impl KernelService + Send + 'static,
 ) -> (String, tokio::task::JoinHandle<()>) {
+    spawn_server_with_options(service, HttpKernelOptions::default()).await
+}
+
+async fn spawn_server_with_options(
+    service: impl KernelService + Send + 'static,
+    options: HttpKernelOptions,
+) -> (String, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
     let address = listener.local_addr().expect("listener address");
     let server = tokio::spawn(async move {
-        axum::serve(listener, http_router(service))
+        let router = if options == HttpKernelOptions::default() {
+            http_router(service)
+        } else {
+            http_router_with_options(service, options)
+        };
+        axum::serve(listener, router)
             .await
             .expect("serve http kernel");
     });
@@ -472,4 +601,46 @@ impl Drop for TestDbPath {
         let _ = std::fs::remove_file(wal);
         let _ = std::fs::remove_file(shm);
     }
+}
+
+struct TestAuditPath {
+    path: PathBuf,
+}
+
+impl TestAuditPath {
+    fn new(name: &str) -> Self {
+        let unique = NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let mut path = std::env::temp_dir();
+        path.push(format!("aether-audit-{name}-{nanos}-{unique}.jsonl"));
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TestAuditPath {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn pilot_auth() -> HttpAuthConfig {
+    HttpAuthConfig::new()
+        .with_token(
+            "pilot-operator-token",
+            "pilot-operator",
+            [
+                AuthScope::Append,
+                AuthScope::Query,
+                AuthScope::Explain,
+                AuthScope::Ops,
+            ],
+        )
+        .with_token("pilot-query-token", "query-client", [AuthScope::Query])
 }

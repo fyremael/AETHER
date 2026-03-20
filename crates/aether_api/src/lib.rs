@@ -17,7 +17,10 @@ pub mod http;
 #[doc(hidden)]
 pub mod perf;
 
-pub use http::{http_router, HealthResponse, HttpKernelState};
+pub use http::{
+    http_router, http_router_with_options, AuditEntry, AuditLogResponse, AuthScope, HealthResponse,
+    HttpAccessToken, HttpAuthConfig, HttpKernelOptions, HttpKernelState,
+};
 
 pub trait KernelService {
     fn append(&mut self, request: AppendRequest) -> Result<AppendResponse, ApiError>;

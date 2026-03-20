@@ -23,6 +23,8 @@ Completed:
 - minimal HTTP JSON kernel service implemented over `aether_api`
 - kernel service generalized over in-memory and durable journal backends
 - coordination pilot contract frozen in restart-safe service and HTTP tests
+- bearer-token authentication and endpoint scope enforcement implemented on the pilot HTTP path
+- auditable request logging implemented on the pilot HTTP path, including persisted JSONL output
 - release-mode performance report example, Criterion benchmarks, and ignored stress workloads added for early performance tracking
 - live console dashboard added for real-time and collected instrument views over the performance suite
 - documentation portal, architecture guide, developer workflow guide, operator guide, glossary, and documentation standards now exist
@@ -45,8 +47,8 @@ Not yet completed:
 
 The most immediate work now sits across the active coordination pilot slice and late `M4`:
 
-- add authenticated service access and auditable request paths
 - widen tuple explanation into richer proof and operator-facing incident/report surfaces
 - add benchmark baseline capture and drift tracking for the durable pilot path
+- widen audit capture from endpoint-level access logs into richer semantic and operator-action context
 - extend the DSL from the current focused authoring surface to the full canonical language
 - add bounded aggregation and further runtime optimization

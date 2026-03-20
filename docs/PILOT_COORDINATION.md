@@ -41,6 +41,8 @@ Implemented:
 - kernel services that can run over either in-memory or durable journal backends
 - restart-safe coordination contract tests at the service layer
 - restart-safe coordination contract tests through the HTTP boundary
+- bearer-token authentication with endpoint scope enforcement on the pilot HTTP path
+- auditable request logging with in-memory inspection and JSONL persistence on the pilot HTTP path
 - a dedicated durable HTTP service example at `crates/aether_api/examples/pilot_http_kernel_service.rs`
 
 Those tests intentionally freeze the current answers for:
@@ -71,6 +73,14 @@ The default database path is:
 artifacts/pilot/coordination.sqlite
 ```
 
+The default pilot bearer token is:
+
+```text
+pilot-operator-token
+```
+
+Override it with the `AETHER_PILOT_TOKEN` environment variable before starting the service.
+
 ## Exit Gates
 
 The pilot is only ready for external design-partner use when all of these are true:
@@ -78,19 +88,18 @@ The pilot is only ready for external design-partner use when all of these are tr
 1. the durable journal reproduces the same semantic answers before and after restart
 2. the HTTP boundary reproduces the same semantic answers before and after restart
 3. operator-facing explain output is sufficient to answer why a worker is authorized or fenced
-4. authenticated service access exists with auditable principal identity
-5. benchmark baselines exist for the durable pilot paths and drift is tracked over time
+4. benchmark baselines exist for the durable pilot paths and drift is tracked over time
+5. operator-grade explain and incident-report artifacts exist for the pilot workloads
 
-This slice closes the first two gates. The remaining gates stay open.
+This slice closes the first three gates. The remaining gates stay open.
 
 ## Next Required Work
 
 The next pilot-critical steps are:
 
-- bearer-token authentication and endpoint authorization
-- append/query/explain audit logging
 - operator-grade explain and incident-report artifacts
 - baseline capture plus benchmark drift budgets for the durable service path
+- richer audit context for semantic cuts and operator actions
 
 Those are the next things to do. They are not optional polish.
 

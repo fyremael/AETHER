@@ -34,6 +34,8 @@ If you need the current durable pilot service rather than a demo, run:
 cargo run -p aether_api --example pilot_http_kernel_service --release
 ```
 
+That pilot service now starts with bearer-token auth enabled. By default it prints the local pilot token at startup and writes audit events beside the SQLite database as JSONL.
+
 ## Demo Catalog
 
 | Demo | Purpose | Best use |
@@ -88,6 +90,12 @@ cargo run -p aether_api --example http_kernel_service
 The HTTP example starts the current minimal networked kernel boundary on `127.0.0.1:3000`.
 
 The durable pilot example starts the same boundary over a SQLite-backed journal at `artifacts/pilot/coordination.sqlite` unless you provide a custom path.
+
+The authenticated pilot boundary currently adds:
+
+- `GET /v1/audit`
+- bearer-token auth for `/v1/*`
+- persisted audit logging for pilot requests
 
 Available endpoints today:
 
