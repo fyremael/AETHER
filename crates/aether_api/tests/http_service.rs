@@ -1,14 +1,21 @@
 use aether_api::{
     http_router, AppendRequest, ExplainTupleRequest, HealthResponse, HistoryResponse,
-    InMemoryKernelService, ParseDocumentRequest, ParseDocumentResponse, RunDocumentRequest,
-    RunDocumentResponse,
+    InMemoryKernelService, KernelService, ParseDocumentRequest, ParseDocumentResponse,
+    RunDocumentRequest, RunDocumentResponse, SqliteKernelService,
 };
 use aether_ast::{AttributeId, Datom, DatomProvenance, ElementId, EntityId, Value};
 use reqwest::Client;
+use std::{
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(1);
 
 #[tokio::test]
 async fn http_service_exposes_health_and_history() {
-    let (base_url, server) = spawn_server().await;
+    let (base_url, server) = spawn_server(InMemoryKernelService::new()).await;
     let client = Client::new();
 
     let health = client
@@ -58,7 +65,7 @@ async fn http_service_exposes_health_and_history() {
 
 #[tokio::test]
 async fn http_service_runs_documents_and_explains_tuples() {
-    let (base_url, server) = spawn_server().await;
+    let (base_url, server) = spawn_server(InMemoryKernelService::new()).await;
     let client = Client::new();
 
     let append = client
@@ -194,6 +201,101 @@ async fn http_service_runs_documents_and_explains_tuples() {
     server.abort();
 }
 
+#[tokio::test]
+async fn http_service_preserves_coordination_history_across_sqlite_restart() {
+    let temp = TestDbPath::new("http-pilot");
+    {
+        let (base_url, server) = spawn_server(
+            SqliteKernelService::open(temp.path()).expect("open sqlite kernel service"),
+        )
+        .await;
+        let client = Client::new();
+
+        let append = client
+            .post(format!("{base_url}/v1/append"))
+            .json(&AppendRequest {
+                datoms: coordination_history(),
+            })
+            .send()
+            .await
+            .expect("append request");
+        assert!(append.status().is_success());
+
+        let current = run_document(
+            &client,
+            &base_url,
+            coordination_dsl(
+                "current",
+                "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
+            ),
+        )
+        .await;
+        assert_eq!(
+            current
+                .query
+                .expect("current query result")
+                .rows
+                .into_iter()
+                .map(|row| row.values)
+                .collect::<Vec<_>>(),
+            vec![vec![
+                Value::Entity(EntityId::new(1)),
+                Value::String("worker-b".into()),
+                Value::U64(2),
+            ]]
+        );
+
+        stop_server(server).await;
+    }
+
+    let (base_url, server) =
+        spawn_server(SqliteKernelService::open(temp.path()).expect("reopen sqlite kernel service"))
+            .await;
+    let client = Client::new();
+
+    let history = client
+        .get(format!("{base_url}/v1/history"))
+        .send()
+        .await
+        .expect("history request");
+    assert!(history.status().is_success());
+    assert_eq!(
+        history
+            .json::<HistoryResponse>()
+            .await
+            .expect("history response")
+            .datoms
+            .len(),
+        7
+    );
+
+    let as_of = run_document(
+        &client,
+        &base_url,
+        coordination_dsl(
+            "as_of e5",
+            "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
+        ),
+    )
+    .await;
+    assert_eq!(
+        as_of
+            .query
+            .expect("as_of query result")
+            .rows
+            .into_iter()
+            .map(|row| row.values)
+            .collect::<Vec<_>>(),
+        vec![vec![
+            Value::Entity(EntityId::new(1)),
+            Value::String("worker-a".into()),
+            Value::U64(1),
+        ]]
+    );
+
+    stop_server(server).await;
+}
+
 async fn run_document(client: &Client, base_url: &str, dsl: String) -> RunDocumentResponse {
     let response = client
         .post(format!("{base_url}/v1/documents/run"))
@@ -208,18 +310,25 @@ async fn run_document(client: &Client, base_url: &str, dsl: String) -> RunDocume
         .expect("run response")
 }
 
-async fn spawn_server() -> (String, tokio::task::JoinHandle<()>) {
+async fn spawn_server(
+    service: impl KernelService + Send + 'static,
+) -> (String, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind test listener");
     let address = listener.local_addr().expect("listener address");
     let server = tokio::spawn(async move {
-        axum::serve(listener, http_router(InMemoryKernelService::new()))
+        axum::serve(listener, http_router(service))
             .await
             .expect("serve http kernel");
     });
 
     (format!("http://{address}"), server)
+}
+
+async fn stop_server(server: tokio::task::JoinHandle<()>) {
+    server.abort();
+    let _ = server.await;
 }
 
 fn coordination_dsl(view: &str, query_body: &str) -> String {
@@ -330,5 +439,37 @@ fn datom(entity: u64, attribute: u64, value: Value, element: u64) -> Datom {
         causal_context: Default::default(),
         provenance: DatomProvenance::default(),
         policy: None,
+    }
+}
+
+struct TestDbPath {
+    path: PathBuf,
+}
+
+impl TestDbPath {
+    fn new(name: &str) -> Self {
+        let unique = NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let mut path = std::env::temp_dir();
+        path.push(format!("aether-http-{name}-{nanos}-{unique}.sqlite"));
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TestDbPath {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+
+        let wal = PathBuf::from(format!("{}-wal", self.path.display()));
+        let shm = PathBuf::from(format!("{}-shm", self.path.display()));
+        let _ = std::fs::remove_file(wal);
+        let _ = std::fs::remove_file(shm);
     }
 }

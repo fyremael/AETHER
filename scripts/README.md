@@ -23,6 +23,7 @@ For technical users or automation:
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-demo.ps1 -Demo 03`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-dashboard.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-report.ps1`
+- run `cargo run -p aether_api --example pilot_http_kernel_service --release`
 - run `cargo bench -p aether_api`
 - run `cargo test -p aether_api --test performance_stress --release -- --ignored --nocapture`
 

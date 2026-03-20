@@ -8,8 +8,9 @@ use aether_resolver::{MaterializedResolver, ResolveError, ResolvedState, Resolve
 use aether_rules::{DefaultDslParser, DefaultRuleCompiler, DslParser, ParseError, RuleCompiler};
 use aether_runtime::{execute_query, DerivedSet, RuleRuntime, RuntimeError, SemiNaiveRuntime};
 use aether_schema::Schema;
-use aether_storage::{InMemoryJournal, Journal, JournalError};
+use aether_storage::{InMemoryJournal, Journal, JournalError, SqliteJournal};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use thiserror::Error;
 
 pub mod http;
@@ -45,15 +46,39 @@ pub trait KernelService {
     ) -> Result<RunDocumentResponse, ApiError>;
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct InMemoryKernelService {
-    journal: InMemoryJournal,
+pub type InMemoryKernelService = KernelServiceCore<InMemoryJournal>;
+pub type SqliteKernelService = KernelServiceCore<SqliteJournal>;
+
+#[derive(Debug)]
+pub struct KernelServiceCore<J: Journal> {
+    journal: J,
     last_derived: Option<DerivedSet>,
 }
 
-impl InMemoryKernelService {
+impl KernelServiceCore<InMemoryJournal> {
     pub fn new() -> Self {
-        Self::default()
+        Self::from_journal(InMemoryJournal::new())
+    }
+}
+
+impl Default for KernelServiceCore<InMemoryJournal> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl KernelServiceCore<SqliteJournal> {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, ApiError> {
+        Ok(Self::from_journal(SqliteJournal::open(path)?))
+    }
+}
+
+impl<J: Journal> KernelServiceCore<J> {
+    pub fn from_journal(journal: J) -> Self {
+        Self {
+            journal,
+            last_derived: None,
+        }
     }
 
     fn datoms_or_history(&self, datoms: &[Datom]) -> Result<Vec<Datom>, ApiError> {
@@ -70,7 +95,7 @@ impl InMemoryKernelService {
     }
 }
 
-impl KernelService for InMemoryKernelService {
+impl<J: Journal> KernelService for KernelServiceCore<J> {
     fn append(&mut self, request: AppendRequest) -> Result<AppendResponse, ApiError> {
         self.journal.append(&request.datoms)?;
         Ok(AppendResponse {

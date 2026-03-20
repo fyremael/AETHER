@@ -118,7 +118,7 @@ pub struct ExplainFixture {
     pub chain_len: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ServiceFixture {
     pub service: InMemoryKernelService,
     pub request: RunDocumentRequest,

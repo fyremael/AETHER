@@ -1,6 +1,6 @@
 use crate::{
     ApiError, AppendRequest, AsOfRequest, CurrentStateRequest, ExplainTupleRequest, HistoryRequest,
-    InMemoryKernelService, KernelService, ParseDocumentRequest, RunDocumentRequest,
+    KernelService, ParseDocumentRequest, RunDocumentRequest,
 };
 use axum::{
     extract::State,
@@ -12,19 +12,21 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct HttpKernelState {
-    service: Arc<Mutex<InMemoryKernelService>>,
+    service: Arc<Mutex<Box<dyn KernelService + Send>>>,
 }
 
 impl HttpKernelState {
-    pub fn new(service: InMemoryKernelService) -> Self {
+    pub fn new(service: impl KernelService + Send + 'static) -> Self {
         Self {
-            service: Arc::new(Mutex::new(service)),
+            service: Arc::new(Mutex::new(Box::new(service))),
         }
     }
 
-    fn service(&self) -> Result<std::sync::MutexGuard<'_, InMemoryKernelService>, HttpError> {
+    fn service(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, Box<dyn KernelService + Send>>, HttpError> {
         self.service.lock().map_err(|_| HttpError::LockPoisoned)
     }
 }
@@ -42,7 +44,7 @@ impl Default for HealthResponse {
     }
 }
 
-pub fn http_router(service: InMemoryKernelService) -> Router {
+pub fn http_router(service: impl KernelService + Send + 'static) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/v1/history", get(history))

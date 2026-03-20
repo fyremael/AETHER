@@ -10,6 +10,7 @@ Completed:
 - canonical Rust crates added under `crates/`
 - Go and Python boundary directories created
 - schema, storage, resolver, compiler, and runtime substrate implemented as an initial vertical slice
+- durable SQLite journal implemented behind the `Journal` boundary with restart-safe replay coverage
 - source datom provenance threaded through resolution and derivation
 - first recursive tuple explainer implemented
 - first whole-document DSL parser implemented for `schema`, `predicates`, `facts`, `rules`, `materialize`, and `query`
@@ -20,6 +21,8 @@ Completed:
 - first coordination acceptance slice implemented for readiness, claims, leases, and stale-attempt rejection
 - in-memory kernel service implemented in `aether_api`
 - minimal HTTP JSON kernel service implemented over `aether_api`
+- kernel service generalized over in-memory and durable journal backends
+- coordination pilot contract frozen in restart-safe service and HTTP tests
 - release-mode performance report example, Criterion benchmarks, and ignored stress workloads added for early performance tracking
 - live console dashboard added for real-time and collected instrument views over the performance suite
 - documentation portal, architecture guide, developer workflow guide, operator guide, glossary, and documentation standards now exist
@@ -33,17 +36,17 @@ Not yet completed:
 
 - bounded aggregation
 - full canonical DSL coverage beyond the current query/fact/policy slice
-- durable storage backends
+- broader durable storage backends beyond the current SQLite journal
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
 - stable Go and Python boundary clients
 - historical benchmark dashboards and automated drift gates
 
 ## Immediate focus
 
-The most immediate work now sits across late `M3` and active `M4`:
+The most immediate work now sits across the active coordination pilot slice and late `M4`:
 
-- widen tuple explanation into richer proof and operator-facing surfaces
+- add authenticated service access and auditable request paths
+- widen tuple explanation into richer proof and operator-facing incident/report surfaces
+- add benchmark baseline capture and drift tracking for the durable pilot path
 - extend the DSL from the current focused authoring surface to the full canonical language
 - add bounded aggregation and further runtime optimization
-- deepen the networked service boundary with durability, authentication, and richer contract coverage
-- expand worked examples, API-level scenarios, and acceptance-style tests

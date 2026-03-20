@@ -7,6 +7,7 @@ version.workspace = true
 
 [dependencies]
 aether_ast = { path = "../aether_ast" }
+rusqlite = { version = "=0.32.1", features = ["bundled"] }
 serde.workspace = true
+serde_json = "1.0.133"
 thiserror.workspace = true
-

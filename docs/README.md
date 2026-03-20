@@ -40,6 +40,15 @@ Start here:
 2. `examples/README.md`
 3. `scripts/README.md`
 
+### If you are working on the coordination pilot
+
+Read:
+
+1. `docs/PILOT_COORDINATION.md`
+2. `docs/STATUS.md`
+3. `docs/KNOWN_LIMITATIONS.md`
+4. `docs/PERFORMANCE.md`
+
 Those documents explain which demo to run, what output to expect, and where reports are written.
 
 ### If you need performance numbers
@@ -83,6 +92,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 | `docs/ARCHITECTURE.md` | How the current kernel is shaped and how data moves through it |
 | `docs/DEVELOPER_WORKFLOW.md` | Day-to-day engineering loop, verification contract, and definition of done |
 | `docs/OPERATIONS.md` | Operator-facing guidance for demos, reports, and presentations |
+| `docs/PILOT_COORDINATION.md` | Scope, exit gates, and run path for the current coordination pilot |
 | `docs/PERFORMANCE.md` | Performance workloads, runner commands, benchmark harness, and interpretation guidance |
 | `docs/GLOSSARY.md` | Canonical vocabulary for the codebase and its semantics |
 | `docs/DOCUMENTATION_STANDARD.md` | Documentation quality bar, update triggers, and maintenance rules |

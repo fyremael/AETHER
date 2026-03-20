@@ -81,7 +81,7 @@ Implemented today:
 
 - foundational identifiers, values, datoms, rule/query ASTs, and provenance types
 - schema registration and predicate arity validation
-- append-only in-memory journal semantics
+- append-only journal semantics across both in-memory and SQLite-backed durable storage
 - deterministic `Current` and `AsOf` resolution across scalar, set, and sequence classes
 - a whole-document DSL parser for `schema`, `predicates`, `facts`, `rules`, `materialize`, and `query` sections
 - rule safety checks
@@ -97,6 +97,7 @@ Implemented today:
 - a coordination acceptance slice for task readiness, claims, lease handoff, and stale-attempt rejection
 - an in-memory kernel service over `aether_api` with end-to-end integration tests
 - a minimal HTTP JSON kernel service boundary over `aether_api`
+- a durable coordination-pilot HTTP service example over a SQLite journal
 - a release-mode performance report, Criterion benchmark suite, and ignored stress workloads for early regression tracking
 - a live console performance dashboard for real-time and collected instrument views
 
@@ -264,8 +265,8 @@ In practical terms, the most immediate work now is:
 
 - widening the DSL from the current focused slice to the full canonical language
 - adding bounded aggregation and deeper runtime optimization
-- widening explainability from tuple traces to richer operator-facing proof surfaces
-- hardening the API boundary from the current minimal HTTP service to richer durable and authenticated process-boundary integrations
+- widening explainability from tuple traces to richer operator-facing proof and incident surfaces
+- hardening the API boundary from the current durable-but-minimal HTTP service to authenticated and audited pilot integrations
 - introducing more boundary-level examples and operator-facing demonstrations
 
 ## Why The README Is Long
