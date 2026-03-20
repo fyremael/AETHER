@@ -19,8 +19,8 @@ pub mod perf;
 pub mod report;
 
 pub use http::{
-    http_router, http_router_with_options, AuditEntry, AuditLogResponse, AuthScope, HealthResponse,
-    HttpAccessToken, HttpAuthConfig, HttpKernelOptions, HttpKernelState,
+    http_router, http_router_with_options, AuditContext, AuditEntry, AuditLogResponse, AuthScope,
+    HealthResponse, HttpAccessToken, HttpAuthConfig, HttpKernelOptions, HttpKernelState,
 };
 pub use report::{
     build_coordination_pilot_report, coordination_pilot_seed_history,

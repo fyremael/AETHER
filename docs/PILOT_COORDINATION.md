@@ -42,12 +42,13 @@ Implemented:
 - restart-safe coordination contract tests at the service layer
 - restart-safe coordination contract tests through the HTTP boundary
 - bearer-token authentication with endpoint scope enforcement on the pilot HTTP path
-- auditable request logging with in-memory inspection and JSONL persistence on the pilot HTTP path
+- auditable request logging with in-memory inspection, semantic request context, and JSONL persistence on the pilot HTTP path
 - a dedicated durable HTTP service example at `crates/aether_api/examples/pilot_http_kernel_service.rs`
 - operator-grade coordination report generation in markdown and JSON
 - durable pilot seed fixtures shared between service tests and report generation
 - performance baseline capture for the pilot path
 - performance drift comparison with warning and fail thresholds
+- repeated authenticated restart-cycle drills that preserve both semantic answers and persisted audit context
 
 Those tests intentionally freeze the current answers for:
 
@@ -125,9 +126,9 @@ The current implementation closes those original gates for the present single-no
 
 The next pilot-critical steps are:
 
-- richer audit context for semantic cuts and operator actions
-- restart and soak drills over longer pilot runs
 - optional CI adoption of the drift report once the local baseline discipline settles
+- longer-run soak drills beyond the current restart-cycle coverage
+- richer operator-intent and semantic-diff context on top of the current audit fields
 - service-hardening work beyond the current bearer-token and single-node posture
 
 Those are the next things to do. They are not optional polish. They are what turns a credible pilot slice into a pilot operators can trust under repetition.

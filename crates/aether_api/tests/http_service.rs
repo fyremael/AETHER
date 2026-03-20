@@ -1,5 +1,5 @@
 use aether_api::{
-    http_router, http_router_with_options, AppendRequest, AuditLogResponse, AuthScope,
+    http_router, http_router_with_options, AppendRequest, AuditEntry, AuditLogResponse, AuthScope,
     ExplainTupleRequest, HealthResponse, HistoryResponse, HttpAuthConfig, HttpKernelOptions,
     InMemoryKernelService, KernelService, ParseDocumentRequest, ParseDocumentResponse,
     RunDocumentRequest, RunDocumentResponse, SqliteKernelService,
@@ -383,34 +383,167 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
         entry.principal == "anonymous"
             && entry.path == "/v1/history"
             && entry.status == reqwest::StatusCode::UNAUTHORIZED.as_u16()
+            && entry.context.temporal_view.as_deref() == Some("history")
     }));
     assert!(audit_entries.iter().any(|entry| {
         entry.principal == "query-client"
             && entry.path == "/v1/append"
             && entry.status == reqwest::StatusCode::FORBIDDEN.as_u16()
+            && entry.context.datom_count == Some(7)
+            && entry.context.last_element == Some(7)
     }));
     assert!(audit_entries.iter().any(|entry| {
         entry.principal == "pilot-operator"
             && entry.path == "/v1/append"
             && entry.status == reqwest::StatusCode::OK.as_u16()
+            && entry.context.datom_count == Some(7)
+            && entry.context.last_element == Some(7)
     }));
     assert!(audit_entries.iter().any(|entry| {
         entry.principal == "pilot-operator"
             && entry.path == "/v1/documents/run"
             && entry.status == reqwest::StatusCode::OK.as_u16()
+            && entry.context.temporal_view.as_deref() == Some("current")
+            && entry.context.query_goal.as_deref() == Some("execution_authorized(t, worker, epoch)")
+            && entry.context.row_count == Some(1)
+            && entry.context.derived_tuple_count.is_some()
     }));
     assert!(audit_entries.iter().any(|entry| {
         entry.principal == "pilot-operator"
             && entry.path == "/v1/explain/tuple"
             && entry.status == reqwest::StatusCode::OK.as_u16()
+            && entry.context.tuple_id == Some(current_rows[0].tuple_id.expect("tuple id").0)
+            && entry.context.trace_tuple_count.is_some()
     }));
 
     let audit_contents =
         std::fs::read_to_string(audit.path()).expect("read persisted audit log contents");
     assert!(audit_contents.contains("\"path\":\"/v1/append\""));
     assert!(audit_contents.contains("\"path\":\"/v1/documents/run\""));
+    assert!(audit_contents.contains("\"temporal_view\":\"current\""));
+    assert!(audit_contents.contains("\"query_goal\":\"execution_authorized(t, worker, epoch)\""));
 
     stop_server(server).await;
+}
+
+#[tokio::test]
+async fn authenticated_http_service_persists_semantic_audit_context_across_restarts() {
+    let temp = TestDbPath::new("http-audit-restart");
+    let audit = TestAuditPath::new("audit-restart");
+    let options = HttpKernelOptions::new()
+        .with_auth(pilot_auth())
+        .with_audit_log_path(audit.path().to_path_buf());
+
+    {
+        let (base_url, server) = spawn_server_with_options(
+            SqliteKernelService::open(temp.path()).expect("open sqlite kernel service"),
+            options.clone(),
+        )
+        .await;
+        let client = Client::new();
+
+        let append = client
+            .post(format!("{base_url}/v1/append"))
+            .bearer_auth("pilot-operator-token")
+            .json(&AppendRequest {
+                datoms: coordination_history(),
+            })
+            .send()
+            .await
+            .expect("append request");
+        assert!(append.status().is_success());
+
+        for _ in 0..3 {
+            let current = run_document_authorized(
+                &client,
+                &base_url,
+                "pilot-operator-token",
+                coordination_dsl(
+                    "current",
+                    "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
+                ),
+            )
+            .await;
+            let tuple_id = current.query.expect("current query result").rows[0]
+                .tuple_id
+                .expect("tuple id");
+
+            let explain = client
+                .post(format!("{base_url}/v1/explain/tuple"))
+                .bearer_auth("pilot-operator-token")
+                .json(&ExplainTupleRequest { tuple_id })
+                .send()
+                .await
+                .expect("explain request");
+            assert!(explain.status().is_success());
+        }
+
+        stop_server(server).await;
+    }
+
+    {
+        let (base_url, server) = spawn_server_with_options(
+            SqliteKernelService::open(temp.path()).expect("reopen sqlite kernel service"),
+            options,
+        )
+        .await;
+        let client = Client::new();
+
+        let as_of = client
+            .post(format!("{base_url}/v1/documents/run"))
+            .bearer_auth("pilot-operator-token")
+            .json(&RunDocumentRequest {
+                dsl: coordination_dsl(
+                    "as_of e5",
+                    "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
+                ),
+            })
+            .send()
+            .await
+            .expect("as_of request");
+        assert!(as_of.status().is_success());
+
+        let audit_response = client
+            .get(format!("{base_url}/v1/audit"))
+            .bearer_auth("pilot-operator-token")
+            .send()
+            .await
+            .expect("audit request");
+        assert!(audit_response.status().is_success());
+
+        stop_server(server).await;
+    }
+
+    let persisted = read_audit_entries(audit.path());
+    let run_entries = persisted
+        .iter()
+        .filter(|entry| entry.path == "/v1/documents/run")
+        .collect::<Vec<_>>();
+    let explain_entries = persisted
+        .iter()
+        .filter(|entry| entry.path == "/v1/explain/tuple")
+        .collect::<Vec<_>>();
+
+    assert!(run_entries.len() >= 4);
+    assert!(explain_entries.len() >= 3);
+    assert!(run_entries.iter().any(|entry| {
+        entry.context.temporal_view.as_deref() == Some("current")
+            && entry.context.query_goal.as_deref() == Some("execution_authorized(t, worker, epoch)")
+            && entry.context.row_count == Some(1)
+    }));
+    assert!(run_entries.iter().any(|entry| {
+        entry.context.temporal_view.as_deref() == Some("as_of(e5)")
+            && entry.context.requested_element == Some(5)
+            && entry.context.row_count == Some(1)
+    }));
+    assert!(explain_entries
+        .iter()
+        .all(|entry| entry.context.tuple_id.is_some()));
+    assert!(explain_entries.iter().all(|entry| entry
+        .context
+        .trace_tuple_count
+        .unwrap_or_default()
+        > 0));
 }
 
 async fn run_document(client: &Client, base_url: &str, dsl: String) -> RunDocumentResponse {
@@ -425,6 +558,26 @@ async fn run_document(client: &Client, base_url: &str, dsl: String) -> RunDocume
         .json::<RunDocumentResponse>()
         .await
         .expect("run response")
+}
+
+async fn run_document_authorized(
+    client: &Client,
+    base_url: &str,
+    token: &str,
+    dsl: String,
+) -> RunDocumentResponse {
+    let response = client
+        .post(format!("{base_url}/v1/documents/run"))
+        .bearer_auth(token)
+        .json(&RunDocumentRequest { dsl })
+        .send()
+        .await
+        .expect("authorized run request");
+    assert!(response.status().is_success());
+    response
+        .json::<RunDocumentResponse>()
+        .await
+        .expect("authorized run response")
 }
 
 async fn spawn_server(
@@ -643,4 +796,13 @@ fn pilot_auth() -> HttpAuthConfig {
             ],
         )
         .with_token("pilot-query-token", "query-client", [AuthScope::Query])
+}
+
+fn read_audit_entries(path: &Path) -> Vec<AuditEntry> {
+    std::fs::read_to_string(path)
+        .expect("read audit log")
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).expect("parse audit entry"))
+        .collect()
 }

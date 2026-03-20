@@ -24,11 +24,12 @@ Completed:
 - kernel service generalized over in-memory and durable journal backends
 - coordination pilot contract frozen in restart-safe service and HTTP tests
 - bearer-token authentication and endpoint scope enforcement implemented on the pilot HTTP path
-- auditable request logging implemented on the pilot HTTP path, including persisted JSONL output
+- auditable request logging implemented on the pilot HTTP path, including semantic cut/query/tuple context and persisted JSONL output
 - operator-grade coordination report artifacts implemented in markdown and JSON for the pilot workload
 - release-mode performance report example, Criterion benchmarks, and ignored stress workloads added for early performance tracking
 - live console dashboard added for real-time and collected instrument views over the performance suite
 - machine-readable performance baseline capture and point-in-time drift reporting implemented for the pilot path
+- authenticated HTTP restart-cycle drills added to preserve semantic answers and persisted audit context across repeated service restarts
 - documentation portal, architecture guide, developer workflow guide, operator guide, glossary, and documentation standards now exist
 - GitHub Pages publishing pipeline added for the documentation portal and generated Rust API reference
 - unit tests added across the Rust core crates
@@ -49,8 +50,8 @@ Not yet completed:
 
 The most immediate work now sits across the active coordination pilot slice and late `M4`:
 
-- widen audit capture from endpoint-level access logs into richer semantic and operator-action context
-- add longer-run restart, soak, and misuse drills around the durable pilot service
+- add longer-run restart, soak, and misuse drills beyond the current restart-cycle coverage
+- decide how far to widen audit context from the current semantic cut/query/tuple fields into fuller operator intent and semantic diffs
 - decide when the current drift comparison should graduate into CI enforcement
 - extend the DSL from the current focused authoring surface to the full canonical language
 - add bounded aggregation and further runtime optimization

@@ -62,10 +62,11 @@ impl HttpKernelState {
         method: &'static str,
         path: &'static str,
         required_scope: AuthScope,
+        mut context: AuditContext,
         operation: F,
     ) -> Result<T, HttpError>
     where
-        F: FnOnce(&mut dyn KernelService) -> Result<T, ApiError>,
+        F: FnOnce(&mut dyn KernelService) -> Result<(T, AuditContext), ApiError>,
     {
         let principal = match self.authorize(headers, required_scope) {
             Ok(principal) => principal,
@@ -77,6 +78,7 @@ impl HttpKernelState {
                     error.audit_principal(),
                     required_scope,
                     error.audit_message(),
+                    context,
                 ));
                 return Err(error);
             }
@@ -91,15 +93,19 @@ impl HttpKernelState {
             Ok(_) => StatusCode::OK,
             Err(error) => status_for_api_error(error),
         };
+        if let Ok((_, response_context)) = &result {
+            context = response_context.clone();
+        }
         self.audit.record(AuditEntry::for_request(
             method,
             path,
             status,
             principal.id,
             required_scope,
+            context,
         ));
 
-        result.map_err(HttpError::Api)
+        result.map(|(response, _)| response).map_err(HttpError::Api)
     }
 
     fn audit_entries(&self, headers: &HeaderMap) -> Result<AuditLogResponse, HttpError> {
@@ -113,6 +119,7 @@ impl HttpKernelState {
                     error.audit_principal(),
                     AuthScope::Ops,
                     error.audit_message(),
+                    AuditContext::default(),
                 ));
                 return Err(error);
             }
@@ -127,6 +134,7 @@ impl HttpKernelState {
             StatusCode::OK,
             principal.id,
             AuthScope::Ops,
+            AuditContext::default(),
         ));
         Ok(response)
     }
@@ -216,6 +224,21 @@ pub struct AuditEntry {
     pub scope: AuthScope,
     pub outcome: String,
     pub detail: Option<String>,
+    pub context: AuditContext,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AuditContext {
+    pub temporal_view: Option<String>,
+    pub query_goal: Option<String>,
+    pub tuple_id: Option<u64>,
+    pub requested_element: Option<u64>,
+    pub datom_count: Option<usize>,
+    pub entity_count: Option<usize>,
+    pub row_count: Option<usize>,
+    pub derived_tuple_count: Option<usize>,
+    pub trace_tuple_count: Option<usize>,
+    pub last_element: Option<u64>,
 }
 
 impl AuditEntry {
@@ -225,6 +248,7 @@ impl AuditEntry {
         status: StatusCode,
         principal: impl Into<String>,
         scope: AuthScope,
+        context: AuditContext,
     ) -> Self {
         Self {
             timestamp_ms: now_millis(),
@@ -239,6 +263,7 @@ impl AuditEntry {
                 "error".into()
             },
             detail: None,
+            context,
         }
     }
 
@@ -249,6 +274,7 @@ impl AuditEntry {
         principal: impl Into<String>,
         scope: AuthScope,
         detail: impl Into<String>,
+        context: AuditContext,
     ) -> Self {
         Self {
             timestamp_ms: now_millis(),
@@ -263,6 +289,7 @@ impl AuditEntry {
                 "forbidden".into()
             },
             detail: Some(detail.into()),
+            context,
         }
     }
 
@@ -276,6 +303,7 @@ impl AuditEntry {
             scope: AuthScope::Ops,
             outcome: "audit_write_failed".into(),
             detail: Some(error.to_string()),
+            context: AuditContext::default(),
         }
     }
 }
@@ -512,9 +540,24 @@ async fn history(
     State(state): State<HttpKernelState>,
     headers: HeaderMap,
 ) -> Result<Json<crate::HistoryResponse>, HttpError> {
-    let response = state.execute(&headers, "GET", "/v1/history", AuthScope::Ops, |service| {
-        service.history(HistoryRequest)
-    })?;
+    let request_context = AuditContext {
+        temporal_view: Some("history".into()),
+        ..Default::default()
+    };
+    let response = state.execute(
+        &headers,
+        "GET",
+        "/v1/history",
+        AuthScope::Ops,
+        request_context.clone(),
+        |service| {
+            let response = service.history(HistoryRequest)?;
+            let mut context = request_context;
+            context.datom_count = Some(response.datoms.len());
+            context.last_element = response.datoms.last().map(|datom| datom.element.0);
+            Ok((response, context))
+        },
+    )?;
     Ok(Json(response))
 }
 
@@ -530,12 +573,17 @@ async fn append(
     headers: HeaderMap,
     Json(request): Json<AppendRequest>,
 ) -> Result<Json<crate::AppendResponse>, HttpError> {
+    let request_context = audit_context_for_append(&request);
     let response = state.execute(
         &headers,
         "POST",
         "/v1/append",
         AuthScope::Append,
-        |service| service.append(request),
+        request_context.clone(),
+        |service| {
+            let response = service.append(request)?;
+            Ok((response, request_context))
+        },
     )?;
     Ok(Json(response))
 }
@@ -545,12 +593,24 @@ async fn current_state(
     headers: HeaderMap,
     Json(request): Json<CurrentStateRequest>,
 ) -> Result<Json<crate::CurrentStateResponse>, HttpError> {
+    let request_context = AuditContext {
+        temporal_view: Some("current".into()),
+        datom_count: Some(request.datoms.len()),
+        ..Default::default()
+    };
     let response = state.execute(
         &headers,
         "POST",
         "/v1/state/current",
         AuthScope::Query,
-        |service| service.current_state(request),
+        request_context.clone(),
+        |service| {
+            let response = service.current_state(request)?;
+            let mut context = request_context;
+            context.entity_count = Some(response.state.entities.len());
+            context.last_element = response.state.as_of.map(|element| element.0);
+            Ok((response, context))
+        },
     )?;
     Ok(Json(response))
 }
@@ -560,12 +620,25 @@ async fn as_of(
     headers: HeaderMap,
     Json(request): Json<AsOfRequest>,
 ) -> Result<Json<crate::AsOfResponse>, HttpError> {
+    let request_context = AuditContext {
+        temporal_view: Some(format!("as_of(e{})", request.at.0)),
+        requested_element: Some(request.at.0),
+        datom_count: Some(request.datoms.len()),
+        ..Default::default()
+    };
     let response = state.execute(
         &headers,
         "POST",
         "/v1/state/as-of",
         AuthScope::Query,
-        |service| service.as_of(request),
+        request_context.clone(),
+        |service| {
+            let response = service.as_of(request)?;
+            let mut context = request_context;
+            context.entity_count = Some(response.state.entities.len());
+            context.last_element = response.state.as_of.map(|element| element.0);
+            Ok((response, context))
+        },
     )?;
     Ok(Json(response))
 }
@@ -575,12 +648,17 @@ async fn parse_document(
     headers: HeaderMap,
     Json(request): Json<ParseDocumentRequest>,
 ) -> Result<Json<crate::ParseDocumentResponse>, HttpError> {
+    let request_context = audit_context_for_document(&request.dsl);
     let response = state.execute(
         &headers,
         "POST",
         "/v1/documents/parse",
         AuthScope::Query,
-        |service| service.parse_document(request),
+        request_context.clone(),
+        |service| {
+            let response = service.parse_document(request)?;
+            Ok((response, request_context))
+        },
     )?;
     Ok(Json(response))
 }
@@ -590,12 +668,22 @@ async fn run_document(
     headers: HeaderMap,
     Json(request): Json<RunDocumentRequest>,
 ) -> Result<Json<crate::RunDocumentResponse>, HttpError> {
+    let request_context = audit_context_for_document(&request.dsl);
     let response = state.execute(
         &headers,
         "POST",
         "/v1/documents/run",
         AuthScope::Query,
-        |service| service.run_document(request),
+        request_context.clone(),
+        |service| {
+            let response = service.run_document(request)?;
+            let mut context = request_context;
+            context.entity_count = Some(response.state.entities.len());
+            context.last_element = response.state.as_of.map(|element| element.0);
+            context.derived_tuple_count = Some(response.derived.tuples.len());
+            context.row_count = response.query.as_ref().map(|query| query.rows.len());
+            Ok((response, context))
+        },
     )?;
     Ok(Json(response))
 }
@@ -605,14 +693,94 @@ async fn explain_tuple(
     headers: HeaderMap,
     Json(request): Json<ExplainTupleRequest>,
 ) -> Result<Json<crate::ExplainTupleResponse>, HttpError> {
+    let request_context = AuditContext {
+        tuple_id: Some(request.tuple_id.0),
+        ..Default::default()
+    };
     let response = state.execute(
         &headers,
         "POST",
         "/v1/explain/tuple",
         AuthScope::Explain,
-        |service| service.explain_tuple(request),
+        request_context.clone(),
+        |service| {
+            let response = service.explain_tuple(request)?;
+            let mut context = request_context;
+            context.trace_tuple_count = Some(response.trace.tuples.len());
+            Ok((response, context))
+        },
     )?;
     Ok(Json(response))
+}
+
+fn audit_context_for_append(request: &AppendRequest) -> AuditContext {
+    AuditContext {
+        datom_count: Some(request.datoms.len()),
+        last_element: request.datoms.last().map(|datom| datom.element.0),
+        ..Default::default()
+    }
+}
+
+fn audit_context_for_document(dsl: &str) -> AuditContext {
+    let summary = summarize_document_dsl(dsl);
+    AuditContext {
+        temporal_view: summary.temporal_view,
+        query_goal: summary.query_goal,
+        requested_element: summary.requested_element,
+        ..Default::default()
+    }
+}
+
+#[derive(Default)]
+struct DocumentAuditSummary {
+    temporal_view: Option<String>,
+    query_goal: Option<String>,
+    requested_element: Option<u64>,
+}
+
+fn summarize_document_dsl(dsl: &str) -> DocumentAuditSummary {
+    let mut summary = DocumentAuditSummary::default();
+    let mut in_query = false;
+
+    for line in dsl.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !in_query {
+            if trimmed.starts_with("query") && trimmed.ends_with('{') {
+                in_query = true;
+            }
+            continue;
+        }
+
+        if trimmed == "}" {
+            break;
+        }
+
+        if summary.temporal_view.is_none() {
+            if trimmed == "current" {
+                summary.temporal_view = Some("current".into());
+                continue;
+            }
+            if let Some(element) = trimmed.strip_prefix("as_of ") {
+                summary.temporal_view = Some(format!("as_of({})", element.trim()));
+                summary.requested_element = element
+                    .trim()
+                    .strip_prefix('e')
+                    .and_then(|value| value.parse::<u64>().ok());
+                continue;
+            }
+        }
+
+        if summary.query_goal.is_none() {
+            if let Some(goal) = trimmed.strip_prefix("goal ") {
+                summary.query_goal = Some(goal.trim().to_string());
+            }
+        }
+    }
+
+    summary
 }
 
 fn append_audit_entry(path: &Path, entry: &AuditEntry) -> Result<(), std::io::Error> {

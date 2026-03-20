@@ -50,6 +50,7 @@ Read:
 4. `docs/PERFORMANCE.md`
 
 Those documents explain the durable pilot contract, report artifacts, drift workflow, and the remaining hardening gaps.
+They are also the place to look for the current audit semantics on the authenticated pilot service.
 
 ### If you need performance numbers
 

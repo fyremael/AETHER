@@ -99,7 +99,7 @@ Implemented today:
 - a minimal HTTP JSON kernel service boundary over `aether_api`
 - a durable coordination-pilot HTTP service example over a SQLite journal
 - bearer-token authentication and endpoint-scope enforcement on the pilot HTTP path
-- auditable pilot request logging with persisted JSONL output
+- auditable pilot request logging with semantic cut, query, tuple, and count context plus persisted JSONL output
 - operator-grade coordination pilot report generation in markdown and JSON
 - a release-mode performance report, Criterion benchmark suite, and ignored stress workloads for early regression tracking
 - a live console performance dashboard for real-time and collected instrument views

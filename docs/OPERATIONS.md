@@ -48,6 +48,8 @@ cargo run -p aether_api --example pilot_http_kernel_service --release
 
 That pilot service now starts with bearer-token auth enabled. By default it prints the local pilot token at startup and writes audit events beside the SQLite database as JSONL.
 
+Those audit entries now carry semantic context, not just endpoint metadata. For the current pilot path that includes the temporal cut, the query goal, tuple IDs for explain requests, and result-count summaries where they exist.
+
 ## Demo Catalog
 
 | Demo | Purpose | Best use |
@@ -108,6 +110,7 @@ The authenticated pilot boundary currently adds:
 - `GET /v1/audit`
 - bearer-token auth for `/v1/*`
 - persisted audit logging for pilot requests
+- semantic audit context for pilot query and explain actions
 
 Available endpoints today:
 
