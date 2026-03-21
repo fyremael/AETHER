@@ -43,6 +43,7 @@ That means the first wedge should remain:
 - exception routing in human-plus-agent service operations
 - governed approval and escalation flows
 - policy-aware case orchestration
+- explainable semantic blackboards and governed tuple-style workspaces
 
 ### Larger platform horizon
 

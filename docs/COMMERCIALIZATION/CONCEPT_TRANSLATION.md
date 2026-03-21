@@ -13,6 +13,7 @@ can understand quickly without losing the real meaning.
 | `AsOf(eN)` | point-in-time truth | "This is what the system believed at that exact cut of history." |
 | Resolver | semantic state builder | "It turns raw history into the state the system reasons over." |
 | Derived tuple | computed operational fact | "This is something the system inferred from the known facts." |
+| TupleSpace | explainable semantic blackboard | "AETHER can host a shared coordination space for agents and operators, with replay and proof." |
 | Stratified negation | safe negative reasoning | "The system can rule something out without creating circular contradictions." |
 | Semi-naive runtime | efficient repeated reasoning | "The engine avoids recomputing the whole world every time it iterates." |
 | Lease fencing | stale-work rejection | "Old authority is rejected automatically once it is no longer valid." |

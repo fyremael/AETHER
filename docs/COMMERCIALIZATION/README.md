@@ -30,8 +30,9 @@ Read these in order:
 2. `docs/COMMERCIALIZATION/CUSTOMER_DECK.md`
 3. `docs/COMMERCIALIZATION/MESSAGING_ARCHITECTURE.md`
 4. `docs/COMMERCIALIZATION/CONCEPT_TRANSLATION.md`
-5. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
-6. `docs/COMMERCIALIZATION/PITCH_DECK_OUTLINE.md`
+5. `docs/COMMERCIALIZATION/TUPLESPACE_OVER_AETHER.md`
+6. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
+7. `docs/COMMERCIALIZATION/PITCH_DECK_OUTLINE.md`
 
 That path gives you the narrative, language discipline, buyer map, and
 presentation structure.
@@ -61,6 +62,7 @@ That path keeps the visual system, copy system, and public front door aligned.
 | `docs/COMMERCIALIZATION/PITCH_DECK_OUTLINE.md` | Suggested slide sequence and evidence hooks for presentations |
 | `docs/COMMERCIALIZATION/MESSAGING_ARCHITECTURE.md` | Message ladder, proof points, claims discipline, and audience variants |
 | `docs/COMMERCIALIZATION/CONCEPT_TRANSLATION.md` | Technical-to-client terminology map for demos, calls, and collateral |
+| `docs/COMMERCIALIZATION/TUPLESPACE_OVER_AETHER.md` | Reference pattern for Linda-style TupleSpace or semantic blackboard use over AETHER |
 | `docs/COMMERCIALIZATION/VISUAL_DIRECTION.md` | Branding, visual grammar, and usability emphasis for public surfaces |
 
 ## Guardrails
