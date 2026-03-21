@@ -689,6 +689,233 @@ h3 {
   color: var(--muted);
 }
 
+.asset-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 22px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.asset-card {
+  display: grid;
+  gap: 12px;
+}
+
+.asset-frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: 22px;
+  border: 1px solid rgba(24, 51, 66, 0.16);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.74),
+    0 18px 34px rgba(71, 63, 46, 0.12);
+}
+
+.export-social {
+  aspect-ratio: 1200 / 630;
+  padding: 42px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(241, 234, 217, 0.98)),
+    rgba(255, 255, 255, 0.86);
+}
+
+.alt-social {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(235, 229, 211, 0.98)),
+    rgba(255, 255, 255, 0.86);
+}
+
+.proof-social {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(233, 225, 205, 0.98)),
+    rgba(255, 255, 255, 0.86);
+}
+
+.export-cover {
+  aspect-ratio: 16 / 9;
+  padding: 58px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(241, 234, 217, 0.98)),
+    rgba(255, 255, 255, 0.86);
+}
+
+.alt-cover {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(232, 225, 205, 0.98)),
+    rgba(255, 255, 255, 0.86);
+}
+
+.proof-cover {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(228, 221, 201, 0.98)),
+    rgba(255, 255, 255, 0.86);
+}
+
+.export-copy {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 14px;
+  max-width: 76%;
+}
+
+.export-copy h3 {
+  font-size: clamp(1.55rem, 2.6vw, 2.2rem);
+  line-height: 0.96;
+}
+
+.export-copy p {
+  margin: 0;
+  color: #35515c;
+  font-size: clamp(0.86rem, 1.2vw, 1rem);
+}
+
+.export-label {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--warm);
+}
+
+.export-orbit,
+.export-cells,
+.export-trace,
+.cover-band,
+.cover-grid,
+.cover-trace {
+  position: absolute;
+  inset: 0;
+  opacity: 0.32;
+  pointer-events: none;
+}
+
+.export-orbit,
+.cover-band {
+  background:
+    url("./assets/geometry-orbits.svg") right -120px center / 58% auto no-repeat,
+    linear-gradient(180deg, transparent 0 66%, rgba(25, 53, 67, 0.08) 67%, transparent 68%);
+}
+
+.export-cells,
+.cover-grid {
+  background:
+    url("./assets/geometry-cells.svg") right -100px bottom -30px / 58% auto no-repeat,
+    url("./assets/geometry-orbits.svg") left -140px top -50px / 42% auto no-repeat;
+}
+
+.export-trace,
+.cover-trace {
+  background:
+    radial-gradient(circle at 24% 30%, rgba(25, 53, 67, 0.18), transparent 10%),
+    radial-gradient(circle at 74% 66%, rgba(25, 53, 67, 0.18), transparent 12%),
+    linear-gradient(135deg, transparent 33%, rgba(25, 53, 67, 0.86) 34%, rgba(25, 53, 67, 0.86) 36%, transparent 37%),
+    linear-gradient(32deg, transparent 47%, rgba(25, 53, 67, 0.72) 48%, rgba(25, 53, 67, 0.72) 50%, transparent 51%),
+    linear-gradient(168deg, transparent 60%, rgba(25, 53, 67, 0.72) 61%, rgba(25, 53, 67, 0.72) 63%, transparent 64%);
+}
+
+.screenshot-frame {
+  min-height: 340px;
+  padding: 22px;
+  background:
+    linear-gradient(180deg, #132630, #173744),
+    rgba(19, 38, 48, 0.96);
+  color: #eef2ea;
+}
+
+.export-cover .export-copy {
+  max-width: 76%;
+}
+
+.export-cover .export-copy h3 {
+  font-size: clamp(1.75rem, 3vw, 2.35rem);
+}
+
+.export-cover .export-copy p {
+  font-size: clamp(0.96rem, 1.45vw, 1.08rem);
+}
+
+.report-frame {
+  background:
+    linear-gradient(180deg, #17303b, #214651),
+    rgba(19, 38, 48, 0.96);
+}
+
+.audit-frame {
+  background:
+    linear-gradient(180deg, #183342, #224b58),
+    rgba(19, 38, 48, 0.96);
+}
+
+.shot-title {
+  margin: 0 0 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #d8b27b;
+}
+
+.shot-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 0.96rem;
+  line-height: 1.55;
+  color: #f4f3ef;
+}
+
+.audit-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.audit-row {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.audit-row span {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.72rem;
+  color: #d5b37f;
+}
+
+.audit-row strong {
+  font-size: 0.96rem;
+  color: #f4f3ef;
+}
+
+.asset-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 4px;
+  color: var(--muted);
+}
+
+.asset-actions strong {
+  color: var(--ink);
+  font-size: 0.98rem;
+}
+
+.asset-actions a {
+  color: var(--accent-strong);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.asset-actions a:hover {
+  text-decoration: underline;
+}
+
 .footer {
   display: grid;
   gap: 10px;
@@ -770,6 +997,20 @@ code {
   .slide-topline {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .export-copy {
+    max-width: 100%;
+  }
+
+  .export-social,
+  .export-cover {
+    padding: 24px;
+  }
+
+  .asset-actions {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   h1 {

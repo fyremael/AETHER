@@ -93,6 +93,29 @@ For public surfaces:
 - show the pilot proof, not abstract promise alone
 - use geometry to reinforce structure rather than decorate whitespace
 - let screenshots, reports, and proof views carry credibility
+- keep the live Pages showcase in `site/showcase.html` as the primary export-and-preview entrance
+
+## Exportable Assets
+
+The current presentation pack now includes:
+
+- social cards
+- slide cover images
+- customer-facing proof screenshots
+
+These are generated reproducibly with:
+
+```bash
+python scripts/build_presentation_assets.py
+```
+
+The generator writes the exported PNG set to:
+
+```text
+site/assets/presentation/
+```
+
+Those files are then served directly by GitHub Pages through the live showcase entrance.
 
 For future product UI:
 

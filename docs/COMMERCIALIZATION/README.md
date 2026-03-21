@@ -43,7 +43,8 @@ Read these in order:
 1. `docs/COMMERCIALIZATION/VISUAL_DIRECTION.md`
 2. `docs/COMMERCIALIZATION/MESSAGING_ARCHITECTURE.md`
 3. `docs/COMMERCIALIZATION/CONCEPT_TRANSLATION.md`
-4. `site/index.html`
+4. `site/showcase.html`
+5. `site/index.html`
 
 That path keeps the visual system, copy system, and public front door aligned.
 

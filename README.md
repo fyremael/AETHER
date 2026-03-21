@@ -15,6 +15,10 @@ It is a Rust-first implementation workspace built from a spec-first package. The
 
 The documentation surface now has two layers: the source-controlled handbook in this repository and an automated GitHub Pages site that publishes the Rust API reference alongside a curated documentation portal.
 
+That Pages surface now also includes a live showcase entrance for executive,
+customer, and partner conversations, plus exportable social cards, slide
+covers, and proof snapshots generated from the same presentation system.
+
 If you are joining the project fresh, read [`docs/README.md`](./docs/README.md) and [`CONTRIBUTING.md`](./CONTRIBUTING.md) after this file and then walk through [`examples/demo-03-coordination-situation-room.md`](./examples/demo-03-coordination-situation-room.md). That is the fastest path from architectural stance to executable behavior.
 
 If you are evaluating AETHER as a product category or design-partner platform,

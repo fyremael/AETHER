@@ -32,6 +32,7 @@ For technical users or automation:
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-report.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-baseline.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-drift.ps1`
+- run `python scripts/build_presentation_assets.py`
 - run `cargo run -p aether_api --example pilot_coordination_report --release`
 - run `cargo run -p aether_api --example capture_performance_baseline --release`
 - run `cargo run -p aether_api --example performance_drift_report --release -- artifacts/performance/baseline.json`
@@ -48,3 +49,5 @@ Pilot launch-validation transcripts are written to `artifacts/pilot/launch/`.
 Performance reports, baselines, and drift captures are written to `artifacts/performance/`.
 
 The launch-validation runner prefers `artifacts/performance/baseline.json`, falls back to `fixtures/performance/accepted-baseline.windows-x86_64.json`, and records the chosen source in the transcript.
+
+Exportable presentation assets are written to `site/assets/presentation/` and exposed through the live Pages showcase in `site/showcase.html`.
