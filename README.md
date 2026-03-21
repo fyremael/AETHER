@@ -17,6 +17,12 @@ The documentation surface now has two layers: the source-controlled handbook in 
 
 If you are joining the project fresh, read [`docs/README.md`](./docs/README.md) and [`CONTRIBUTING.md`](./CONTRIBUTING.md) after this file and then walk through [`examples/demo-03-coordination-situation-room.md`](./examples/demo-03-coordination-situation-room.md). That is the fastest path from architectural stance to executable behavior.
 
+If you are evaluating AETHER as a product category or design-partner platform,
+start with [`docs/COMMERCIALIZATION/README.md`](./docs/COMMERCIALIZATION/README.md)
+after this file. That pack explains the long-range vision, buyer story,
+messaging discipline, and commercialization wedge while staying anchored to the
+current pilot proof.
+
 ## Thesis
 
 AETHER is built around two internal centers.
@@ -60,6 +66,23 @@ AETHER is not:
 - merely an orchestration shell
 - a Janus fork with recursive features bolted on later
 - a Python-first or Go-first semantic implementation
+
+## Commercial Frame
+
+The shortest commercial description is:
+
+**AETHER is the semantic coordination fabric for agentic operations.**
+
+That means:
+
+- operational memory with durable replay
+- derived understanding of readiness and authority
+- governed action through claims, leases, handoff, and fencing
+- proof-backed explanation for operators and auditors
+
+The current design-partner pilot proves that story narrowly in the coordination
+domain. The longer-range platform vision is documented in
+[`docs/COMMERCIALIZATION/VISION.md`](./docs/COMMERCIALIZATION/VISION.md).
 
 ## Design Position
 

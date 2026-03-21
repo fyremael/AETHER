@@ -40,6 +40,18 @@ Start here:
 2. `examples/README.md`
 3. `scripts/README.md`
 
+### If you are evaluating AETHER as a product or platform
+
+Read:
+
+1. `docs/COMMERCIALIZATION/README.md`
+2. `docs/COMMERCIALIZATION/VISION.md`
+3. `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md`
+4. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
+5. `docs/PILOT_COORDINATION.md`
+
+That path moves from category ambition to buyer story to the actual pilot proof.
+
 ### If you are working on the coordination pilot
 
 Read:
@@ -97,6 +109,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 | `docs/PILOT_COORDINATION.md` | Scope, exit gates, and run path for the current coordination pilot |
 | `docs/PILOT_LAUNCH.md` | Launch-readiness contract and validation pack for the current design-partner pilot |
 | `docs/PERFORMANCE.md` | Performance workloads, runner commands, benchmark harness, and interpretation guidance |
+| `docs/COMMERCIALIZATION/README.md` | Hub for commercialization, product framing, buyer narrative, and messaging |
 | `docs/GLOSSARY.md` | Canonical vocabulary for the codebase and its semantics |
 | `docs/DOCUMENTATION_STANDARD.md` | Documentation quality bar, update triggers, and maintenance rules |
 | `docs/STATUS.md` | What is implemented now |
@@ -112,6 +125,7 @@ The documentation system follows a few non-negotiable rules:
 - distinguish governing specification from current implementation guide
 - optimize for precision, not hype
 - make the operator path as explicit as the developer path
+- make the product story as disciplined as the implementation story
 - treat process documentation as product surface, not internal trivia
 
 ## Maintenance
