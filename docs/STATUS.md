@@ -18,6 +18,7 @@ Completed:
 - policy annotations supported on DSL-authored extensional facts
 - semi-naive delta execution implemented for recursive SCC evaluation
 - executable stratified negation implemented for stratified programs
+- bounded aggregation implemented for non-recursive head-term `count`, `sum`, `min`, and `max` rules
 - first coordination acceptance slice implemented for readiness, claims, leases, and stale-attempt rejection
 - in-memory kernel service implemented in `aether_api`
 - minimal HTTP JSON kernel service implemented over `aether_api`
@@ -41,7 +42,6 @@ Completed:
 
 Not yet completed:
 
-- bounded aggregation
 - full canonical DSL coverage beyond the current query/fact/policy slice
 - broader durable storage backends beyond the current SQLite journal
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
@@ -57,4 +57,4 @@ The most immediate work now sits just beyond the launch-ready pilot slice and la
 - decide how far to widen audit context from the current semantic cut/query/tuple fields into fuller operator intent and semantic diffs
 - decide when the current drift comparison should graduate into CI enforcement
 - extend the DSL from the current focused authoring surface to the full canonical language
-- add bounded aggregation and further runtime optimization
+- widen aggregation beyond the current non-recursive head-term slice and continue runtime optimization

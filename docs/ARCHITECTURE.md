@@ -66,6 +66,7 @@ It currently provides:
 
 - semi-naive delta evaluation across recursive SCCs
 - stratified negation across strata
+- bounded aggregation for non-recursive aggregate rules
 - materialized derived tuples
 - iteration metadata
 - parent tuple references

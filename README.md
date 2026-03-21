@@ -118,6 +118,7 @@ Implemented today:
 - unstratified-negation rejection
 - predicate-stratum computation for executable stratified negation
 - semi-naive delta execution across recursive SCCs
+- bounded aggregation via non-recursive head-term `count`, `sum`, `min`, and `max` rules
 - a first real recursive runtime slice for positive recursion and cross-stratum negation
 - source datom provenance threaded from resolved facts into derived tuples
 - derived tuple metadata with rule, SCC, stratum, iteration, parent tuple references, and source datom IDs
@@ -137,7 +138,7 @@ Implemented today:
 Deliberately still narrow:
 
 - the DSL parser is still a focused initial slice rather than the full canonical language
-- bounded aggregation is not implemented yet
+- bounded aggregation is currently limited to non-recursive aggregate rules
 - Go and Python remain boundary placeholders rather than active implementations
 - sidecar integrations are specified, not yet implemented
 

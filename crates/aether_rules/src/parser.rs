@@ -1,6 +1,7 @@
 use aether_ast::{
-    Atom, AttributeId, ExtensionalFact, Literal, PolicyEnvelope, PredicateId, PredicateRef,
-    QueryAst, QuerySpec, RuleAst, RuleId, RuleProgram, TemporalView, Term, Value, Variable,
+    AggregateFunction, AggregateTerm, Atom, AttributeId, ExtensionalFact, Literal, PolicyEnvelope,
+    PredicateId, PredicateRef, QueryAst, QuerySpec, RuleAst, RuleId, RuleProgram, TemporalView,
+    Term, Value, Variable,
 };
 use aether_schema::{
     AttributeClass, AttributeSchema, PredicateSignature, Schema, SchemaError, ValueType,
@@ -256,7 +257,7 @@ fn parse_rules_section(
                 rule: entry.clone(),
             });
         };
-        let head = parse_atom(*line, head.trim(), predicate_refs)?;
+        let head = parse_atom(*line, head.trim(), predicate_refs, true)?;
         let body = split_top_level(body.trim(), ',', *line)?
             .into_iter()
             .filter(|literal| !literal.is_empty())
@@ -390,7 +391,7 @@ fn parse_query_section(
             .strip_prefix("goal ")
             .or_else(|| entry.strip_prefix("find "))
         {
-            goals.push(parse_atom(*line, rest.trim(), predicate_refs)?);
+            goals.push(parse_atom(*line, rest.trim(), predicate_refs, false)?);
             continue;
         }
         if let Some(rest) = entry.strip_prefix("keep ") {
@@ -466,6 +467,7 @@ fn parse_literal(
             line,
             atom.trim(),
             predicate_refs,
+            false,
         )?));
     }
     if let Some(atom) = literal.strip_prefix('!') {
@@ -473,6 +475,7 @@ fn parse_literal(
             line,
             atom.trim(),
             predicate_refs,
+            false,
         )?));
     }
 
@@ -480,6 +483,7 @@ fn parse_literal(
         line,
         literal.trim(),
         predicate_refs,
+        false,
     )?))
 }
 
@@ -487,6 +491,7 @@ fn parse_atom(
     line: usize,
     atom: &str,
     predicate_refs: &IndexMap<String, PredicateRef>,
+    allow_aggregates: bool,
 ) -> Result<Atom, ParseError> {
     let (name, args) = parse_call(line, atom)?;
     let predicate = predicate_refs
@@ -506,7 +511,7 @@ fn parse_atom(
 
     let terms = args
         .iter()
-        .map(|token| parse_term(line, token))
+        .map(|token| parse_term(line, token, allow_aggregates))
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(Atom {
@@ -553,7 +558,7 @@ fn parse_call(line: usize, text: &str) -> Result<(&str, Vec<String>), ParseError
     Ok((name, args))
 }
 
-fn parse_term(line: usize, token: &str) -> Result<Term, ParseError> {
+fn parse_term(line: usize, token: &str, allow_aggregates: bool) -> Result<Term, ParseError> {
     let token = token.trim();
     if token.is_empty() {
         return Err(ParseError::InvalidTerm {
@@ -566,6 +571,18 @@ fn parse_term(line: usize, token: &str) -> Result<Term, ParseError> {
         return Ok(Term::Value(Value::String(parse_string_literal(
             line, token,
         )?)));
+    }
+
+    if token.contains('(') || token.contains(')') {
+        if allow_aggregates {
+            if let Some(aggregate) = parse_aggregate_term(line, token)? {
+                return Ok(Term::Aggregate(aggregate));
+            }
+        }
+        return Err(ParseError::InvalidTerm {
+            line,
+            text: token.into(),
+        });
     }
 
     match token {
@@ -608,13 +625,51 @@ fn parse_fact_value(line: usize, token: &str) -> Result<Value, ParseError> {
         return Ok(Value::Entity(aether_ast::EntityId::new(value)));
     }
 
-    match parse_term(line, token)? {
+    match parse_term(line, token, false)? {
         Term::Value(value) => Ok(value),
-        Term::Variable(_) => Err(ParseError::InvalidFactValue {
+        Term::Variable(_) | Term::Aggregate(_) => Err(ParseError::InvalidFactValue {
             line,
             text: token.into(),
         }),
     }
+}
+
+fn parse_aggregate_term(line: usize, token: &str) -> Result<Option<AggregateTerm>, ParseError> {
+    let Ok((name, args)) = parse_call(line, token) else {
+        return Ok(None);
+    };
+
+    let function = match name {
+        "count" => AggregateFunction::Count,
+        "sum" => AggregateFunction::Sum,
+        "min" => AggregateFunction::Min,
+        "max" => AggregateFunction::Max,
+        _ => return Ok(None),
+    };
+
+    if args.len() != 1 {
+        return Err(ParseError::InvalidTerm {
+            line,
+            text: token.into(),
+        });
+    }
+
+    let variable = args[0].trim();
+    if variable.is_empty()
+        || variable.starts_with('"')
+        || variable.contains('(')
+        || variable.contains(')')
+    {
+        return Err(ParseError::InvalidTerm {
+            line,
+            text: token.into(),
+        });
+    }
+
+    Ok(Some(AggregateTerm {
+        function,
+        variable: Variable::new(variable),
+    }))
 }
 
 fn parse_string_literal(line: usize, token: &str) -> Result<String, ParseError> {
@@ -893,7 +948,8 @@ mod tests {
     use super::{DefaultDslParser, DslParser, ParseError};
     use crate::{DefaultRuleCompiler, RuleCompiler};
     use aether_ast::{
-        Atom, Literal, PredicateId, PredicateRef, QueryAst, QuerySpec, TemporalView, Term, Value,
+        AggregateFunction, Atom, Literal, PredicateId, PredicateRef, QueryAst, QuerySpec,
+        TemporalView, Term, Value,
     };
     use aether_schema::{AttributeClass, ValueType};
 
@@ -1051,6 +1107,40 @@ mod tests {
                 },
             })
         );
+    }
+
+    #[test]
+    fn parses_head_aggregates_for_bounded_aggregation_rules() {
+        let document = DefaultDslParser
+            .parse_document(
+                r#"
+                schema {
+                  attr task.depends_on: RefSet<Entity>
+                }
+
+                predicates {
+                  task_depends_on(Entity, Entity)
+                  dependency_count(Entity, U64)
+                }
+
+                rules {
+                  dependency_count(task, count(dep)) <- task_depends_on(task, dep)
+                }
+
+                materialize {
+                  dependency_count
+                }
+                "#,
+            )
+            .expect("parse aggregate rule");
+
+        let aggregate_rule = &document.program.rules[0];
+        assert!(matches!(
+            &aggregate_rule.head.terms[1],
+            Term::Aggregate(aggregate)
+                if aggregate.function == AggregateFunction::Count
+                    && aggregate.variable == aether_ast::Variable::new("dep")
+        ));
     }
 
     #[test]

@@ -145,10 +145,37 @@ pub struct PredicateRef {
     pub arity: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum AggregateFunction {
+    Count,
+    Sum,
+    Min,
+    Max,
+}
+
+impl fmt::Display for AggregateFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            Self::Count => "count",
+            Self::Sum => "sum",
+            Self::Min => "min",
+            Self::Max => "max",
+        };
+        write!(f, "{label}")
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AggregateTerm {
+    pub function: AggregateFunction,
+    pub variable: Variable,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Term {
     Variable(Variable),
     Value(Value),
+    Aggregate(AggregateTerm),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

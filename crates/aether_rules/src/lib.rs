@@ -3,7 +3,8 @@ mod parser;
 pub use parser::{DefaultDslParser, DslDocument, DslParser, ParseError};
 
 use aether_ast::{
-    Atom, AttributeId, ExtensionalFact, Literal, PredicateId, RuleAst, RuleProgram, Value, Variable,
+    AggregateFunction, AggregateTerm, Atom, AttributeId, ExtensionalFact, Literal, PredicateId,
+    RuleAst, RuleId, RuleProgram, Term, Value, Variable,
 };
 use aether_plan::{CompiledProgram, DeltaRulePlan, DependencyGraph, StronglyConnectedComponent};
 use aether_schema::{AttributeSchema, Schema, SchemaError, ValueType};
@@ -48,6 +49,7 @@ impl RuleCompiler for DefaultRuleCompiler {
 
             let positive_variables = positive_variables(rule);
             validate_rule_safety(rule, &positive_variables)?;
+            validate_rule_types_and_aggregates(schema, rule, &positive_variables)?;
 
             let mut source_predicates = Vec::new();
             for literal in &rule.body {
@@ -79,6 +81,7 @@ impl RuleCompiler for DefaultRuleCompiler {
 
         let sccs = compute_sccs(&dependency_graph, &all_predicates);
         let scc_lookup = build_scc_lookup(&sccs);
+        validate_recursive_aggregation(schema, program, &dependency_graph, &sccs, &scc_lookup)?;
         for (head, dependency) in &negative_edges {
             if scc_lookup.get(head) == scc_lookup.get(dependency) {
                 return Err(CompileError::UnstratifiedNegation {
@@ -172,8 +175,9 @@ fn atom_variables(atom: &Atom) -> IndexSet<Variable> {
     atom.terms
         .iter()
         .filter_map(|term| match term {
-            aether_ast::Term::Variable(variable) => Some(variable.clone()),
-            aether_ast::Term::Value(_) => None,
+            Term::Variable(variable) => Some(variable.clone()),
+            Term::Aggregate(aggregate) => Some(aggregate.variable.clone()),
+            Term::Value(_) => None,
         })
         .collect()
 }
@@ -182,6 +186,234 @@ fn literal_atom(literal: &Literal) -> &Atom {
     match literal {
         Literal::Positive(atom) | Literal::Negative(atom) => atom,
     }
+}
+
+fn validate_rule_types_and_aggregates(
+    schema: &Schema,
+    rule: &RuleAst,
+    positive_variables: &IndexSet<Variable>,
+) -> Result<(), CompileError> {
+    let variable_types = infer_rule_variable_types(schema, rule)?;
+    let signature = schema
+        .predicate(&rule.head.predicate.id)
+        .expect("validated rule head predicate is present in schema");
+    let aggregate = head_aggregate(rule)?;
+
+    if let Some((_, aggregate_term)) = aggregate {
+        if rule.head.terms.iter().any(
+            |term| matches!(term, Term::Variable(variable) if variable == &aggregate_term.variable),
+        ) {
+            return Err(CompileError::AggregateVariableInGroupKey {
+                rule_id: rule.id,
+                variable: aggregate_term.variable.0.clone(),
+            });
+        }
+    }
+
+    for (position, (term, expected)) in rule.head.terms.iter().zip(&signature.fields).enumerate() {
+        match term {
+            Term::Variable(variable) => {
+                let actual = variable_types.get(variable).ok_or_else(|| {
+                    CompileError::RuleVariableTypeUnknown {
+                        rule_id: rule.id,
+                        variable: variable.0.clone(),
+                    }
+                })?;
+                if actual != expected {
+                    return Err(CompileError::RuleTermTypeMismatch {
+                        rule_id: rule.id,
+                        predicate: signature.name.clone(),
+                        position,
+                        expected: expected.clone(),
+                        actual: actual.clone(),
+                    });
+                }
+            }
+            Term::Value(value) => {
+                if !value_matches_type(value, expected) {
+                    return Err(CompileError::RuleTermTypeMismatch {
+                        rule_id: rule.id,
+                        predicate: signature.name.clone(),
+                        position,
+                        expected: expected.clone(),
+                        actual: value_type_of(value),
+                    });
+                }
+            }
+            Term::Aggregate(aggregate_term) => {
+                if !positive_variables.contains(&aggregate_term.variable) {
+                    return Err(CompileError::UnsafeVariable {
+                        rule_id: rule.id,
+                        variable: aggregate_term.variable.0.clone(),
+                    });
+                }
+                let input_type = variable_types
+                    .get(&aggregate_term.variable)
+                    .ok_or_else(|| CompileError::RuleVariableTypeUnknown {
+                        rule_id: rule.id,
+                        variable: aggregate_term.variable.0.clone(),
+                    })?;
+                let output_type =
+                    aggregate_output_type(rule.id, aggregate_term, input_type.clone())?;
+                if &output_type != expected {
+                    return Err(CompileError::AggregateOutputTypeMismatch {
+                        rule_id: rule.id,
+                        function: aggregate_term.function,
+                        expected: expected.clone(),
+                        actual: output_type,
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn infer_rule_variable_types(
+    schema: &Schema,
+    rule: &RuleAst,
+) -> Result<IndexMap<Variable, ValueType>, CompileError> {
+    let mut variable_types = IndexMap::new();
+    validate_atom_term_types(schema, rule.id, &rule.head, true, &mut variable_types)?;
+    for literal in &rule.body {
+        validate_atom_term_types(
+            schema,
+            rule.id,
+            literal_atom(literal),
+            false,
+            &mut variable_types,
+        )?;
+    }
+    Ok(variable_types)
+}
+
+fn validate_atom_term_types(
+    schema: &Schema,
+    rule_id: RuleId,
+    atom: &Atom,
+    allow_head_aggregate: bool,
+    variable_types: &mut IndexMap<Variable, ValueType>,
+) -> Result<(), CompileError> {
+    let signature = schema
+        .predicate(&atom.predicate.id)
+        .expect("validated atom predicate is present in schema");
+
+    for (position, (term, expected)) in atom.terms.iter().zip(&signature.fields).enumerate() {
+        match term {
+            Term::Variable(variable) => {
+                if let Some(existing) = variable_types.get(variable) {
+                    if existing != expected {
+                        return Err(CompileError::RuleVariableTypeConflict {
+                            rule_id,
+                            variable: variable.0.clone(),
+                            first: existing.clone(),
+                            second: expected.clone(),
+                        });
+                    }
+                } else {
+                    variable_types.insert(variable.clone(), expected.clone());
+                }
+            }
+            Term::Value(value) => {
+                if !value_matches_type(value, expected) {
+                    return Err(CompileError::RuleTermTypeMismatch {
+                        rule_id,
+                        predicate: signature.name.clone(),
+                        position,
+                        expected: expected.clone(),
+                        actual: value_type_of(value),
+                    });
+                }
+            }
+            Term::Aggregate(_) if !allow_head_aggregate => {
+                return Err(CompileError::AggregateOutsideHead { rule_id });
+            }
+            Term::Aggregate(_) => {}
+        }
+    }
+
+    Ok(())
+}
+
+fn head_aggregate(rule: &RuleAst) -> Result<Option<(usize, &AggregateTerm)>, CompileError> {
+    let mut aggregate = None;
+    for (index, term) in rule.head.terms.iter().enumerate() {
+        if let Term::Aggregate(aggregate_term) = term {
+            if aggregate.is_some() {
+                return Err(CompileError::MultipleHeadAggregates { rule_id: rule.id });
+            }
+            aggregate = Some((index, aggregate_term));
+        }
+    }
+    Ok(aggregate)
+}
+
+fn aggregate_output_type(
+    rule_id: RuleId,
+    aggregate: &AggregateTerm,
+    input_type: ValueType,
+) -> Result<ValueType, CompileError> {
+    match aggregate.function {
+        AggregateFunction::Count => Ok(ValueType::U64),
+        AggregateFunction::Sum => match input_type {
+            ValueType::I64 | ValueType::U64 | ValueType::F64 => Ok(input_type),
+            other => Err(CompileError::UnsupportedAggregateInputType {
+                rule_id,
+                function: aggregate.function,
+                variable: aggregate.variable.0.clone(),
+                input_type: other,
+            }),
+        },
+        AggregateFunction::Min | AggregateFunction::Max => match input_type {
+            ValueType::I64
+            | ValueType::U64
+            | ValueType::F64
+            | ValueType::String
+            | ValueType::Entity => Ok(input_type),
+            other => Err(CompileError::UnsupportedAggregateInputType {
+                rule_id,
+                function: aggregate.function,
+                variable: aggregate.variable.0.clone(),
+                input_type: other,
+            }),
+        },
+    }
+}
+
+fn validate_recursive_aggregation(
+    schema: &Schema,
+    program: &RuleProgram,
+    graph: &DependencyGraph,
+    sccs: &[StronglyConnectedComponent],
+    scc_lookup: &IndexMap<PredicateId, usize>,
+) -> Result<(), CompileError> {
+    for rule in &program.rules {
+        if head_aggregate(rule)?.is_none() {
+            continue;
+        }
+
+        let scc_id = *scc_lookup
+            .get(&rule.head.predicate.id)
+            .expect("aggregate head predicate should be present in scc lookup");
+        let recursive = sccs.iter().find(|scc| scc.id == scc_id).is_some_and(|scc| {
+            scc.predicates.len() > 1
+                || scc.predicates.iter().any(|predicate| {
+                    graph
+                        .edges
+                        .get(predicate)
+                        .is_some_and(|deps| deps.contains(predicate))
+                })
+        });
+        if recursive {
+            return Err(CompileError::RecursiveAggregation {
+                rule_id: rule.id,
+                predicate: predicate_label(schema, rule.head.predicate.id),
+            });
+        }
+    }
+
+    Ok(())
 }
 
 fn compute_sccs(
@@ -576,6 +808,53 @@ fn value_type_of(value: &Value) -> ValueType {
 pub enum CompileError {
     #[error(transparent)]
     Schema(#[from] SchemaError),
+    #[error("rule {rule_id} uses aggregate terms outside a rule head")]
+    AggregateOutsideHead { rule_id: RuleId },
+    #[error("rule {rule_id} has more than one aggregate term in its head")]
+    MultipleHeadAggregates { rule_id: RuleId },
+    #[error("rule {rule_id} cannot group by aggregate variable {variable}")]
+    AggregateVariableInGroupKey { rule_id: RuleId, variable: String },
+    #[error(
+        "rule {rule_id} uses aggregate {function} over variable {variable} with unsupported input type {input_type:?}"
+    )]
+    UnsupportedAggregateInputType {
+        rule_id: RuleId,
+        function: AggregateFunction,
+        variable: String,
+        input_type: ValueType,
+    },
+    #[error(
+        "rule {rule_id} produces aggregate {function} with type {actual:?}, but the head expects {expected:?}"
+    )]
+    AggregateOutputTypeMismatch {
+        rule_id: RuleId,
+        function: AggregateFunction,
+        expected: ValueType,
+        actual: ValueType,
+    },
+    #[error(
+        "rule {rule_id} uses variable {variable} with incompatible types {first:?} and {second:?}"
+    )]
+    RuleVariableTypeConflict {
+        rule_id: RuleId,
+        variable: String,
+        first: ValueType,
+        second: ValueType,
+    },
+    #[error("rule {rule_id} references variable {variable}, but its type could not be inferred")]
+    RuleVariableTypeUnknown { rule_id: RuleId, variable: String },
+    #[error(
+        "rule {rule_id} uses term {position} of predicate {predicate} with type {actual:?}, expected {expected:?}"
+    )]
+    RuleTermTypeMismatch {
+        rule_id: RuleId,
+        predicate: String,
+        position: usize,
+        expected: ValueType,
+        actual: ValueType,
+    },
+    #[error("rule {rule_id} uses bounded aggregation recursively through predicate {predicate}")]
+    RecursiveAggregation { rule_id: RuleId, predicate: String },
     #[error(
         "predicate {predicate} cannot bind to attribute {attribute}: expected {expected_fields:?}, found {actual_fields:?}"
     )]
@@ -609,8 +888,8 @@ pub enum CompileError {
 mod tests {
     use super::{CompileError, DefaultRuleCompiler, RuleCompiler};
     use aether_ast::{
-        Atom, AttributeId, ExtensionalFact, Literal, PredicateId, PredicateRef, RuleAst, RuleId,
-        RuleProgram, Term, Value, Variable,
+        AggregateFunction, AggregateTerm, Atom, AttributeId, ExtensionalFact, Literal, PredicateId,
+        PredicateRef, RuleAst, RuleId, RuleProgram, Term, Value, Variable,
     };
     use aether_schema::{AttributeClass, AttributeSchema, PredicateSignature, Schema, ValueType};
 
@@ -630,6 +909,13 @@ mod tests {
                 .map(|name| Term::Variable(Variable::new(*name)))
                 .collect(),
         }
+    }
+
+    fn aggregate(function: AggregateFunction, variable: &str) -> Term {
+        Term::Aggregate(AggregateTerm {
+            function,
+            variable: Variable::new(variable),
+        })
     }
 
     fn schema(predicates: &[(u64, &str, usize)]) -> Schema {
@@ -756,6 +1042,103 @@ mod tests {
             compiled.extensional_bindings.get(&task_depends_on.id),
             Some(&AttributeId::new(21))
         );
+    }
+
+    #[test]
+    fn bounded_aggregation_requires_non_recursive_rules_and_matching_output_types() {
+        let edge = predicate(1, "edge", 2);
+        let reach_count = predicate(2, "reach_count", 2);
+        let mut aggregate_schema = Schema::new("v1");
+        aggregate_schema
+            .register_predicate(PredicateSignature {
+                id: edge.id,
+                name: edge.name.clone(),
+                fields: vec![ValueType::Entity, ValueType::Entity],
+            })
+            .expect("register edge");
+        aggregate_schema
+            .register_predicate(PredicateSignature {
+                id: reach_count.id,
+                name: reach_count.name.clone(),
+                fields: vec![ValueType::Entity, ValueType::String],
+            })
+            .expect("register aggregate predicate");
+
+        let type_mismatch = DefaultRuleCompiler
+            .compile(
+                &aggregate_schema,
+                &RuleProgram {
+                    predicates: vec![edge.clone(), reach_count.clone()],
+                    rules: vec![RuleAst {
+                        id: RuleId::new(1),
+                        head: Atom {
+                            predicate: reach_count.clone(),
+                            terms: vec![
+                                Term::Variable(Variable::new("x")),
+                                aggregate(AggregateFunction::Count, "y"),
+                            ],
+                        },
+                        body: vec![Literal::Positive(atom(edge.clone(), &["x", "y"]))],
+                    }],
+                    materialized: vec![reach_count.id],
+                    facts: Vec::new(),
+                },
+            )
+            .expect_err("aggregate output type mismatch should fail");
+        assert!(matches!(
+            type_mismatch,
+            CompileError::AggregateOutputTypeMismatch {
+                rule_id,
+                function: AggregateFunction::Count,
+                expected: ValueType::String,
+                actual: ValueType::U64,
+            } if rule_id == RuleId::new(1)
+        ));
+
+        let mut recursive_schema = Schema::new("v1");
+        recursive_schema
+            .register_predicate(PredicateSignature {
+                id: PredicateId::new(1),
+                name: "edge".into(),
+                fields: vec![ValueType::Entity, ValueType::Entity],
+            })
+            .expect("register edge");
+        recursive_schema
+            .register_predicate(PredicateSignature {
+                id: PredicateId::new(3),
+                name: "bad_count".into(),
+                fields: vec![ValueType::Entity, ValueType::U64],
+            })
+            .expect("register recursive aggregate predicate");
+        let recursive = DefaultRuleCompiler
+            .compile(
+                &recursive_schema,
+                &RuleProgram {
+                    predicates: vec![edge, predicate(3, "bad_count", 2)],
+                    rules: vec![RuleAst {
+                        id: RuleId::new(2),
+                        head: Atom {
+                            predicate: predicate(3, "bad_count", 2),
+                            terms: vec![
+                                Term::Variable(Variable::new("x")),
+                                aggregate(AggregateFunction::Count, "y"),
+                            ],
+                        },
+                        body: vec![Literal::Positive(atom(
+                            predicate(3, "bad_count", 2),
+                            &["x", "y"],
+                        ))],
+                    }],
+                    materialized: vec![PredicateId::new(3)],
+                    facts: Vec::new(),
+                },
+            )
+            .expect_err("recursive aggregate should fail");
+        assert!(matches!(
+            recursive,
+            CompileError::RecursiveAggregation { rule_id, predicate }
+                if rule_id == RuleId::new(2) && predicate == "bad_count"
+        ));
     }
 
     #[test]

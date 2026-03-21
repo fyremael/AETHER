@@ -1,11 +1,13 @@
 use aether_ast::{
-    DerivedTuple, DerivedTupleMetadata, ElementId, Literal, PredicateId, QueryAst, QueryResult,
-    QueryRow, RuleAst, RuleId, Term, Tuple, TupleId, Value, Variable,
+    AggregateFunction, AggregateTerm, DerivedTuple, DerivedTupleMetadata, ElementId, Literal,
+    PredicateId, QueryAst, QueryResult, QueryRow, RuleAst, RuleId, Term, Tuple, TupleId, Value,
+    Variable,
 };
 use aether_plan::CompiledProgram;
 use aether_resolver::ResolvedState;
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use thiserror::Error;
 
 pub trait RuleRuntime {
@@ -53,6 +55,32 @@ struct MatchState {
     query_tuple_id: Option<TupleId>,
 }
 
+#[derive(Clone, Debug)]
+struct AggregatedMatch {
+    values: Vec<Value>,
+    parent_tuple_ids: Vec<TupleId>,
+    source_datom_ids: Vec<ElementId>,
+}
+
+#[derive(Clone, Debug)]
+struct AggregateGroup {
+    values: Vec<Option<Value>>,
+    accumulator: AggregateAccumulator,
+    seen_bindings: IndexSet<String>,
+    parent_tuple_ids: Vec<TupleId>,
+    source_datom_ids: Vec<ElementId>,
+}
+
+#[derive(Clone, Debug)]
+enum AggregateAccumulator {
+    Count(u64),
+    SumI64(i64),
+    SumU64(u64),
+    SumF64(f64),
+    Min(Value),
+    Max(Value),
+}
+
 #[derive(Default)]
 pub struct SemiNaiveRuntime;
 
@@ -97,8 +125,12 @@ impl RuleRuntime for SemiNaiveRuntime {
                 let mut batch_tuples = Vec::new();
 
                 for rule in rules {
-                    let anchor_indices =
-                        current_scc_positive_indices(rule, &current_scc_predicates);
+                    let aggregate = head_aggregate(rule);
+                    let anchor_indices = if aggregate.is_some() {
+                        Vec::new()
+                    } else {
+                        current_scc_positive_indices(rule, &current_scc_predicates)
+                    };
                     let anchor_plan = if delta_rows.is_empty() {
                         if anchor_indices.is_empty() {
                             vec![None]
@@ -111,6 +143,8 @@ impl RuleRuntime for SemiNaiveRuntime {
                         anchor_indices.into_iter().map(Some).collect()
                     };
 
+                    let mut aggregate_matches = Vec::new();
+
                     for anchor_index in anchor_plan {
                         let matches = evaluate_rule_body_variant(
                             rule,
@@ -122,9 +156,17 @@ impl RuleRuntime for SemiNaiveRuntime {
                             &current_scc_predicates,
                         )?;
 
+                        if aggregate.is_some() {
+                            aggregate_matches.extend(matches);
+                            continue;
+                        }
+
                         for matched in matches {
-                            let values =
-                                materialize_head(rule.id, &rule.head.terms, &matched.bindings)?;
+                            let values = materialize_non_aggregate_head(
+                                rule.id,
+                                &rule.head.terms,
+                                &matched.bindings,
+                            )?;
                             let key = tuple_key(rule.head.predicate.id, &values);
                             if tuple_keys.contains(&key) {
                                 continue;
@@ -146,6 +188,50 @@ impl RuleRuntime for SemiNaiveRuntime {
                                     id: tuple_id,
                                     predicate: rule.head.predicate.id,
                                     values,
+                                },
+                                metadata: DerivedTupleMetadata {
+                                    rule_id: rule.id,
+                                    predicate_id: rule.head.predicate.id,
+                                    stratum,
+                                    scc_id,
+                                    iteration,
+                                    parent_tuple_ids: matched.parent_tuple_ids,
+                                    source_datom_ids: matched.source_datom_ids,
+                                },
+                            });
+                        }
+                    }
+
+                    if let Some((aggregate_index, aggregate_term)) = aggregate {
+                        let matches = materialize_aggregate_head(
+                            rule.id,
+                            &rule.head.terms,
+                            aggregate_index,
+                            aggregate_term,
+                            &aggregate_matches,
+                        )?;
+                        for matched in matches {
+                            let key = tuple_key(rule.head.predicate.id, &matched.values);
+                            if tuple_keys.contains(&key) {
+                                continue;
+                            }
+
+                            let tuple_id = TupleId::new(next_tuple_id);
+                            next_tuple_id += 1;
+                            tuple_keys.insert(key);
+
+                            batch_rows.entry(rule.head.predicate.id).or_default().push(
+                                RelationRow {
+                                    values: matched.values.clone(),
+                                    tuple_id: Some(tuple_id),
+                                    source_datom_ids: matched.source_datom_ids.clone(),
+                                },
+                            );
+                            batch_tuples.push(DerivedTuple {
+                                tuple: Tuple {
+                                    id: tuple_id,
+                                    predicate: rule.head.predicate.id,
+                                    values: matched.values,
                                 },
                                 metadata: DerivedTupleMetadata {
                                     rule_id: rule.id,
@@ -582,13 +668,14 @@ fn unify_terms(
             },
             Term::Value(expected) if expected != value => return None,
             Term::Value(_) => {}
+            Term::Aggregate(_) => return None,
         }
     }
 
     Some(next_bindings)
 }
 
-fn materialize_head(
+fn materialize_non_aggregate_head(
     rule_id: RuleId,
     terms: &[Term],
     bindings: &IndexMap<Variable, Value>,
@@ -606,8 +693,153 @@ fn materialize_head(
                     })
             }
             Term::Value(value) => Ok(value.clone()),
+            Term::Aggregate(_) => Err(RuntimeError::UnexpectedAggregate(rule_id)),
         })
         .collect()
+}
+
+fn materialize_aggregate_head(
+    rule_id: RuleId,
+    terms: &[Term],
+    aggregate_index: usize,
+    aggregate_term: &AggregateTerm,
+    matches: &[MatchState],
+) -> Result<Vec<AggregatedMatch>, RuntimeError> {
+    let mut groups: IndexMap<String, AggregateGroup> = IndexMap::new();
+
+    for matched in matches {
+        let binding_key = bindings_key(&matched.bindings);
+        let group_values =
+            materialize_group_values(rule_id, terms, aggregate_index, &matched.bindings)?;
+        let group_key = values_key(&group_values);
+        let aggregate_value = matched
+            .bindings
+            .get(&aggregate_term.variable)
+            .ok_or_else(|| RuntimeError::UnboundVariable {
+                rule_id,
+                variable: aggregate_term.variable.0.clone(),
+            })?;
+
+        if !groups.contains_key(&group_key) {
+            let accumulator = AggregateAccumulator::from_value(
+                rule_id,
+                aggregate_term.function,
+                aggregate_value,
+            )?;
+            groups.insert(
+                group_key.clone(),
+                AggregateGroup {
+                    values: group_values.into_iter().map(Some).collect(),
+                    accumulator,
+                    seen_bindings: IndexSet::new(),
+                    parent_tuple_ids: Vec::new(),
+                    source_datom_ids: Vec::new(),
+                },
+            );
+        }
+        let group = groups
+            .get_mut(&group_key)
+            .expect("aggregate group should exist after insertion");
+
+        if !group.seen_bindings.insert(binding_key) {
+            continue;
+        }
+
+        if group.seen_bindings.len() > 1 {
+            group
+                .accumulator
+                .add(rule_id, aggregate_term.function, aggregate_value)?;
+        }
+        extend_unique(&mut group.parent_tuple_ids, &matched.parent_tuple_ids);
+        extend_unique(&mut group.source_datom_ids, &matched.source_datom_ids);
+    }
+
+    let mut aggregated = groups
+        .into_values()
+        .map(|group| {
+            let mut values = group
+                .values
+                .into_iter()
+                .map(|value| value.expect("group values are initialized"))
+                .collect::<Vec<_>>();
+            values[aggregate_index] = group.accumulator.finalize();
+            AggregatedMatch {
+                values,
+                parent_tuple_ids: group.parent_tuple_ids,
+                source_datom_ids: group.source_datom_ids,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    aggregated.sort_by_key(|group| values_key(&group.values));
+    Ok(aggregated)
+}
+
+fn materialize_group_values(
+    rule_id: RuleId,
+    terms: &[Term],
+    aggregate_index: usize,
+    bindings: &IndexMap<Variable, Value>,
+) -> Result<Vec<Value>, RuntimeError> {
+    terms
+        .iter()
+        .enumerate()
+        .map(|(index, term)| {
+            if index == aggregate_index {
+                return Ok(Value::Null);
+            }
+            match term {
+                Term::Variable(variable) => {
+                    bindings
+                        .get(variable)
+                        .cloned()
+                        .ok_or_else(|| RuntimeError::UnboundVariable {
+                            rule_id,
+                            variable: variable.0.clone(),
+                        })
+                }
+                Term::Value(value) => Ok(value.clone()),
+                Term::Aggregate(_) => Err(RuntimeError::UnexpectedAggregate(rule_id)),
+            }
+        })
+        .collect()
+}
+
+fn head_aggregate(rule: &RuleAst) -> Option<(usize, &AggregateTerm)> {
+    rule.head
+        .terms
+        .iter()
+        .enumerate()
+        .find_map(|(index, term)| match term {
+            Term::Aggregate(aggregate) => Some((index, aggregate)),
+            _ => None,
+        })
+}
+
+fn bindings_key(bindings: &IndexMap<Variable, Value>) -> String {
+    let mut entries = bindings
+        .iter()
+        .map(|(variable, value)| (variable.0.as_str(), value_key(value)))
+        .collect::<Vec<_>>();
+    entries.sort_unstable_by(|left, right| left.0.cmp(right.0));
+
+    let mut rendered = String::new();
+    for (variable, value) in entries {
+        rendered.push_str(variable);
+        rendered.push('=');
+        rendered.push_str(&value);
+        rendered.push('|');
+    }
+    rendered
+}
+
+fn values_key(values: &[Value]) -> String {
+    let mut rendered = String::new();
+    for value in values {
+        rendered.push_str(&value_key(value));
+        rendered.push('|');
+    }
+    rendered
 }
 
 fn build_scc_lookup(program: &CompiledProgram) -> IndexMap<PredicateId, usize> {
@@ -618,6 +850,144 @@ fn build_scc_lookup(program: &CompiledProgram) -> IndexMap<PredicateId, usize> {
         }
     }
     lookup
+}
+
+impl AggregateAccumulator {
+    fn from_value(
+        rule_id: RuleId,
+        function: AggregateFunction,
+        value: &Value,
+    ) -> Result<Self, RuntimeError> {
+        match function {
+            AggregateFunction::Count => Ok(Self::Count(1)),
+            AggregateFunction::Sum => match value {
+                Value::I64(inner) => Ok(Self::SumI64(*inner)),
+                Value::U64(inner) => Ok(Self::SumU64(*inner)),
+                Value::F64(inner) => Ok(Self::SumF64(*inner)),
+                other => Err(RuntimeError::UnsupportedAggregateInput {
+                    rule_id,
+                    function,
+                    actual: runtime_value_type(other),
+                }),
+            },
+            AggregateFunction::Min => {
+                validate_orderable_input(rule_id, function, value).map(|_| Self::Min(value.clone()))
+            }
+            AggregateFunction::Max => {
+                validate_orderable_input(rule_id, function, value).map(|_| Self::Max(value.clone()))
+            }
+        }
+    }
+
+    fn add(
+        &mut self,
+        rule_id: RuleId,
+        function: AggregateFunction,
+        value: &Value,
+    ) -> Result<(), RuntimeError> {
+        match self {
+            Self::Count(count) => {
+                *count += 1;
+                Ok(())
+            }
+            Self::SumI64(total) => match value {
+                Value::I64(inner) => {
+                    *total += inner;
+                    Ok(())
+                }
+                other => Err(RuntimeError::AggregateInputTypeMismatch {
+                    rule_id,
+                    function,
+                    expected: "I64".into(),
+                    actual: runtime_value_type(other),
+                }),
+            },
+            Self::SumU64(total) => match value {
+                Value::U64(inner) => {
+                    *total += inner;
+                    Ok(())
+                }
+                other => Err(RuntimeError::AggregateInputTypeMismatch {
+                    rule_id,
+                    function,
+                    expected: "U64".into(),
+                    actual: runtime_value_type(other),
+                }),
+            },
+            Self::SumF64(total) => match value {
+                Value::F64(inner) => {
+                    *total += inner;
+                    Ok(())
+                }
+                other => Err(RuntimeError::AggregateInputTypeMismatch {
+                    rule_id,
+                    function,
+                    expected: "F64".into(),
+                    actual: runtime_value_type(other),
+                }),
+            },
+            Self::Min(current) => {
+                validate_orderable_input(rule_id, function, value)?;
+                if compare_values(current, value)? == Ordering::Greater {
+                    *current = value.clone();
+                }
+                Ok(())
+            }
+            Self::Max(current) => {
+                validate_orderable_input(rule_id, function, value)?;
+                if compare_values(current, value)? == Ordering::Less {
+                    *current = value.clone();
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn finalize(self) -> Value {
+        match self {
+            Self::Count(inner) => Value::U64(inner),
+            Self::SumI64(inner) => Value::I64(inner),
+            Self::SumU64(inner) => Value::U64(inner),
+            Self::SumF64(inner) => Value::F64(inner),
+            Self::Min(inner) | Self::Max(inner) => inner,
+        }
+    }
+}
+
+fn validate_orderable_input(
+    rule_id: RuleId,
+    function: AggregateFunction,
+    value: &Value,
+) -> Result<(), RuntimeError> {
+    match value {
+        Value::I64(_) | Value::U64(_) | Value::F64(_) | Value::String(_) | Value::Entity(_) => {
+            Ok(())
+        }
+        other => Err(RuntimeError::UnsupportedAggregateInput {
+            rule_id,
+            function,
+            actual: runtime_value_type(other),
+        }),
+    }
+}
+
+fn compare_values(left: &Value, right: &Value) -> Result<Ordering, RuntimeError> {
+    match (left, right) {
+        (Value::I64(left_inner), Value::I64(right_inner)) => Ok(left_inner.cmp(right_inner)),
+        (Value::U64(left_inner), Value::U64(right_inner)) => Ok(left_inner.cmp(right_inner)),
+        (Value::F64(left_inner), Value::F64(right_inner)) => left_inner
+            .partial_cmp(right_inner)
+            .ok_or_else(|| RuntimeError::NonComparableAggregateValues {
+                left: runtime_value_type(left),
+                right: runtime_value_type(right),
+            }),
+        (Value::String(left_inner), Value::String(right_inner)) => Ok(left_inner.cmp(right_inner)),
+        (Value::Entity(left_inner), Value::Entity(right_inner)) => Ok(left_inner.cmp(right_inner)),
+        _ => Err(RuntimeError::NonComparableAggregateValues {
+            left: runtime_value_type(left),
+            right: runtime_value_type(right),
+        }),
+    }
 }
 
 fn tuple_key(predicate: PredicateId, values: &[Value]) -> String {
@@ -662,6 +1032,20 @@ fn value_key(value: &Value) -> String {
     }
 }
 
+fn runtime_value_type(value: &Value) -> String {
+    match value {
+        Value::Null => "Null".into(),
+        Value::Bool(_) => "Bool".into(),
+        Value::I64(_) => "I64".into(),
+        Value::U64(_) => "U64".into(),
+        Value::F64(_) => "F64".into(),
+        Value::String(_) => "String".into(),
+        Value::Bytes(_) => "Bytes".into(),
+        Value::Entity(_) => "Entity".into(),
+        Value::List(_) => "List".into(),
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum RuntimeError {
     #[error("predicate {0} has no extensional binding or fact rows in the compiled program")]
@@ -670,15 +1054,38 @@ pub enum RuntimeError {
     UnsupportedIntraStratumNegation(RuleId),
     #[error("rule {rule_id} references unbound variable {variable}")]
     UnboundVariable { rule_id: RuleId, variable: String },
+    #[error(
+        "rule {0} requires grouped aggregate materialization, but was evaluated as a plain rule"
+    )]
+    UnexpectedAggregate(RuleId),
+    #[error(
+        "rule {rule_id} uses aggregate {function} over unsupported runtime value type {actual}"
+    )]
+    UnsupportedAggregateInput {
+        rule_id: RuleId,
+        function: AggregateFunction,
+        actual: String,
+    },
+    #[error(
+        "rule {rule_id} uses aggregate {function} with mixed runtime input types: expected {expected}, found {actual}"
+    )]
+    AggregateInputTypeMismatch {
+        rule_id: RuleId,
+        function: AggregateFunction,
+        expected: String,
+        actual: String,
+    },
+    #[error("aggregate comparison requires comparable values, found {left} and {right}")]
+    NonComparableAggregateValues { left: String, right: String },
 }
 
 #[cfg(test)]
 mod tests {
     use super::{execute_query, RuleRuntime, RuntimeError, SemiNaiveRuntime};
     use aether_ast::{
-        Atom, AttributeId, Datom, DatomProvenance, ElementId, EntityId, ExtensionalFact, Literal,
-        PredicateId, PredicateRef, QueryAst, QueryRow, RuleAst, RuleId, RuleProgram, Term, Value,
-        Variable,
+        AggregateFunction, AggregateTerm, Atom, AttributeId, Datom, DatomProvenance, ElementId,
+        EntityId, ExtensionalFact, Literal, PredicateId, PredicateRef, QueryAst, QueryRow, RuleAst,
+        RuleId, RuleProgram, Term, Value, Variable,
     };
     use aether_resolver::{MaterializedResolver, Resolver};
     use aether_rules::{DefaultRuleCompiler, RuleCompiler};
@@ -700,6 +1107,13 @@ mod tests {
                 .map(|name| Term::Variable(Variable::new(*name)))
                 .collect(),
         }
+    }
+
+    fn aggregate(function: AggregateFunction, variable: &str) -> Term {
+        Term::Aggregate(AggregateTerm {
+            function,
+            variable: Variable::new(variable),
+        })
     }
 
     fn dependency_datom(entity: u64, value: u64, element: u64) -> Datom {
@@ -819,6 +1233,277 @@ mod tests {
         assert_eq!(
             longest_path.metadata.source_datom_ids,
             vec![ElementId::new(1), ElementId::new(2), ElementId::new(3)]
+        );
+    }
+
+    #[test]
+    fn bounded_aggregation_materializes_counts_sums_and_maxima() {
+        let mut schema = Schema::new("v1");
+        for signature in [
+            PredicateSignature {
+                id: PredicateId::new(1),
+                name: "edge".into(),
+                fields: vec![ValueType::Entity, ValueType::Entity],
+            },
+            PredicateSignature {
+                id: PredicateId::new(2),
+                name: "reach".into(),
+                fields: vec![ValueType::Entity, ValueType::Entity],
+            },
+            PredicateSignature {
+                id: PredicateId::new(3),
+                name: "reachable_count".into(),
+                fields: vec![ValueType::Entity, ValueType::U64],
+            },
+            PredicateSignature {
+                id: PredicateId::new(4),
+                name: "project_task".into(),
+                fields: vec![ValueType::Entity, ValueType::Entity],
+            },
+            PredicateSignature {
+                id: PredicateId::new(5),
+                name: "task_hours".into(),
+                fields: vec![ValueType::Entity, ValueType::U64],
+            },
+            PredicateSignature {
+                id: PredicateId::new(6),
+                name: "project_hours".into(),
+                fields: vec![ValueType::Entity, ValueType::U64],
+            },
+            PredicateSignature {
+                id: PredicateId::new(7),
+                name: "execution_attempt".into(),
+                fields: vec![ValueType::Entity, ValueType::String, ValueType::U64],
+            },
+            PredicateSignature {
+                id: PredicateId::new(8),
+                name: "latest_epoch".into(),
+                fields: vec![ValueType::Entity, ValueType::U64],
+            },
+        ] {
+            schema
+                .register_predicate(signature)
+                .expect("register predicate");
+        }
+
+        let program = RuleProgram {
+            predicates: vec![
+                predicate(1, "edge", 2),
+                predicate(2, "reach", 2),
+                predicate(3, "reachable_count", 2),
+                predicate(4, "project_task", 2),
+                predicate(5, "task_hours", 2),
+                predicate(6, "project_hours", 2),
+                predicate(7, "execution_attempt", 3),
+                predicate(8, "latest_epoch", 2),
+            ],
+            rules: vec![
+                RuleAst {
+                    id: RuleId::new(1),
+                    head: atom(predicate(2, "reach", 2), &["x", "y"]),
+                    body: vec![Literal::Positive(atom(
+                        predicate(1, "edge", 2),
+                        &["x", "y"],
+                    ))],
+                },
+                RuleAst {
+                    id: RuleId::new(2),
+                    head: atom(predicate(2, "reach", 2), &["x", "z"]),
+                    body: vec![
+                        Literal::Positive(atom(predicate(2, "reach", 2), &["x", "y"])),
+                        Literal::Positive(atom(predicate(1, "edge", 2), &["y", "z"])),
+                    ],
+                },
+                RuleAst {
+                    id: RuleId::new(3),
+                    head: Atom {
+                        predicate: predicate(3, "reachable_count", 2),
+                        terms: vec![
+                            Term::Variable(Variable::new("x")),
+                            aggregate(AggregateFunction::Count, "y"),
+                        ],
+                    },
+                    body: vec![Literal::Positive(atom(
+                        predicate(2, "reach", 2),
+                        &["x", "y"],
+                    ))],
+                },
+                RuleAst {
+                    id: RuleId::new(4),
+                    head: Atom {
+                        predicate: predicate(6, "project_hours", 2),
+                        terms: vec![
+                            Term::Variable(Variable::new("project")),
+                            aggregate(AggregateFunction::Sum, "hours"),
+                        ],
+                    },
+                    body: vec![
+                        Literal::Positive(atom(
+                            predicate(4, "project_task", 2),
+                            &["project", "task"],
+                        )),
+                        Literal::Positive(atom(predicate(5, "task_hours", 2), &["task", "hours"])),
+                    ],
+                },
+                RuleAst {
+                    id: RuleId::new(5),
+                    head: Atom {
+                        predicate: predicate(8, "latest_epoch", 2),
+                        terms: vec![
+                            Term::Variable(Variable::new("task")),
+                            aggregate(AggregateFunction::Max, "epoch"),
+                        ],
+                    },
+                    body: vec![Literal::Positive(atom(
+                        predicate(7, "execution_attempt", 3),
+                        &["task", "worker", "epoch"],
+                    ))],
+                },
+            ],
+            materialized: vec![
+                PredicateId::new(2),
+                PredicateId::new(3),
+                PredicateId::new(6),
+                PredicateId::new(8),
+            ],
+            facts: vec![
+                ExtensionalFact {
+                    predicate: predicate(1, "edge", 2),
+                    values: vec![
+                        Value::Entity(EntityId::new(1)),
+                        Value::Entity(EntityId::new(2)),
+                    ],
+                    policy: None,
+                },
+                ExtensionalFact {
+                    predicate: predicate(1, "edge", 2),
+                    values: vec![
+                        Value::Entity(EntityId::new(2)),
+                        Value::Entity(EntityId::new(3)),
+                    ],
+                    policy: None,
+                },
+                ExtensionalFact {
+                    predicate: predicate(1, "edge", 2),
+                    values: vec![
+                        Value::Entity(EntityId::new(3)),
+                        Value::Entity(EntityId::new(4)),
+                    ],
+                    policy: None,
+                },
+                ExtensionalFact {
+                    predicate: predicate(4, "project_task", 2),
+                    values: vec![
+                        Value::Entity(EntityId::new(10)),
+                        Value::Entity(EntityId::new(101)),
+                    ],
+                    policy: None,
+                },
+                ExtensionalFact {
+                    predicate: predicate(4, "project_task", 2),
+                    values: vec![
+                        Value::Entity(EntityId::new(10)),
+                        Value::Entity(EntityId::new(102)),
+                    ],
+                    policy: None,
+                },
+                ExtensionalFact {
+                    predicate: predicate(5, "task_hours", 2),
+                    values: vec![Value::Entity(EntityId::new(101)), Value::U64(3)],
+                    policy: None,
+                },
+                ExtensionalFact {
+                    predicate: predicate(5, "task_hours", 2),
+                    values: vec![Value::Entity(EntityId::new(102)), Value::U64(5)],
+                    policy: None,
+                },
+                ExtensionalFact {
+                    predicate: predicate(7, "execution_attempt", 3),
+                    values: vec![
+                        Value::Entity(EntityId::new(1)),
+                        Value::String("worker-a".into()),
+                        Value::U64(1),
+                    ],
+                    policy: None,
+                },
+                ExtensionalFact {
+                    predicate: predicate(7, "execution_attempt", 3),
+                    values: vec![
+                        Value::Entity(EntityId::new(1)),
+                        Value::String("worker-b".into()),
+                        Value::U64(4),
+                    ],
+                    policy: None,
+                },
+            ],
+        };
+
+        let compiled = DefaultRuleCompiler
+            .compile(&schema, &program)
+            .expect("compile aggregate program");
+        let derived = SemiNaiveRuntime
+            .evaluate(&Default::default(), &compiled)
+            .expect("evaluate aggregate program");
+
+        let reachable_count = execute_query(
+            &Default::default(),
+            &compiled,
+            &derived,
+            &QueryAst {
+                goals: vec![atom(predicate(3, "reachable_count", 2), &["x", "count"])],
+                keep: vec![Variable::new("x"), Variable::new("count")],
+            },
+        )
+        .expect("query reachable count");
+        assert_eq!(
+            reachable_count.rows,
+            vec![
+                QueryRow {
+                    values: vec![Value::Entity(EntityId::new(1)), Value::U64(3)],
+                    tuple_id: reachable_count.rows[0].tuple_id,
+                },
+                QueryRow {
+                    values: vec![Value::Entity(EntityId::new(2)), Value::U64(2)],
+                    tuple_id: reachable_count.rows[1].tuple_id,
+                },
+                QueryRow {
+                    values: vec![Value::Entity(EntityId::new(3)), Value::U64(1)],
+                    tuple_id: reachable_count.rows[2].tuple_id,
+                },
+            ]
+        );
+
+        let project_hours = execute_query(
+            &Default::default(),
+            &compiled,
+            &derived,
+            &QueryAst {
+                goals: vec![atom(
+                    predicate(6, "project_hours", 2),
+                    &["project", "hours"],
+                )],
+                keep: vec![Variable::new("project"), Variable::new("hours")],
+            },
+        )
+        .expect("query project hours");
+        assert_eq!(
+            project_hours.rows[0].values,
+            vec![Value::Entity(EntityId::new(10)), Value::U64(8)]
+        );
+
+        let latest_epoch = execute_query(
+            &Default::default(),
+            &compiled,
+            &derived,
+            &QueryAst {
+                goals: vec![atom(predicate(8, "latest_epoch", 2), &["task", "epoch"])],
+                keep: vec![Variable::new("task"), Variable::new("epoch")],
+            },
+        )
+        .expect("query latest epoch");
+        assert_eq!(
+            latest_epoch.rows[0].values,
+            vec![Value::Entity(EntityId::new(1)), Value::U64(4)]
         );
     }
 
