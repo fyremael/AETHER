@@ -13,10 +13,11 @@ drifting away from the current pilot proof.
 
 Read these in order:
 
-1. `docs/COMMERCIALIZATION/VISION.md`
-2. `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md`
-3. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
-4. `docs/PILOT_COORDINATION.md`
+1. `docs/COMMERCIALIZATION/EXECUTIVE_BRIEF.md`
+2. `docs/COMMERCIALIZATION/VISION.md`
+3. `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md`
+4. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
+5. `docs/PILOT_COORDINATION.md`
 
 That path answers what AETHER is for, why it matters, where it can go, and what
 the current pilot already proves.
@@ -26,10 +27,11 @@ the current pilot already proves.
 Read these in order:
 
 1. `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md`
-2. `docs/COMMERCIALIZATION/MESSAGING_ARCHITECTURE.md`
-3. `docs/COMMERCIALIZATION/CONCEPT_TRANSLATION.md`
-4. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
-5. `docs/COMMERCIALIZATION/PITCH_DECK_OUTLINE.md`
+2. `docs/COMMERCIALIZATION/CUSTOMER_DECK.md`
+3. `docs/COMMERCIALIZATION/MESSAGING_ARCHITECTURE.md`
+4. `docs/COMMERCIALIZATION/CONCEPT_TRANSLATION.md`
+5. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
+6. `docs/COMMERCIALIZATION/PITCH_DECK_OUTLINE.md`
 
 That path gives you the narrative, language discipline, buyer map, and
 presentation structure.
@@ -53,6 +55,8 @@ That path keeps the visual system, copy system, and public front door aligned.
 | `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md` | Main commercial story: what problem AETHER solves and how to explain it |
 | `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md` | Buyer personas, pains, use cases, and wedge-entry motions |
 | `docs/COMMERCIALIZATION/CATEGORY_MAP.md` | Where AETHER sits relative to adjacent categories and why it is distinct |
+| `docs/COMMERCIALIZATION/EXECUTIVE_BRIEF.md` | One-page outward-facing summary for sponsors, executives, and evaluators |
+| `docs/COMMERCIALIZATION/CUSTOMER_DECK.md` | Presentation-ready customer deck script with slide-level copy guidance |
 | `docs/COMMERCIALIZATION/PITCH_DECK_OUTLINE.md` | Suggested slide sequence and evidence hooks for presentations |
 | `docs/COMMERCIALIZATION/MESSAGING_ARCHITECTURE.md` | Message ladder, proof points, claims discipline, and audience variants |
 | `docs/COMMERCIALIZATION/CONCEPT_TRANSLATION.md` | Technical-to-client terminology map for demos, calls, and collateral |
