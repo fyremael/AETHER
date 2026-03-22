@@ -14,7 +14,7 @@
 - merge semantics by attribute class
 
 ### M2 - Rust rule compiler
-- DSL parsing
+- canonical v1 DSL parsing
 - safety checks
 - type validation
 - dependency graph construction
@@ -36,4 +36,3 @@
 - operator shell
 - SDK ergonomics
 - benchmark and fixture harnesses
-

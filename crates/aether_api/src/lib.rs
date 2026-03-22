@@ -1,6 +1,7 @@
 use aether_ast::{
-    Datom, DerivationTrace, ElementId, PhaseGraph, PlanExplanation, QueryResult, QuerySpec,
-    RuleProgram, TupleId,
+    Datom, DerivationTrace, ElementId, ExplainSpec, ExplainTarget, NamedExplainSpec,
+    NamedQuerySpec, PhaseGraph, PlanExplanation, QueryResult, QuerySpec, RuleProgram, TemporalView,
+    Term, TupleId,
 };
 use aether_explain::{ExplainError, Explainer, InMemoryExplainer};
 use aether_plan::CompiledProgram;
@@ -102,6 +103,40 @@ impl<J: Journal> KernelServiceCore<J> {
         self.last_derived = Some(derived.clone());
         derived
     }
+
+    fn document_evaluation<'a>(
+        &self,
+        cache: &'a mut Vec<DocumentEvaluation>,
+        schema: &Schema,
+        datoms: &[Datom],
+        program: &CompiledProgram,
+        view: &TemporalView,
+    ) -> Result<&'a DocumentEvaluation, ApiError> {
+        if let Some(index) = cache.iter().position(|evaluation| &evaluation.view == view) {
+            return Ok(&cache[index]);
+        }
+
+        let state = match view {
+            TemporalView::AsOf(element) => MaterializedResolver.as_of(schema, datoms, element)?,
+            TemporalView::Current => MaterializedResolver.current(schema, datoms)?,
+        };
+        let derived = SemiNaiveRuntime.evaluate(&state, program)?;
+        cache.push(DocumentEvaluation {
+            view: view.clone(),
+            state,
+            derived,
+        });
+        Ok(cache
+            .last()
+            .expect("evaluation cache contains the inserted view"))
+    }
+}
+
+#[derive(Clone, Debug)]
+struct DocumentEvaluation {
+    view: TemporalView,
+    state: ResolvedState,
+    derived: DerivedSet,
 }
 
 impl<J: Journal> KernelService for KernelServiceCore<J> {
@@ -184,6 +219,8 @@ impl<J: Journal> KernelService for KernelServiceCore<J> {
             schema: document.schema,
             program: document.program,
             query: document.query,
+            queries: document.queries,
+            explains: document.explains,
         })
     }
 
@@ -193,25 +230,93 @@ impl<J: Journal> KernelService for KernelServiceCore<J> {
     ) -> Result<RunDocumentResponse, ApiError> {
         let document = DefaultDslParser.parse_document(&request.dsl)?;
         let datoms = self.journal.history()?;
-        let state = match document.query.as_ref().map(|query| &query.view) {
-            Some(aether_ast::TemporalView::AsOf(element)) => {
-                MaterializedResolver.as_of(&document.schema, &datoms, element)?
-            }
-            _ => MaterializedResolver.current(&document.schema, &datoms)?,
-        };
         let program = DefaultRuleCompiler.compile(&document.schema, &document.program)?;
-        let derived = SemiNaiveRuntime.evaluate(&state, &program)?;
+        let mut evaluations = Vec::new();
+        let primary_view = document
+            .query
+            .as_ref()
+            .map(|query| query.view.clone())
+            .or_else(|| {
+                document
+                    .queries
+                    .first()
+                    .map(|query| query.spec.view.clone())
+            })
+            .or_else(|| {
+                document
+                    .explains
+                    .first()
+                    .map(|explain| explain.spec.view.clone())
+            })
+            .unwrap_or(TemporalView::Current);
+        let primary = self.document_evaluation(
+            &mut evaluations,
+            &document.schema,
+            &datoms,
+            &program,
+            &primary_view,
+        )?;
+        let primary_state = primary.state.clone();
+        let primary_derived = primary.derived.clone();
         let query = match &document.query {
-            Some(query) => Some(execute_query(&state, &program, &derived, &query.query)?),
+            Some(query) => Some(execute_query(
+                &primary_state,
+                &program,
+                &primary_derived,
+                &query.query,
+            )?),
             None => None,
         };
-        let derived = self.cache_derived(derived);
+        let queries = document
+            .queries
+            .iter()
+            .map(|named_query| {
+                let evaluation = self.document_evaluation(
+                    &mut evaluations,
+                    &document.schema,
+                    &datoms,
+                    &program,
+                    &named_query.spec.view,
+                )?;
+                Ok(NamedQueryResult {
+                    name: named_query.name.clone(),
+                    spec: named_query.spec.clone(),
+                    result: execute_query(
+                        &evaluation.state,
+                        &program,
+                        &evaluation.derived,
+                        &named_query.spec.query,
+                    )?,
+                })
+            })
+            .collect::<Result<Vec<_>, ApiError>>()?;
+        let explains = document
+            .explains
+            .iter()
+            .map(|named_explain| {
+                let evaluation = self.document_evaluation(
+                    &mut evaluations,
+                    &document.schema,
+                    &datoms,
+                    &program,
+                    &named_explain.spec.view,
+                )?;
+                Ok(NamedExplainResult {
+                    name: named_explain.name.clone(),
+                    spec: named_explain.spec.clone(),
+                    result: execute_explain_spec(&program, evaluation, &named_explain.spec)?,
+                })
+            })
+            .collect::<Result<Vec<_>, ApiError>>()?;
+        let derived = self.cache_derived(primary_derived.clone());
 
         Ok(RunDocumentResponse {
-            state,
+            state: primary_state,
             program,
             derived,
             query,
+            queries,
+            explains,
         })
     }
 }
@@ -309,6 +414,8 @@ pub struct ParseDocumentResponse {
     pub schema: Schema,
     pub program: RuleProgram,
     pub query: Option<QuerySpec>,
+    pub queries: Vec<NamedQuerySpec>,
+    pub explains: Vec<NamedExplainSpec>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -322,6 +429,78 @@ pub struct RunDocumentResponse {
     pub program: CompiledProgram,
     pub derived: DerivedSet,
     pub query: Option<QueryResult>,
+    pub queries: Vec<NamedQueryResult>,
+    pub explains: Vec<NamedExplainResult>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NamedQueryResult {
+    pub name: Option<String>,
+    pub spec: QuerySpec,
+    pub result: QueryResult,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ExplainArtifact {
+    Plan(PlanExplanation),
+    Tuple(DerivationTrace),
+}
+
+impl Default for ExplainArtifact {
+    fn default() -> Self {
+        Self::Plan(PlanExplanation::default())
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NamedExplainResult {
+    pub name: Option<String>,
+    pub spec: ExplainSpec,
+    pub result: ExplainArtifact,
+}
+
+fn execute_explain_spec(
+    program: &CompiledProgram,
+    evaluation: &DocumentEvaluation,
+    spec: &ExplainSpec,
+) -> Result<ExplainArtifact, ApiError> {
+    match &spec.target {
+        ExplainTarget::Plan => Ok(ExplainArtifact::Plan(
+            InMemoryExplainer::default().explain_plan(&program.phase_graph)?,
+        )),
+        ExplainTarget::Tuple(atom) => {
+            let tuple_id =
+                find_matching_derived_tuple(&evaluation.derived, atom).ok_or_else(|| {
+                    ApiError::Validation(format!(
+                        "no derived tuple matched explain target {}",
+                        atom.predicate.name
+                    ))
+                })?;
+            Ok(ExplainArtifact::Tuple(
+                InMemoryExplainer::from_derived_set(&evaluation.derived)
+                    .explain_tuple(&tuple_id)?,
+            ))
+        }
+    }
+}
+
+fn find_matching_derived_tuple(derived: &DerivedSet, atom: &aether_ast::Atom) -> Option<TupleId> {
+    derived.tuples.iter().find_map(|tuple| {
+        if tuple.tuple.predicate != atom.predicate.id
+            || tuple.tuple.values.len() != atom.terms.len()
+        {
+            return None;
+        }
+        let matches = atom
+            .terms
+            .iter()
+            .zip(&tuple.tuple.values)
+            .all(|(term, value)| match term {
+                Term::Value(expected) => expected == value,
+                Term::Variable(_) | Term::Aggregate(_) => false,
+            });
+        matches.then_some(tuple.tuple.id)
+    })
 }
 
 #[derive(Debug, Error)]
@@ -345,7 +524,7 @@ pub enum ApiError {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppendRequest, ExplainTupleRequest, InMemoryKernelService, KernelService,
+        AppendRequest, ExplainArtifact, ExplainTupleRequest, InMemoryKernelService, KernelService,
         ParseDocumentRequest, RunDocumentRequest,
     };
     use aether_ast::{AttributeId, Datom, DatomProvenance, ElementId, EntityId, Value};
@@ -510,6 +689,58 @@ mod tests {
         );
     }
 
+    #[test]
+    fn service_parses_and_runs_named_queries_and_explain_directives() {
+        let mut service = InMemoryKernelService::new();
+        service
+            .append(AppendRequest {
+                datoms: vec![dependency_datom(1, 2, 1), dependency_datom(2, 3, 2)],
+            })
+            .expect("append transitive chain");
+
+        let parsed = service
+            .parse_document(ParseDocumentRequest {
+                dsl: transitive_document_dsl(),
+            })
+            .expect("parse transitive document");
+        assert_eq!(parsed.query, Some(parsed.queries[0].spec.clone()));
+        assert_eq!(parsed.queries.len(), 2);
+        assert_eq!(parsed.explains.len(), 2);
+
+        let response = service
+            .run_document(RunDocumentRequest {
+                dsl: transitive_document_dsl(),
+            })
+            .expect("run named-query document");
+        assert_eq!(response.query, Some(response.queries[0].result.clone()));
+        assert_eq!(response.queries.len(), 2);
+        assert_eq!(response.explains.len(), 2);
+        assert_eq!(
+            response.queries[0].result.rows[0].values,
+            vec![Value::Entity(EntityId::new(2))]
+        );
+        assert_eq!(
+            response.queries[1]
+                .result
+                .rows
+                .iter()
+                .map(|row| row.values.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                vec![Value::Entity(EntityId::new(2))],
+                vec![Value::Entity(EntityId::new(3))],
+            ]
+        );
+        assert!(matches!(
+            &response.explains[0].result,
+            ExplainArtifact::Tuple(trace) if !trace.tuples.is_empty()
+        ));
+        assert!(matches!(
+            &response.explains[1].result,
+            ExplainArtifact::Plan(explanation) if !explanation.phase_graph.nodes.is_empty()
+        ));
+    }
+
     fn coordination_dsl(view: &str, query_body: &str) -> String {
         format!(
             r#"
@@ -607,5 +838,48 @@ query {{
             provenance: DatomProvenance::default(),
             policy: None,
         }
+    }
+
+    fn transitive_document_dsl() -> String {
+        r#"
+schema {
+  attr task.depends_on: RefSet<Entity>
+}
+
+predicates {
+  task_depends_on(Entity, Entity)
+  depends_transitive(Entity, Entity)
+}
+
+rules {
+  depends_transitive(x, y) <- task_depends_on(x, y)
+  depends_transitive(x, z) <- depends_transitive(x, y), task_depends_on(y, z)
+}
+
+materialize {
+  depends_transitive
+}
+
+query first_cut {
+  as_of e1
+  goal depends_transitive(entity(1), y)
+  keep y
+}
+
+query current_cut {
+  current
+  goal depends_transitive(entity(1), y)
+  keep y
+}
+
+explain current_path {
+  tuple depends_transitive(entity(1), entity(3))
+}
+
+explain plan_shape {
+  plan
+}
+"#
+        .into()
     }
 }

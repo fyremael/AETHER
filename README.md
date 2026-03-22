@@ -111,7 +111,7 @@ Implemented today:
 - schema registration and predicate arity validation
 - append-only journal semantics across both in-memory and SQLite-backed durable storage
 - deterministic `Current` and `AsOf` resolution across scalar, set, and sequence classes
-- a whole-document DSL parser for `schema`, `predicates`, `facts`, `rules`, `materialize`, and `query` sections
+- a whole-document DSL parser for the current canonical v1 surface, including facts, repeated query sections, explain directives, temporal views, entity constants, and policy annotations
 - rule safety checks
 - dependency-graph construction
 - SCC decomposition and phase-graph lowering

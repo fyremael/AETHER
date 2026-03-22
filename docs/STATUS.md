@@ -13,7 +13,7 @@ Completed:
 - durable SQLite journal implemented behind the `Journal` boundary with restart-safe replay coverage
 - source datom provenance threaded through resolution and derivation
 - first recursive tuple explainer implemented
-- first whole-document DSL parser implemented for `schema`, `predicates`, `facts`, `rules`, `materialize`, and `query`
+- whole-document DSL parser implemented for the current canonical v1 surface: schema, attribute classes, facts, repeated queries, explain directives, temporal views, and policy annotations
 - `Current` and `AsOf` query execution implemented
 - policy annotations supported on DSL-authored extensional facts
 - semi-naive delta execution implemented for recursive SCC evaluation
@@ -56,5 +56,5 @@ The most immediate work now sits just beyond the launch-ready pilot slice and la
 - add longer-duration soak coverage beyond the current launch validation window
 - decide how far to widen audit context from the current semantic cut/query/tuple fields into fuller operator intent and semantic diffs
 - decide when the current drift comparison should graduate into CI enforcement
-- extend the DSL from the current focused authoring surface to the full canonical language
+- decide which post-v1 ergonomic DSL extensions matter beyond the now-implemented canonical surface
 - widen aggregation beyond the current non-recursive head-term slice and continue runtime optimization

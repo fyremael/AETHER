@@ -1,7 +1,8 @@
 use aether_ast::{
-    AggregateFunction, AggregateTerm, Atom, AttributeId, ExtensionalFact, Literal, PolicyEnvelope,
-    PredicateId, PredicateRef, QueryAst, QuerySpec, RuleAst, RuleId, RuleProgram, TemporalView,
-    Term, Value, Variable,
+    AggregateFunction, AggregateTerm, Atom, AttributeId, ExplainSpec, ExplainTarget,
+    ExtensionalFact, Literal, NamedExplainSpec, NamedQuerySpec, PolicyEnvelope, PredicateId,
+    PredicateRef, QueryAst, QuerySpec, RuleAst, RuleId, RuleProgram, TemporalView, Term, Value,
+    Variable,
 };
 use aether_schema::{
     AttributeClass, AttributeSchema, PredicateSignature, Schema, SchemaError, ValueType,
@@ -18,6 +19,8 @@ pub struct DslDocument {
     pub schema: Schema,
     pub program: RuleProgram,
     pub query: Option<QuerySpec>,
+    pub queries: Vec<NamedQuerySpec>,
+    pub explains: Vec<NamedExplainSpec>,
 }
 
 #[derive(Default)]
@@ -31,25 +34,21 @@ impl DslParser for DefaultDslParser {
 
 fn parse_document(input: &str) -> Result<DslDocument, ParseError> {
     let sections = collect_sections(input)?;
-    let schema_section = sections
-        .get("schema")
-        .ok_or(ParseError::MissingSection("schema"))?;
-    let predicates_section = sections
-        .get("predicates")
-        .ok_or(ParseError::MissingSection("predicates"))?;
-    let rules_section = sections
-        .get("rules")
-        .ok_or(ParseError::MissingSection("rules"))?;
-    let facts_section = sections.get("facts");
-    let materialize_section = sections.get("materialize");
-    let query_section = sections.get("query");
+    let schema_section = single_section(&sections, "schema")?;
+    let predicates_section = single_section(&sections, "predicates")?;
+    let rules_section = single_section(&sections, "rules")?;
+    let facts_section = optional_single_section(&sections, "facts")?;
+    let materialize_section = optional_single_section(&sections, "materialize")?;
+    let query_sections = sections.get("query").map(Vec::as_slice).unwrap_or(&[]);
+    let explain_sections = sections.get("explain").map(Vec::as_slice).unwrap_or(&[]);
 
     let mut schema = parse_schema_section(schema_section)?;
     let predicate_refs = parse_predicates_section(predicates_section, &mut schema)?;
     let facts = parse_facts_section(facts_section, &predicate_refs)?;
     let rules = parse_rules_section(rules_section, &predicate_refs)?;
     let materialized = parse_materialize_section(materialize_section, &predicate_refs)?;
-    let query = parse_query_section(query_section, &predicate_refs)?;
+    let (query, queries) = parse_query_sections(query_sections, &predicate_refs)?;
+    let explains = parse_explain_sections(explain_sections, &predicate_refs)?;
 
     Ok(DslDocument {
         program: RuleProgram {
@@ -60,6 +59,8 @@ fn parse_document(input: &str) -> Result<DslDocument, ParseError> {
         },
         schema,
         query,
+        queries,
+        explains,
     })
 }
 
@@ -71,8 +72,8 @@ struct Section {
     entries: Vec<(usize, String)>,
 }
 
-fn collect_sections(input: &str) -> Result<IndexMap<String, Section>, ParseError> {
-    let mut sections = IndexMap::new();
+fn collect_sections(input: &str) -> Result<IndexMap<String, Vec<Section>>, ParseError> {
+    let mut sections: IndexMap<String, Vec<Section>> = IndexMap::new();
     let mut current: Option<Section> = None;
 
     for (index, raw_line) in input.lines().enumerate() {
@@ -85,13 +86,16 @@ fn collect_sections(input: &str) -> Result<IndexMap<String, Section>, ParseError
         if let Some(section) = current.as_mut() {
             if line == "}" {
                 let section = current.take().expect("section present");
-                if sections.contains_key(&section.name) {
+                if !is_repeatable_section(&section.name) && sections.contains_key(&section.name) {
                     return Err(ParseError::DuplicateSection {
                         line: section.line,
                         section: section.name,
                     });
                 }
-                sections.insert(section.name.clone(), section);
+                sections
+                    .entry(section.name.clone())
+                    .or_default()
+                    .push(section);
                 continue;
             }
 
@@ -136,8 +140,11 @@ fn parse_section_header(line: usize, header: &str) -> Result<(String, Option<Str
             header: header.into(),
         })?;
     let name = match name {
-        "schema" | "predicates" | "rules" | "materialize" | "facts" | "query" => name.to_owned(),
+        "schema" | "predicates" | "rules" | "materialize" | "facts" | "query" | "explain" => {
+            name.to_owned()
+        }
         "queries" => "query".to_owned(),
+        "explains" => "explain".to_owned(),
         "materialized" => "materialize".to_owned(),
         other => {
             return Err(ParseError::UnknownSection {
@@ -155,6 +162,25 @@ fn parse_section_header(line: usize, header: &str) -> Result<(String, Option<Str
     }
 
     Ok((name, argument))
+}
+
+fn is_repeatable_section(name: &str) -> bool {
+    matches!(name, "query" | "explain")
+}
+
+fn single_section<'a>(
+    sections: &'a IndexMap<String, Vec<Section>>,
+    name: &'static str,
+) -> Result<&'a Section, ParseError> {
+    let entries = sections.get(name).ok_or(ParseError::MissingSection(name))?;
+    entries.first().ok_or(ParseError::MissingSection(name))
+}
+
+fn optional_single_section<'a>(
+    sections: &'a IndexMap<String, Vec<Section>>,
+    name: &'static str,
+) -> Result<Option<&'a Section>, ParseError> {
+    Ok(sections.get(name).and_then(|entries| entries.first()))
 }
 
 fn parse_schema_section(section: &Section) -> Result<Schema, ParseError> {
@@ -354,14 +380,39 @@ fn parse_materialize_section(
     Ok(materialized)
 }
 
-fn parse_query_section(
-    section: Option<&Section>,
+fn parse_query_sections(
+    sections: &[Section],
     predicate_refs: &IndexMap<String, PredicateRef>,
-) -> Result<Option<QuerySpec>, ParseError> {
-    let Some(section) = section else {
-        return Ok(None);
-    };
+) -> Result<(Option<QuerySpec>, Vec<NamedQuerySpec>), ParseError> {
+    let mut named_queries = Vec::new();
+    let mut seen_names = IndexSet::new();
+    let mut primary_query = None;
 
+    for section in sections {
+        let query = parse_single_query_section(section, predicate_refs)?;
+        if !seen_names.insert(section.argument.clone()) {
+            return Err(ParseError::DuplicateNamedSection {
+                line: section.line,
+                section: "query".into(),
+                name: section.argument.clone(),
+            });
+        }
+        if primary_query.is_none() || section.argument.is_none() {
+            primary_query = Some(query.clone());
+        }
+        named_queries.push(NamedQuerySpec {
+            name: section.argument.clone(),
+            spec: query,
+        });
+    }
+
+    Ok((primary_query, named_queries))
+}
+
+fn parse_single_query_section(
+    section: &Section,
+    predicate_refs: &IndexMap<String, PredicateRef>,
+) -> Result<QuerySpec, ParseError> {
     let mut view = TemporalView::Current;
     let mut goals = Vec::new();
     let mut keep = Vec::new();
@@ -410,10 +461,101 @@ fn parse_query_section(
         });
     }
 
-    Ok(Some(QuerySpec {
+    Ok(QuerySpec {
         view,
         query: QueryAst { goals, keep },
-    }))
+    })
+}
+
+fn parse_explain_sections(
+    sections: &[Section],
+    predicate_refs: &IndexMap<String, PredicateRef>,
+) -> Result<Vec<NamedExplainSpec>, ParseError> {
+    let mut explains = Vec::new();
+    let mut seen_names = IndexSet::new();
+
+    for section in sections {
+        if !seen_names.insert(section.argument.clone()) {
+            return Err(ParseError::DuplicateNamedSection {
+                line: section.line,
+                section: "explain".into(),
+                name: section.argument.clone(),
+            });
+        }
+        explains.push(NamedExplainSpec {
+            name: section.argument.clone(),
+            spec: parse_single_explain_section(section, predicate_refs)?,
+        });
+    }
+
+    Ok(explains)
+}
+
+fn parse_single_explain_section(
+    section: &Section,
+    predicate_refs: &IndexMap<String, PredicateRef>,
+) -> Result<ExplainSpec, ParseError> {
+    let mut view = TemporalView::Current;
+    let mut target = None;
+
+    for (line, entry) in &section.entries {
+        if let Some(rest) = entry.strip_prefix("as_of ") {
+            let Some(element) = rest.trim().strip_prefix('e') else {
+                return Err(ParseError::InvalidExplainEntry {
+                    line: *line,
+                    entry: entry.clone(),
+                });
+            };
+            let element = element
+                .parse::<u64>()
+                .map_err(|_| ParseError::InvalidExplainEntry {
+                    line: *line,
+                    entry: entry.clone(),
+                })?;
+            view = TemporalView::AsOf(aether_ast::ElementId::new(element));
+            continue;
+        }
+        if entry == "current" {
+            view = TemporalView::Current;
+            continue;
+        }
+        if entry == "plan" {
+            if target.replace(ExplainTarget::Plan).is_some() {
+                return Err(ParseError::InvalidExplainEntry {
+                    line: *line,
+                    entry: entry.clone(),
+                });
+            }
+            continue;
+        }
+        if let Some(rest) = entry.strip_prefix("tuple ") {
+            let atom = parse_atom(*line, rest.trim(), predicate_refs, false)?;
+            if !atom.terms.iter().all(|term| matches!(term, Term::Value(_))) {
+                return Err(ParseError::NonGroundExplainTuple {
+                    line: *line,
+                    entry: entry.clone(),
+                });
+            }
+            if target.replace(ExplainTarget::Tuple(atom)).is_some() {
+                return Err(ParseError::InvalidExplainEntry {
+                    line: *line,
+                    entry: entry.clone(),
+                });
+            }
+            continue;
+        }
+
+        return Err(ParseError::InvalidExplainEntry {
+            line: *line,
+            entry: entry.clone(),
+        });
+    }
+
+    let target = target.ok_or(ParseError::MissingExplainTarget {
+        line: section.line,
+        name: section.argument.clone(),
+    })?;
+    Ok(ExplainSpec { view, target })
 }
 
 fn parse_attribute_spec(
@@ -573,6 +715,20 @@ fn parse_term(line: usize, token: &str, allow_aggregates: bool) -> Result<Term, 
         )?)));
     }
 
+    if let Some(inner) = token
+        .strip_prefix("entity(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
+        let value = inner
+            .trim()
+            .parse::<u64>()
+            .map_err(|_| ParseError::InvalidTerm {
+                line,
+                text: token.into(),
+            })?;
+        return Ok(Term::Value(Value::Entity(aether_ast::EntityId::new(value))));
+    }
+
     if token.contains('(') || token.contains(')') {
         if allow_aggregates {
             if let Some(aggregate) = parse_aggregate_term(line, token)? {
@@ -611,20 +767,6 @@ fn parse_term(line: usize, token: &str, allow_aggregates: bool) -> Result<Term, 
 
 fn parse_fact_value(line: usize, token: &str) -> Result<Value, ParseError> {
     let token = token.trim();
-    if let Some(inner) = token
-        .strip_prefix("entity(")
-        .and_then(|rest| rest.strip_suffix(')'))
-    {
-        let value = inner
-            .trim()
-            .parse::<u64>()
-            .map_err(|_| ParseError::InvalidTerm {
-                line,
-                text: token.into(),
-            })?;
-        return Ok(Value::Entity(aether_ast::EntityId::new(value)));
-    }
-
     match parse_term(line, token, false)? {
         Term::Value(value) => Ok(value),
         Term::Variable(_) | Term::Aggregate(_) => Err(ParseError::InvalidFactValue {
@@ -933,10 +1075,22 @@ pub enum ParseError {
     InvalidFactValue { line: usize, text: String },
     #[error("line {line}: invalid query entry {entry}")]
     InvalidQueryEntry { line: usize, entry: String },
+    #[error("line {line}: invalid explain entry {entry}")]
+    InvalidExplainEntry { line: usize, entry: String },
     #[error("line {line}: invalid policy annotation {text}")]
     InvalidPolicyAnnotation { line: usize, text: String },
     #[error("line {line}: duplicate materialized predicate {name}")]
     DuplicateMaterializedPredicate { line: usize, name: String },
+    #[error("line {line}: duplicate {section} section name {name:?}")]
+    DuplicateNamedSection {
+        line: usize,
+        section: String,
+        name: Option<String>,
+    },
+    #[error("line {line}: explain section {name:?} does not declare a target")]
+    MissingExplainTarget { line: usize, name: Option<String> },
+    #[error("line {line}: explain tuple must be ground: {entry}")]
+    NonGroundExplainTuple { line: usize, entry: String },
     #[error("line {line}: unbalanced delimiter in DSL input")]
     UnbalancedDelimiter { line: usize },
     #[error("line {line}: schema error: {source}")]
@@ -948,8 +1102,8 @@ mod tests {
     use super::{DefaultDslParser, DslParser, ParseError};
     use crate::{DefaultRuleCompiler, RuleCompiler};
     use aether_ast::{
-        AggregateFunction, Atom, Literal, PredicateId, PredicateRef, QueryAst, QuerySpec,
-        TemporalView, Term, Value,
+        AggregateFunction, Atom, ExplainTarget, Literal, NamedQuerySpec, PredicateId, PredicateRef,
+        QueryAst, QuerySpec, TemporalView, Term, Value,
     };
     use aether_schema::{AttributeClass, ValueType};
 
@@ -1000,6 +1154,8 @@ mod tests {
         assert_eq!(document.program.rules.len(), 2);
         assert_eq!(document.program.materialized, vec![PredicateId::new(2)]);
         assert!(document.query.is_none());
+        assert!(document.queries.is_empty());
+        assert!(document.explains.is_empty());
 
         let compiled = DefaultRuleCompiler
             .compile(&document.schema, &document.program)
@@ -1107,6 +1263,14 @@ mod tests {
                 },
             })
         );
+        assert_eq!(
+            document.queries,
+            vec![NamedQuerySpec {
+                name: None,
+                spec: document.query.clone().expect("primary query"),
+            }]
+        );
+        assert!(document.explains.is_empty());
     }
 
     #[test]
@@ -1141,6 +1305,71 @@ mod tests {
                 if aggregate.function == AggregateFunction::Count
                     && aggregate.variable == aether_ast::Variable::new("dep")
         ));
+    }
+
+    #[test]
+    fn parses_named_queries_and_explain_directives() {
+        let document = DefaultDslParser
+            .parse_document(
+                r#"
+                schema {
+                  attr task.depends_on: RefSet<Entity>
+                }
+
+                predicates {
+                  task_depends_on(Entity, Entity)
+                  depends_transitive(Entity, Entity)
+                }
+
+                rules {
+                  depends_transitive(x, y) <- task_depends_on(x, y)
+                }
+
+                materialize {
+                  depends_transitive
+                }
+
+                query ready_now {
+                  current
+                  find depends_transitive(entity(1), y)
+                  keep y
+                }
+
+                query ready_then {
+                  as_of e7
+                  goal depends_transitive(entity(1), y)
+                  keep y
+                }
+
+                explain proof_now {
+                  current
+                  tuple depends_transitive(entity(1), entity(2))
+                }
+
+                explain plan_view {
+                  plan
+                }
+                "#,
+            )
+            .expect("parse named queries and explain directives");
+
+        assert_eq!(document.queries.len(), 2);
+        assert_eq!(document.queries[0].name.as_deref(), Some("ready_now"));
+        assert_eq!(document.queries[1].name.as_deref(), Some("ready_then"));
+        assert_eq!(document.query, Some(document.queries[0].spec.clone()));
+
+        assert_eq!(document.explains.len(), 2);
+        assert!(matches!(
+            &document.explains[0].spec.target,
+            ExplainTarget::Tuple(atom)
+                if atom.terms
+                    == vec![
+                        Term::Value(Value::Entity(aether_ast::EntityId::new(1))),
+                        Term::Value(Value::Entity(aether_ast::EntityId::new(2))),
+                    ]
+        ));
+        assert_eq!(document.explains[1].name.as_deref(), Some("plan_view"));
+        assert_eq!(document.explains[1].spec.target, ExplainTarget::Plan);
     }
 
     #[test]

@@ -146,7 +146,7 @@ This is not an omission of ambition. It is sequencing. The kernel is being made 
 
 - append-only journal behavior
 - deterministic resolution
-- whole-document DSL parsing for the current slice
+- whole-document DSL parsing for the current canonical v1 surface
 - recursive and stratified runtime evaluation
 - service-backed query and explanation
 - operator-facing demonstrations

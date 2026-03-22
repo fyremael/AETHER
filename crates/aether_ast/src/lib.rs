@@ -224,6 +224,31 @@ pub struct QuerySpec {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NamedQuerySpec {
+    pub name: Option<String>,
+    pub spec: QuerySpec,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum ExplainTarget {
+    #[default]
+    Plan,
+    Tuple(Atom),
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ExplainSpec {
+    pub view: TemporalView,
+    pub target: ExplainTarget,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NamedExplainSpec {
+    pub name: Option<String>,
+    pub spec: ExplainSpec,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct RuleProgram {
     pub predicates: Vec<PredicateRef>,
     pub rules: Vec<RuleAst>,
