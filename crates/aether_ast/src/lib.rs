@@ -81,6 +81,21 @@ pub struct SourceRef {
     pub digest: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SidecarKind {
+    #[default]
+    Artifact,
+    Vector,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SidecarOrigin {
+    pub kind: SidecarKind,
+    pub sidecar_id: String,
+    pub record_id: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DatomProvenance {
     pub author_principal: String,
@@ -127,6 +142,13 @@ pub struct Datom {
     pub causal_context: CausalContext,
     pub provenance: DatomProvenance,
     pub policy: Option<PolicyEnvelope>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FactProvenance {
+    pub source_datom_ids: Vec<ElementId>,
+    pub sidecar_origin: Option<SidecarOrigin>,
+    pub source_ref: Option<SourceRef>,
 }
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -208,6 +230,7 @@ pub struct ExtensionalFact {
     pub predicate: PredicateRef,
     pub values: Vec<Value>,
     pub policy: Option<PolicyEnvelope>,
+    pub provenance: Option<FactProvenance>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -332,8 +355,8 @@ pub struct PlanExplanation {
 #[cfg(test)]
 mod tests {
     use super::{
-        AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, ReplicaId,
-        SourceRef, Value,
+        AttributeId, Datom, DatomProvenance, ElementId, EntityId, FactProvenance, OperationKind,
+        ReplicaId, SidecarKind, SidecarOrigin, SourceRef, Value,
     };
 
     #[test]
@@ -398,5 +421,27 @@ mod tests {
 
         assert_eq!(decoded.provenance, provenance);
         assert_eq!(decoded, datom);
+    }
+
+    #[test]
+    fn fact_provenance_round_trips_with_sidecar_origin() {
+        let provenance = FactProvenance {
+            source_datom_ids: vec![ElementId::new(7)],
+            sidecar_origin: Some(SidecarOrigin {
+                kind: SidecarKind::Vector,
+                sidecar_id: "vector-sidecar".into(),
+                record_id: "vec-1".into(),
+            }),
+            source_ref: Some(SourceRef {
+                uri: "s3://vectors/vec-1".into(),
+                digest: Some("sha256:def".into()),
+            }),
+        };
+
+        let json = serde_json::to_string(&provenance).expect("serialize fact provenance");
+        let decoded: FactProvenance =
+            serde_json::from_str(&json).expect("deserialize fact provenance");
+
+        assert_eq!(decoded, provenance);
     }
 }

@@ -1,13 +1,16 @@
 use aether_api::{
     coordination_pilot_dsl, coordination_pilot_seed_history, http_router, http_router_with_options,
-    AppendRequest, AuditEntry, AuditLogResponse, AuthScope, ExplainTupleRequest, HealthResponse,
-    HistoryResponse, HttpAuthConfig, HttpKernelOptions, InMemoryKernelService, KernelService,
-    ParseDocumentRequest, ParseDocumentResponse, RunDocumentRequest, RunDocumentResponse,
-    SqliteKernelService, COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
-    COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
+    AppendRequest, AuditEntry, AuditLogResponse, AuthScope, ExplainTupleRequest,
+    GetArtifactReferenceRequest, HealthResponse, HistoryResponse, HttpAuthConfig,
+    HttpKernelOptions, InMemoryKernelService, KernelService, ParseDocumentRequest,
+    ParseDocumentResponse, RegisterArtifactReferenceRequest, RegisterVectorRecordRequest,
+    RunDocumentRequest, RunDocumentResponse, SearchVectorsRequest, SearchVectorsResponse,
+    SqliteKernelService, VectorFactProjection, VectorMetric,
+    COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
-use aether_ast::{ElementId, EntityId, Value};
+use aether_ast::{DatomProvenance, ElementId, EntityId, PredicateId, PredicateRef, Value};
 use reqwest::Client;
+use std::collections::BTreeMap;
 use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
@@ -631,6 +634,106 @@ async fn authenticated_http_service_persists_semantic_audit_context_across_resta
         .trace_tuple_count
         .unwrap_or_default()
         > 0));
+}
+
+#[tokio::test]
+async fn http_service_registers_and_searches_sidecar_records() {
+    let (base_url, server) = spawn_server(InMemoryKernelService::new()).await;
+    let client = Client::new();
+
+    let artifact = client
+        .post(format!("{base_url}/v1/sidecars/artifacts/register"))
+        .json(&RegisterArtifactReferenceRequest {
+            reference: aether_api::ArtifactReference {
+                sidecar_id: "semantic-memory".into(),
+                artifact_id: "doc-1".into(),
+                entity: EntityId::new(31),
+                uri: "s3://aether/docs/doc-1.md".into(),
+                media_type: "text/markdown".into(),
+                byte_length: 256,
+                digest: Some("sha256:doc-1".into()),
+                metadata: BTreeMap::from([("kind".into(), Value::String("runbook".into()))]),
+                provenance: DatomProvenance::default(),
+                policy: None,
+                registered_at: ElementId::new(1),
+            },
+        })
+        .send()
+        .await
+        .expect("register artifact request");
+    assert!(artifact.status().is_success());
+
+    let vector = client
+        .post(format!("{base_url}/v1/sidecars/vectors/register"))
+        .json(&RegisterVectorRecordRequest {
+            record: aether_api::VectorRecordMetadata {
+                sidecar_id: "semantic-memory".into(),
+                vector_id: "vec-1".into(),
+                entity: EntityId::new(31),
+                source_artifact_id: Some("doc-1".into()),
+                embedding_ref: "s3://aether/vectors/vec-1.bin".into(),
+                dimensions: 3,
+                metric: VectorMetric::Cosine,
+                metadata: BTreeMap::new(),
+                provenance: DatomProvenance::default(),
+                policy: None,
+                registered_at: ElementId::new(2),
+            },
+            embedding: vec![0.9, 0.1, 0.0],
+        })
+        .send()
+        .await
+        .expect("register vector request");
+    assert!(vector.status().is_success());
+
+    let fetched = client
+        .post(format!("{base_url}/v1/sidecars/artifacts/get"))
+        .json(&GetArtifactReferenceRequest {
+            sidecar_id: "semantic-memory".into(),
+            artifact_id: "doc-1".into(),
+        })
+        .send()
+        .await
+        .expect("get artifact request");
+    assert!(fetched.status().is_success());
+
+    let search = client
+        .post(format!("{base_url}/v1/sidecars/vectors/search"))
+        .json(&SearchVectorsRequest {
+            sidecar_id: "semantic-memory".into(),
+            query_embedding: vec![1.0, 0.0, 0.0],
+            top_k: 1,
+            metric: VectorMetric::Cosine,
+            as_of: Some(ElementId::new(2)),
+            projection: Some(VectorFactProjection {
+                predicate: PredicateRef {
+                    id: PredicateId::new(81),
+                    name: "semantic_neighbor".into(),
+                    arity: 3,
+                },
+                query_entity: EntityId::new(999),
+            }),
+        })
+        .send()
+        .await
+        .expect("search vectors request");
+    assert!(search.status().is_success());
+    let search = search
+        .json::<SearchVectorsResponse>()
+        .await
+        .expect("search vectors response");
+    assert_eq!(search.matches.len(), 1);
+    assert_eq!(search.facts.len(), 1);
+    assert_eq!(
+        search.facts[0]
+            .provenance
+            .as_ref()
+            .expect("fact provenance")
+            .source_datom_ids,
+        vec![ElementId::new(2)]
+    );
+
+    server.abort();
 }
 
 async fn run_document(client: &Client, base_url: &str, dsl: String) -> RunDocumentResponse {

@@ -19,6 +19,7 @@ pub mod http;
 pub mod perf;
 pub mod pilot;
 pub mod report;
+pub mod sidecar;
 
 pub use http::{
     http_router, http_router_with_options, AuditContext, AuditEntry, AuditLogResponse, AuthScope,
@@ -31,6 +32,13 @@ pub use pilot::{
 pub use report::{
     build_coordination_pilot_report, render_coordination_pilot_report_markdown,
     CoordinationPilotReport, ReportRow, TraceSummary, TraceTupleSummary,
+};
+pub use sidecar::{
+    ArtifactReference, GetArtifactReferenceRequest, GetArtifactReferenceResponse,
+    InMemorySidecarFederation, RegisterArtifactReferenceRequest, RegisterArtifactReferenceResponse,
+    RegisterVectorRecordRequest, RegisterVectorRecordResponse, SearchVectorsRequest,
+    SearchVectorsResponse, SidecarError, SidecarFederation, VectorFactProjection, VectorMetric,
+    VectorRecordMetadata, VectorSearchMatch,
 };
 
 pub trait KernelService {
@@ -58,39 +66,57 @@ pub trait KernelService {
         &mut self,
         request: RunDocumentRequest,
     ) -> Result<RunDocumentResponse, ApiError>;
+    fn register_artifact_reference(
+        &mut self,
+        request: RegisterArtifactReferenceRequest,
+    ) -> Result<RegisterArtifactReferenceResponse, ApiError>;
+    fn get_artifact_reference(
+        &self,
+        request: GetArtifactReferenceRequest,
+    ) -> Result<GetArtifactReferenceResponse, ApiError>;
+    fn register_vector_record(
+        &mut self,
+        request: RegisterVectorRecordRequest,
+    ) -> Result<RegisterVectorRecordResponse, ApiError>;
+    fn search_vectors(
+        &self,
+        request: SearchVectorsRequest,
+    ) -> Result<SearchVectorsResponse, ApiError>;
 }
 
-pub type InMemoryKernelService = KernelServiceCore<InMemoryJournal>;
-pub type SqliteKernelService = KernelServiceCore<SqliteJournal>;
+pub type InMemoryKernelService = KernelServiceCore<InMemoryJournal, InMemorySidecarFederation>;
+pub type SqliteKernelService = KernelServiceCore<SqliteJournal, InMemorySidecarFederation>;
 
 #[derive(Debug)]
-pub struct KernelServiceCore<J: Journal> {
+pub struct KernelServiceCore<J: Journal, S: SidecarFederation = InMemorySidecarFederation> {
     journal: J,
+    sidecars: S,
     last_derived: Option<DerivedSet>,
 }
 
-impl KernelServiceCore<InMemoryJournal> {
+impl KernelServiceCore<InMemoryJournal, InMemorySidecarFederation> {
     pub fn new() -> Self {
         Self::from_journal(InMemoryJournal::new())
     }
 }
 
-impl Default for KernelServiceCore<InMemoryJournal> {
+impl Default for KernelServiceCore<InMemoryJournal, InMemorySidecarFederation> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl KernelServiceCore<SqliteJournal> {
+impl KernelServiceCore<SqliteJournal, InMemorySidecarFederation> {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, ApiError> {
         Ok(Self::from_journal(SqliteJournal::open(path)?))
     }
 }
 
-impl<J: Journal> KernelServiceCore<J> {
-    pub fn from_journal(journal: J) -> Self {
+impl<J: Journal, S: SidecarFederation> KernelServiceCore<J, S> {
+    pub fn from_parts(journal: J, sidecars: S) -> Self {
         Self {
             journal,
+            sidecars,
             last_derived: None,
         }
     }
@@ -136,6 +162,16 @@ impl<J: Journal> KernelServiceCore<J> {
     }
 }
 
+impl<J, S> KernelServiceCore<J, S>
+where
+    J: Journal,
+    S: SidecarFederation + Default,
+{
+    pub fn from_journal(journal: J) -> Self {
+        Self::from_parts(journal, S::default())
+    }
+}
+
 #[derive(Clone, Debug)]
 struct DocumentEvaluation {
     view: TemporalView,
@@ -143,7 +179,7 @@ struct DocumentEvaluation {
     derived: DerivedSet,
 }
 
-impl<J: Journal> KernelService for KernelServiceCore<J> {
+impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S> {
     fn append(&mut self, request: AppendRequest) -> Result<AppendResponse, ApiError> {
         self.journal.append(&request.datoms)?;
         Ok(AppendResponse {
@@ -322,6 +358,34 @@ impl<J: Journal> KernelService for KernelServiceCore<J> {
             queries,
             explains,
         })
+    }
+
+    fn register_artifact_reference(
+        &mut self,
+        request: RegisterArtifactReferenceRequest,
+    ) -> Result<RegisterArtifactReferenceResponse, ApiError> {
+        Ok(self.sidecars.register_artifact_reference(request)?)
+    }
+
+    fn get_artifact_reference(
+        &self,
+        request: GetArtifactReferenceRequest,
+    ) -> Result<GetArtifactReferenceResponse, ApiError> {
+        Ok(self.sidecars.get_artifact_reference(request)?)
+    }
+
+    fn register_vector_record(
+        &mut self,
+        request: RegisterVectorRecordRequest,
+    ) -> Result<RegisterVectorRecordResponse, ApiError> {
+        Ok(self.sidecars.register_vector_record(request)?)
+    }
+
+    fn search_vectors(
+        &self,
+        request: SearchVectorsRequest,
+    ) -> Result<SearchVectorsResponse, ApiError> {
+        Ok(self.sidecars.search_vectors(request)?)
     }
 }
 
@@ -513,6 +577,8 @@ pub enum ApiError {
     Validation(String),
     #[error(transparent)]
     Journal(#[from] JournalError),
+    #[error(transparent)]
+    Sidecar(#[from] SidecarError),
     #[error(transparent)]
     Resolve(#[from] ResolveError),
     #[error(transparent)]

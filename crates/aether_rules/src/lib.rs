@@ -1326,6 +1326,7 @@ mod tests {
                         predicate: task,
                         values: vec![Value::Entity(aether_ast::EntityId::new(1))],
                         policy: None,
+                        provenance: None,
                     }],
                 },
             )

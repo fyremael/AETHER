@@ -393,7 +393,11 @@ fn build_extensional_rows(
             .push(RelationRow {
                 values: fact.values.clone(),
                 tuple_id: None,
-                source_datom_ids: Vec::new(),
+                source_datom_ids: fact
+                    .provenance
+                    .as_ref()
+                    .map(|provenance| provenance.source_datom_ids.clone())
+                    .unwrap_or_default(),
             });
     }
 
@@ -1374,6 +1378,7 @@ mod tests {
                         Value::Entity(EntityId::new(2)),
                     ],
                     policy: None,
+                    provenance: None,
                 },
                 ExtensionalFact {
                     predicate: predicate(1, "edge", 2),
@@ -1382,6 +1387,7 @@ mod tests {
                         Value::Entity(EntityId::new(3)),
                     ],
                     policy: None,
+                    provenance: None,
                 },
                 ExtensionalFact {
                     predicate: predicate(1, "edge", 2),
@@ -1390,6 +1396,7 @@ mod tests {
                         Value::Entity(EntityId::new(4)),
                     ],
                     policy: None,
+                    provenance: None,
                 },
                 ExtensionalFact {
                     predicate: predicate(4, "project_task", 2),
@@ -1398,6 +1405,7 @@ mod tests {
                         Value::Entity(EntityId::new(101)),
                     ],
                     policy: None,
+                    provenance: None,
                 },
                 ExtensionalFact {
                     predicate: predicate(4, "project_task", 2),
@@ -1406,16 +1414,19 @@ mod tests {
                         Value::Entity(EntityId::new(102)),
                     ],
                     policy: None,
+                    provenance: None,
                 },
                 ExtensionalFact {
                     predicate: predicate(5, "task_hours", 2),
                     values: vec![Value::Entity(EntityId::new(101)), Value::U64(3)],
                     policy: None,
+                    provenance: None,
                 },
                 ExtensionalFact {
                     predicate: predicate(5, "task_hours", 2),
                     values: vec![Value::Entity(EntityId::new(102)), Value::U64(5)],
                     policy: None,
+                    provenance: None,
                 },
                 ExtensionalFact {
                     predicate: predicate(7, "execution_attempt", 3),
@@ -1425,6 +1436,7 @@ mod tests {
                         Value::U64(1),
                     ],
                     policy: None,
+                    provenance: None,
                 },
                 ExtensionalFact {
                     predicate: predicate(7, "execution_attempt", 3),
@@ -1434,6 +1446,7 @@ mod tests {
                         Value::U64(4),
                     ],
                     policy: None,
+                    provenance: None,
                 },
             ],
         };
@@ -1717,11 +1730,13 @@ mod tests {
                     predicate: predicate(1, "task", 1),
                     values: vec![Value::Entity(EntityId::new(1))],
                     policy: None,
+                    provenance: None,
                 },
                 ExtensionalFact {
                     predicate: predicate(1, "task", 1),
                     values: vec![Value::Entity(EntityId::new(2))],
                     policy: None,
+                    provenance: None,
                 },
                 ExtensionalFact {
                     predicate: predicate(2, "execution_attempt", 3),
@@ -1731,6 +1746,7 @@ mod tests {
                         Value::U64(1),
                     ],
                     policy: None,
+                    provenance: None,
                 },
             ],
         };

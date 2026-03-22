@@ -1,6 +1,8 @@
 use crate::{
-    ApiError, AppendRequest, AsOfRequest, CurrentStateRequest, ExplainTupleRequest, HistoryRequest,
-    KernelService, ParseDocumentRequest, RunDocumentRequest,
+    ApiError, AppendRequest, AsOfRequest, CurrentStateRequest, ExplainTupleRequest,
+    GetArtifactReferenceRequest, HistoryRequest, KernelService, ParseDocumentRequest,
+    RegisterArtifactReferenceRequest, RegisterVectorRecordRequest, RunDocumentRequest,
+    SearchVectorsRequest,
 };
 use axum::{
     extract::State,
@@ -344,6 +346,16 @@ pub fn http_router_with_options(
         .route("/v1/documents/parse", post(parse_document))
         .route("/v1/documents/run", post(run_document))
         .route("/v1/explain/tuple", post(explain_tuple))
+        .route(
+            "/v1/sidecars/artifacts/register",
+            post(register_artifact_reference),
+        )
+        .route("/v1/sidecars/artifacts/get", post(get_artifact_reference))
+        .route(
+            "/v1/sidecars/vectors/register",
+            post(register_vector_record),
+        )
+        .route("/v1/sidecars/vectors/search", post(search_vectors))
         .with_state(HttpKernelState::with_options(service, options))
 }
 
@@ -523,6 +535,7 @@ impl IntoResponse for HttpError {
 fn status_for_api_error(error: &ApiError) -> StatusCode {
     match error {
         ApiError::Validation(_)
+        | ApiError::Sidecar(_)
         | ApiError::Resolve(_)
         | ApiError::Parse(_)
         | ApiError::Compile(_)
@@ -707,6 +720,103 @@ async fn explain_tuple(
             let response = service.explain_tuple(request)?;
             let mut context = request_context;
             context.trace_tuple_count = Some(response.trace.tuples.len());
+            Ok((response, context))
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn register_artifact_reference(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<RegisterArtifactReferenceRequest>,
+) -> Result<Json<crate::RegisterArtifactReferenceResponse>, HttpError> {
+    let request_context = AuditContext {
+        temporal_view: Some("sidecar_artifact_register".into()),
+        requested_element: Some(request.reference.registered_at.0),
+        ..Default::default()
+    };
+    let response = state.execute(
+        &headers,
+        "POST",
+        "/v1/sidecars/artifacts/register",
+        AuthScope::Append,
+        request_context.clone(),
+        |service| {
+            let response = service.register_artifact_reference(request)?;
+            Ok((response, request_context))
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn get_artifact_reference(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<GetArtifactReferenceRequest>,
+) -> Result<Json<crate::GetArtifactReferenceResponse>, HttpError> {
+    let request_context = AuditContext {
+        temporal_view: Some("sidecar_artifact_lookup".into()),
+        ..Default::default()
+    };
+    let response = state.execute(
+        &headers,
+        "POST",
+        "/v1/sidecars/artifacts/get",
+        AuthScope::Query,
+        request_context.clone(),
+        |service| {
+            let response = service.get_artifact_reference(request)?;
+            Ok((response, request_context))
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn register_vector_record(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<RegisterVectorRecordRequest>,
+) -> Result<Json<crate::RegisterVectorRecordResponse>, HttpError> {
+    let request_context = AuditContext {
+        temporal_view: Some("sidecar_vector_register".into()),
+        requested_element: Some(request.record.registered_at.0),
+        ..Default::default()
+    };
+    let response = state.execute(
+        &headers,
+        "POST",
+        "/v1/sidecars/vectors/register",
+        AuthScope::Append,
+        request_context.clone(),
+        |service| {
+            let response = service.register_vector_record(request)?;
+            Ok((response, request_context))
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn search_vectors(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<SearchVectorsRequest>,
+) -> Result<Json<crate::SearchVectorsResponse>, HttpError> {
+    let request_context = AuditContext {
+        temporal_view: Some("sidecar_vector_search".into()),
+        requested_element: request.as_of.map(|element| element.0),
+        ..Default::default()
+    };
+    let response = state.execute(
+        &headers,
+        "POST",
+        "/v1/sidecars/vectors/search",
+        AuthScope::Query,
+        request_context.clone(),
+        |service| {
+            let response = service.search_vectors(request)?;
+            let mut context = request_context;
+            context.row_count = Some(response.matches.len());
             Ok((response, context))
         },
     )?;

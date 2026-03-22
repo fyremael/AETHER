@@ -342,6 +342,7 @@ fn parse_facts_section(
             predicate: predicate.clone(),
             values,
             policy,
+            provenance: None,
         });
     }
 

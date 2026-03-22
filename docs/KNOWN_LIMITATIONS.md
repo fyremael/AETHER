@@ -5,6 +5,8 @@
 - Explain traces currently reconstruct one merged proof graph per tuple; they do not yet distinguish alternative proof families for the same derived tuple.
 - The DSL now covers the current canonical v1 surface, but it still lacks post-v1 ergonomic features such as richer type aliases, broader document modularity, and more generalized explain/query composition.
 - The kernel service now has both in-memory and SQLite-backed execution paths, and the pilot HTTP path now supports bearer-token auth plus persisted audit logs, but the boundary is still not multi-tenant or production-hardened.
+- Artifact and vector sidecar federation is now implemented at the stable API boundary, but the current sidecar backends are in-memory only and do not yet persist or replicate independently of the kernel process.
+- Vector search can now project provenance-bearing semantic facts back into the rule layer, but the current projection is deliberately narrow: a three-field `(query_entity, matched_entity, score)` extensional fact shape.
 - Coordination semantics now cover heartbeats and execution outcomes in the pilot slice, but expiry still relies on explicit semantic state rather than clock-driven timeout windows or distributed failure detection.
 - HTTP authorization is currently coarse endpoint scope enforcement; it is not yet semantic row-level or policy-envelope-aware authorization.
 - Audit entries now capture semantic cut, query goal, tuple ID, datom counts, and basic result counts, but they still do not capture full operator intent, row-level policy context, or semantic diffs between cuts.
