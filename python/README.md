@@ -1,6 +1,6 @@
 # Python Boundary
 
-This directory is reserved for the AETHER SDK, fixtures, and research harnesses.
+This directory now contains the first real AETHER Python boundary client.
 
 Scope for Python in v1:
 
@@ -9,8 +9,19 @@ Scope for Python in v1:
 - benchmark runners
 - high-level API clients
 
+Implemented today:
+
+- `aether_sdk.AetherClient`, a minimal HTTP client for the stable Rust service boundary
+- live integration coverage against `crates/aether_api/examples/http_kernel_service.rs`
+- core document execution calls plus sidecar artifact/vector calls
+
+Current test command:
+
+```bash
+python -m unittest discover python/tests -v
+```
+
 Out of scope:
 
 - shadow implementations of kernel semantics
 - authoritative rule or resolver logic
-

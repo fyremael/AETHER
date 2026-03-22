@@ -99,7 +99,7 @@ It is deliberately modest. Today it provides:
 - `Current` and `AsOf` resolution
 - parse, compile, evaluate, and explain flows
 - end-to-end execution of DSL-authored documents
-- artifact and vector sidecar federation for external artifact references and vector-match projection
+- artifact and vector sidecar federation for external artifact references, vector-match projection, and durable sidecar replay on the SQLite-backed path
 
 It is responsible for answering the question: “How does an external caller talk to the kernel without re-implementing its semantics?”
 
@@ -139,7 +139,7 @@ The current implementation line is intentionally clear:
 - Go and Python remain boundary layers, not semantic authorities
 - journal storage is in-memory or SQLite-backed
 - the kernel service is in-memory or SQLite-backed, with a minimal authenticated HTTP path
-- sidecar federation is implemented at the API boundary, but remains in-memory and subordinate to the kernel
+- sidecar federation is implemented at the API boundary and durable on the SQLite-backed path, but remains subordinate to the kernel
 
 This is not an omission of ambition. It is sequencing. The kernel is being made semantically credible before it is made infrastructurally broad.
 
@@ -153,15 +153,16 @@ This is not an omission of ambition. It is sequencing. The kernel is being made 
 - recursive and stratified runtime evaluation
 - service-backed query and explanation
 - bounded aggregation for the current non-recursive slice
-- artifact and vector sidecar federation with provenance-bearing semantic fact projection
+- artifact and vector sidecar federation with provenance-bearing semantic fact projection and SQLite-backed replay on the durable pilot path
+- a first real Python HTTP client over the stable boundary
 - operator-facing demonstrations
 
 ### Deferred
 
 - broader post-v1 DSL ergonomics
-- durable or distributed sidecar federation backends
+- distributed or replicated sidecar federation backends
 - production-hardened multi-tenant service boundaries
-- stable Go and Python clients
+- stable Go client and a broader Python SDK surface
 
 Those deferrals are deliberate. They keep the semantic center stable while the kernel is still proving itself.
 

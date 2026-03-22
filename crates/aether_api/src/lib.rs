@@ -37,8 +37,8 @@ pub use sidecar::{
     ArtifactReference, GetArtifactReferenceRequest, GetArtifactReferenceResponse,
     InMemorySidecarFederation, RegisterArtifactReferenceRequest, RegisterArtifactReferenceResponse,
     RegisterVectorRecordRequest, RegisterVectorRecordResponse, SearchVectorsRequest,
-    SearchVectorsResponse, SidecarError, SidecarFederation, VectorFactProjection, VectorMetric,
-    VectorRecordMetadata, VectorSearchMatch,
+    SearchVectorsResponse, SidecarError, SidecarFederation, SqliteSidecarFederation,
+    VectorFactProjection, VectorMetric, VectorRecordMetadata, VectorSearchMatch,
 };
 
 pub trait KernelService {
@@ -85,7 +85,7 @@ pub trait KernelService {
 }
 
 pub type InMemoryKernelService = KernelServiceCore<InMemoryJournal, InMemorySidecarFederation>;
-pub type SqliteKernelService = KernelServiceCore<SqliteJournal, InMemorySidecarFederation>;
+pub type SqliteKernelService = KernelServiceCore<SqliteJournal, SqliteSidecarFederation>;
 
 #[derive(Debug)]
 pub struct KernelServiceCore<J: Journal, S: SidecarFederation = InMemorySidecarFederation> {
@@ -106,9 +106,13 @@ impl Default for KernelServiceCore<InMemoryJournal, InMemorySidecarFederation> {
     }
 }
 
-impl KernelServiceCore<SqliteJournal, InMemorySidecarFederation> {
+impl KernelServiceCore<SqliteJournal, SqliteSidecarFederation> {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, ApiError> {
-        Ok(Self::from_journal(SqliteJournal::open(path)?))
+        let path = path.as_ref();
+        Ok(Self::from_parts(
+            SqliteJournal::open(path)?,
+            SqliteSidecarFederation::open(sidecar::sidecar_catalog_path_for_journal(path))?,
+        ))
     }
 }
 

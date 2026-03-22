@@ -64,6 +64,7 @@ Read:
 
 Those documents explain the durable pilot contract, report artifacts, drift workflow, and the remaining hardening gaps.
 They are also the place to look for the current audit semantics on the authenticated pilot service.
+They now also describe the scheduled/manual CI launch-validation path and the current durable sidecar posture on the pilot service.
 
 ### If you need performance numbers
 
@@ -74,6 +75,16 @@ Read:
 3. `TESTPLAN.md`
 
 That path explains the operator-facing report, baseline capture, drift comparison, the benchmark harness, the stress workloads, and the target interpretation.
+
+### If you need the boundary-client path
+
+Read:
+
+1. `python/README.md`
+2. `docs/OPERATIONS.md`
+3. `docs/ARCHITECTURE.md`
+
+That path covers the current Python HTTP client, the available service endpoints, and the boundary posture for non-Rust consumers.
 
 ### If you need the long-range picture
 

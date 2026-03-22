@@ -119,6 +119,7 @@ The authenticated pilot boundary currently adds:
 - bearer-token auth for `/v1/*`
 - persisted audit logging for pilot requests
 - semantic audit context for pilot query and explain actions
+- SQLite-backed sidecar replay for artifact and vector registrations on the durable pilot path
 
 Available endpoints today:
 
@@ -130,6 +131,10 @@ Available endpoints today:
 - `POST /v1/documents/parse`
 - `POST /v1/documents/run`
 - `POST /v1/explain/tuple`
+- `POST /v1/sidecars/artifacts/register`
+- `POST /v1/sidecars/artifacts/get`
+- `POST /v1/sidecars/vectors/register`
+- `POST /v1/sidecars/vectors/search`
 
 ## Reports
 
@@ -185,6 +190,8 @@ Each run produces:
 - `latest.txt`
 
 The launch transcript also records which accepted baseline was used: explicit override, local artifact, or tracked fixture.
+
+The same launch pack now also runs in GitHub Actions through the dedicated pilot-validation workflow, which uploads the generated report, drift, and launch transcript artifacts for review.
 
 For the full engineering-facing performance suite, also run:
 

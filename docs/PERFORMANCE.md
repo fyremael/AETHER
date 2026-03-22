@@ -112,6 +112,8 @@ By default, the drift comparison applies these budgets:
 
 The example exits with code `2` when any workload crosses a fail-level threshold. That behavior is intentional so the same tool can become a future CI gate.
 
+The repository now also runs this drift path through the scheduled/manual `Pilot Validation` GitHub Actions workflow, which uploads the generated performance and drift artifacts for review.
+
 ### Pilot launch validation
 
 Windows operator path:
@@ -189,6 +191,7 @@ The current performance program is real, but not complete.
 
 - Baseline comparison is point-in-time rather than a historical trend store.
 - There is no CI-enforced drift gate yet.
+- The dedicated pilot-validation workflow exists, but drift is not yet a required gate on every mainline change.
 - Memory tracking is structural rather than allocator-exact.
 - The HTTP boundary is not benchmarked independently of the in-process kernel service yet.
 - There is no fixture set derived from captured production-like workloads because the project is not at that deployment stage yet.

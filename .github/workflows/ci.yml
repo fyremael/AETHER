@@ -42,3 +42,24 @@ jobs:
 
       - name: cargo test
         run: cargo test
+
+  python-sdk:
+    name: Python SDK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Run Python SDK tests
+        run: python -m unittest discover python/tests -v

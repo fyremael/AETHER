@@ -33,7 +33,9 @@ Completed:
 - authenticated HTTP restart-cycle drills added to preserve semantic answers and persisted audit context across repeated service restarts
 - ignored release-mode soak and misuse drills added for the authenticated pilot HTTP path
 - a one-command pilot launch validation pack added to produce the current report, drift, soak, and stress evidence set
-- initial artifact and vector sidecar federation implemented in `aether_api`, including external artifact references, in-memory vector search, and semantic fact projection with provenance
+- artifact and vector sidecar federation implemented in `aether_api`, including external artifact references, vector search, semantic fact projection with provenance, and SQLite-backed durability for the durable kernel service
+- scheduled/manual GitHub Actions automation added for the pilot launch-validation and drift artifact pack
+- first real Python boundary client implemented against the HTTP API with live integration coverage
 - documentation portal, architecture guide, developer workflow guide, operator guide, glossary, and documentation standards now exist
 - GitHub Pages publishing pipeline added for the documentation portal and generated Rust API reference
 - unit tests added across the Rust core crates
@@ -45,10 +47,9 @@ Not yet completed:
 
 - post-v1 DSL ergonomics and document modularity beyond the current canonical surface
 - broader durable storage backends beyond the current SQLite journal
-- durable or distributed sidecar federation backends beyond the current in-memory implementation
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
-- stable Go and Python boundary clients
-- historical benchmark dashboards and CI-enforced drift gates
+- stable Go client and a broader Python SDK surface
+- historical benchmark dashboards and fully release-gated drift enforcement on the main CI path
 
 ## Immediate focus
 

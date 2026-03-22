@@ -32,6 +32,8 @@ The pilot is launch-ready when all of these are true:
 
 The repository now contains all of those gates for the current pilot.
 
+The repo also now contains a dedicated GitHub Actions workflow, `pilot-validation.yml`, that runs this same validation pack on Windows on a schedule or by manual dispatch and uploads the resulting artifacts.
+
 ## One-Command Validation
 
 Windows operator path:
@@ -45,6 +47,12 @@ Technical path:
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1
 ```
+
+CI path:
+
+- GitHub Actions workflow: `Pilot Validation`
+- triggers: manual dispatch and scheduled weekly run
+- artifacts: pilot report, performance report, drift report, launch transcript
 
 That validation pack performs these steps in order:
 

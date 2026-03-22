@@ -16,6 +16,7 @@ aether_schema = { path = "../aether_schema" }
 aether_storage = { path = "../aether_storage" }
 axum = { version = "=0.7.9", features = ["json"] }
 indexmap.workspace = true
+rusqlite = { version = "=0.32.1", features = ["bundled"] }
 serde.workspace = true
 serde_json = "1.0.133"
 thiserror.workspace = true

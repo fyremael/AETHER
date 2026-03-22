@@ -1,7 +1,7 @@
 use aether_api::{
     GetArtifactReferenceRequest, InMemoryKernelService, KernelService,
     RegisterArtifactReferenceRequest, RegisterVectorRecordRequest, SearchVectorsRequest,
-    VectorFactProjection, VectorMetric, VectorRecordMetadata,
+    SqliteKernelService, VectorFactProjection, VectorMetric, VectorRecordMetadata,
 };
 use aether_ast::{
     DatomProvenance, ElementId, EntityId, PredicateId, PredicateRef, RuleAst, RuleId, RuleProgram,
@@ -10,7 +10,14 @@ use aether_ast::{
 use aether_rules::{DefaultRuleCompiler, RuleCompiler};
 use aether_runtime::{RuleRuntime, SemiNaiveRuntime};
 use aether_schema::{PredicateSignature, Schema, ValueType};
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(1);
 
 #[test]
 fn vector_search_results_reenter_the_semantic_layer_with_provenance() {
@@ -160,4 +167,120 @@ fn vector_search_results_reenter_the_semantic_layer_with_provenance() {
         derived.tuples[0].metadata.source_datom_ids,
         vec![ElementId::new(2)]
     );
+}
+
+#[test]
+fn sqlite_sidecar_federation_survives_restart() {
+    let temp = TestDbPath::new("sidecar-federation");
+    {
+        let mut service = SqliteKernelService::open(temp.path()).expect("open sqlite kernel");
+        service
+            .register_artifact_reference(RegisterArtifactReferenceRequest {
+                reference: aether_api::ArtifactReference {
+                    sidecar_id: "semantic-memory".into(),
+                    artifact_id: "doc-1".into(),
+                    entity: EntityId::new(31),
+                    uri: "s3://aether/docs/doc-1.md".into(),
+                    media_type: "text/markdown".into(),
+                    byte_length: 256,
+                    digest: Some("sha256:doc-1".into()),
+                    metadata: BTreeMap::new(),
+                    provenance: DatomProvenance::default(),
+                    policy: None,
+                    registered_at: ElementId::new(1),
+                },
+            })
+            .expect("register artifact");
+        service
+            .register_vector_record(RegisterVectorRecordRequest {
+                record: VectorRecordMetadata {
+                    sidecar_id: "semantic-memory".into(),
+                    vector_id: "vec-1".into(),
+                    entity: EntityId::new(31),
+                    source_artifact_id: Some("doc-1".into()),
+                    embedding_ref: "s3://aether/vectors/vec-1.bin".into(),
+                    dimensions: 3,
+                    metric: VectorMetric::Cosine,
+                    metadata: BTreeMap::new(),
+                    provenance: DatomProvenance::default(),
+                    policy: None,
+                    registered_at: ElementId::new(2),
+                },
+                embedding: vec![0.9, 0.1, 0.0],
+            })
+            .expect("register vector");
+    }
+
+    let service = SqliteKernelService::open(temp.path()).expect("reopen sqlite kernel");
+    let artifact = service
+        .get_artifact_reference(GetArtifactReferenceRequest {
+            sidecar_id: "semantic-memory".into(),
+            artifact_id: "doc-1".into(),
+        })
+        .expect("fetch persisted artifact")
+        .reference;
+    assert_eq!(artifact.uri, "s3://aether/docs/doc-1.md");
+
+    let search = service
+        .search_vectors(SearchVectorsRequest {
+            sidecar_id: "semantic-memory".into(),
+            query_embedding: vec![1.0, 0.0, 0.0],
+            top_k: 1,
+            metric: VectorMetric::Cosine,
+            as_of: Some(ElementId::new(2)),
+            projection: Some(VectorFactProjection {
+                predicate: PredicateRef {
+                    id: PredicateId::new(81),
+                    name: "semantic_neighbor".into(),
+                    arity: 3,
+                },
+                query_entity: EntityId::new(999),
+            }),
+        })
+        .expect("search persisted vectors");
+    assert_eq!(search.matches.len(), 1);
+    assert_eq!(
+        search.facts[0]
+            .provenance
+            .as_ref()
+            .expect("fact provenance")
+            .source_datom_ids,
+        vec![ElementId::new(2)]
+    );
+}
+
+struct TestDbPath {
+    path: PathBuf,
+}
+
+impl TestDbPath {
+    fn new(name: &str) -> Self {
+        let unique = NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let mut path = std::env::temp_dir();
+        path.push(format!("aether-sidecars-{name}-{nanos}-{unique}.sqlite"));
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TestDbPath {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        let sidecars = PathBuf::from(format!("{}.sidecars.sqlite", self.path.display()));
+        let _ = std::fs::remove_file(&sidecars);
+
+        for suffix in ["-wal", "-shm"] {
+            let _ =
+                std::fs::remove_file(PathBuf::from(format!("{}{}", self.path.display(), suffix)));
+            let _ =
+                std::fs::remove_file(PathBuf::from(format!("{}{}", sidecars.display(), suffix)));
+        }
+    }
 }
