@@ -19,7 +19,7 @@ Completed:
 - semi-naive delta execution implemented for recursive SCC evaluation
 - executable stratified negation implemented for stratified programs
 - bounded aggregation implemented for non-recursive head-term `count`, `sum`, `min`, and `max` rules
-- first coordination acceptance slice implemented for readiness, claims, leases, and stale-attempt rejection
+- first coordination acceptance slice implemented for readiness, claims, leases, lease heartbeats, execution outcomes, and stale-result rejection
 - in-memory kernel service implemented in `aether_api`
 - minimal HTTP JSON kernel service implemented over `aether_api`
 - kernel service generalized over in-memory and durable journal backends
@@ -42,7 +42,7 @@ Completed:
 
 Not yet completed:
 
-- full canonical DSL coverage beyond the current query/fact/policy slice
+- post-v1 DSL ergonomics and document modularity beyond the current canonical surface
 - broader durable storage backends beyond the current SQLite journal
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
 - stable Go and Python boundary clients

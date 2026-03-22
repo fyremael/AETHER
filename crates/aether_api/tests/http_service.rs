@@ -1,10 +1,12 @@
 use aether_api::{
-    http_router, http_router_with_options, AppendRequest, AuditEntry, AuditLogResponse, AuthScope,
-    ExplainTupleRequest, HealthResponse, HistoryResponse, HttpAuthConfig, HttpKernelOptions,
-    InMemoryKernelService, KernelService, ParseDocumentRequest, ParseDocumentResponse,
-    RunDocumentRequest, RunDocumentResponse, SqliteKernelService,
+    coordination_pilot_dsl, coordination_pilot_seed_history, http_router, http_router_with_options,
+    AppendRequest, AuditEntry, AuditLogResponse, AuthScope, ExplainTupleRequest, HealthResponse,
+    HistoryResponse, HttpAuthConfig, HttpKernelOptions, InMemoryKernelService, KernelService,
+    ParseDocumentRequest, ParseDocumentResponse, RunDocumentRequest, RunDocumentResponse,
+    SqliteKernelService, COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
+    COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
-use aether_ast::{AttributeId, Datom, DatomProvenance, ElementId, EntityId, Value};
+use aether_ast::{ElementId, EntityId, Value};
 use reqwest::Client;
 use std::{
     path::{Path, PathBuf},
@@ -38,7 +40,7 @@ async fn http_service_exposes_health_and_history() {
     let append = client
         .post(format!("{base_url}/v1/append"))
         .json(&AppendRequest {
-            datoms: coordination_history(),
+            datoms: coordination_pilot_seed_history(),
         })
         .send()
         .await
@@ -58,7 +60,7 @@ async fn http_service_exposes_health_and_history() {
             .expect("history response")
             .datoms
             .len(),
-        7
+        25
     );
 
     server.abort();
@@ -72,7 +74,7 @@ async fn http_service_runs_documents_and_explains_tuples() {
     let append = client
         .post(format!("{base_url}/v1/append"))
         .json(&AppendRequest {
-            datoms: coordination_history(),
+            datoms: coordination_pilot_seed_history(),
         })
         .send()
         .await
@@ -82,8 +84,8 @@ async fn http_service_runs_documents_and_explains_tuples() {
     let parsed = client
         .post(format!("{base_url}/v1/documents/parse"))
         .json(&ParseDocumentRequest {
-            dsl: coordination_dsl(
-                "as_of e5",
+            dsl: coordination_pilot_dsl(
+                &format!("as_of e{}", COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT),
                 "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
         })
@@ -95,18 +97,43 @@ async fn http_service_runs_documents_and_explains_tuples() {
         .json::<ParseDocumentResponse>()
         .await
         .expect("parse response");
-    assert_eq!(parsed.program.facts.len(), 11);
+    assert_eq!(parsed.program.facts.len(), 7);
 
-    let as_of_authorized = run_document(
+    let pre_heartbeat_authorized = run_document(
         &client,
         &base_url,
-        coordination_dsl(
-            "as_of e5",
+        coordination_pilot_dsl(
+            &format!("as_of e{}", COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT),
             "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
         ),
     )
     .await;
-    assert_eq!(as_of_authorized.state.as_of, Some(ElementId::new(5)));
+    assert_eq!(
+        pre_heartbeat_authorized.state.as_of,
+        Some(ElementId::new(COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT))
+    );
+    assert_eq!(
+        pre_heartbeat_authorized
+            .query
+            .expect("pre-heartbeat query result")
+            .rows
+            .len(),
+        0
+    );
+
+    let as_of_authorized = run_document(
+        &client,
+        &base_url,
+        coordination_pilot_dsl(
+            &format!("as_of e{}", COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT),
+            "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
+        ),
+    )
+    .await;
+    assert_eq!(
+        as_of_authorized.state.as_of,
+        Some(ElementId::new(COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT))
+    );
     assert_eq!(
         as_of_authorized
             .query
@@ -125,7 +152,7 @@ async fn http_service_runs_documents_and_explains_tuples() {
     let current_authorized = run_document(
         &client,
         &base_url,
-        coordination_dsl(
+        coordination_pilot_dsl(
             "current",
             "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
         ),
@@ -166,12 +193,37 @@ async fn http_service_runs_documents_and_explains_tuples() {
     let stale = run_document(
         &client,
         &base_url,
-        coordination_dsl(
+        coordination_pilot_dsl(
             "current",
-            "goal execution_rejected_stale(t, worker, epoch)\n  keep t, worker, epoch",
+            "goal execution_outcome_rejected_stale(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
         ),
     )
     .await;
+    let accepted = run_document(
+        &client,
+        &base_url,
+        coordination_pilot_dsl(
+            "current",
+            "goal execution_outcome_accepted(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
+        ),
+    )
+    .await;
+    assert_eq!(
+        accepted
+            .query
+            .expect("accepted query result")
+            .rows
+            .into_iter()
+            .map(|row| row.values)
+            .collect::<Vec<_>>(),
+        vec![vec![
+            Value::Entity(EntityId::new(1)),
+            Value::String("worker-b".into()),
+            Value::U64(2),
+            Value::String("completed".into()),
+            Value::String("current-worker-b".into()),
+        ]]
+    );
     assert_eq!(
         stale
             .query
@@ -180,23 +232,13 @@ async fn http_service_runs_documents_and_explains_tuples() {
             .into_iter()
             .map(|row| row.values)
             .collect::<Vec<_>>(),
-        vec![
-            vec![
-                Value::Entity(EntityId::new(1)),
-                Value::String("worker-a".into()),
-                Value::U64(1),
-            ],
-            vec![
-                Value::Entity(EntityId::new(1)),
-                Value::String("worker-a".into()),
-                Value::U64(2),
-            ],
-            vec![
-                Value::Entity(EntityId::new(1)),
-                Value::String("worker-b".into()),
-                Value::U64(1),
-            ],
-        ]
+        vec![vec![
+            Value::Entity(EntityId::new(1)),
+            Value::String("worker-a".into()),
+            Value::U64(1),
+            Value::String("completed".into()),
+            Value::String("stale-worker-a".into()),
+        ],]
     );
 
     server.abort();
@@ -215,7 +257,7 @@ async fn http_service_preserves_coordination_history_across_sqlite_restart() {
         let append = client
             .post(format!("{base_url}/v1/append"))
             .json(&AppendRequest {
-                datoms: coordination_history(),
+                datoms: coordination_pilot_seed_history(),
             })
             .send()
             .await
@@ -225,7 +267,7 @@ async fn http_service_preserves_coordination_history_across_sqlite_restart() {
         let current = run_document(
             &client,
             &base_url,
-            coordination_dsl(
+            coordination_pilot_dsl(
                 "current",
                 "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
@@ -267,14 +309,14 @@ async fn http_service_preserves_coordination_history_across_sqlite_restart() {
             .expect("history response")
             .datoms
             .len(),
-        7
+        25
     );
 
     let as_of = run_document(
         &client,
         &base_url,
-        coordination_dsl(
-            "as_of e5",
+        coordination_pilot_dsl(
+            &format!("as_of e{}", COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT),
             "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
         ),
     )
@@ -317,7 +359,7 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
         .post(format!("{base_url}/v1/append"))
         .bearer_auth("pilot-query-token")
         .json(&AppendRequest {
-            datoms: coordination_history(),
+            datoms: coordination_pilot_seed_history(),
         })
         .send()
         .await
@@ -328,7 +370,7 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
         .post(format!("{base_url}/v1/append"))
         .bearer_auth("pilot-operator-token")
         .json(&AppendRequest {
-            datoms: coordination_history(),
+            datoms: coordination_pilot_seed_history(),
         })
         .send()
         .await
@@ -339,7 +381,7 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
         .post(format!("{base_url}/v1/documents/run"))
         .bearer_auth("pilot-operator-token")
         .json(&RunDocumentRequest {
-            dsl: coordination_dsl(
+            dsl: coordination_pilot_dsl(
                 "current",
                 "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
@@ -389,15 +431,15 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
         entry.principal == "query-client"
             && entry.path == "/v1/append"
             && entry.status == reqwest::StatusCode::FORBIDDEN.as_u16()
-            && entry.context.datom_count == Some(7)
-            && entry.context.last_element == Some(7)
+            && entry.context.datom_count == Some(25)
+            && entry.context.last_element == Some(25)
     }));
     assert!(audit_entries.iter().any(|entry| {
         entry.principal == "pilot-operator"
             && entry.path == "/v1/append"
             && entry.status == reqwest::StatusCode::OK.as_u16()
-            && entry.context.datom_count == Some(7)
-            && entry.context.last_element == Some(7)
+            && entry.context.datom_count == Some(25)
+            && entry.context.last_element == Some(25)
     }));
     assert!(audit_entries.iter().any(|entry| {
         entry.principal == "pilot-operator"
@@ -439,7 +481,7 @@ async fn authenticated_http_service_audits_query_goal_for_find_alias() {
         .post(format!("{base_url}/v1/append"))
         .bearer_auth("pilot-operator-token")
         .json(&AppendRequest {
-            datoms: coordination_history(),
+            datoms: coordination_pilot_seed_history(),
         })
         .send()
         .await
@@ -450,7 +492,7 @@ async fn authenticated_http_service_audits_query_goal_for_find_alias() {
         .post(format!("{base_url}/v1/documents/run"))
         .bearer_auth("pilot-operator-token")
         .json(&RunDocumentRequest {
-            dsl: coordination_dsl(
+            dsl: coordination_pilot_dsl(
                 "current",
                 "find execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
@@ -491,7 +533,7 @@ async fn authenticated_http_service_persists_semantic_audit_context_across_resta
             .post(format!("{base_url}/v1/append"))
             .bearer_auth("pilot-operator-token")
             .json(&AppendRequest {
-                datoms: coordination_history(),
+                datoms: coordination_pilot_seed_history(),
             })
             .send()
             .await
@@ -503,7 +545,7 @@ async fn authenticated_http_service_persists_semantic_audit_context_across_resta
                 &client,
                 &base_url,
                 "pilot-operator-token",
-                coordination_dsl(
+                coordination_pilot_dsl(
                     "current",
                     "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
                 ),
@@ -538,8 +580,8 @@ async fn authenticated_http_service_persists_semantic_audit_context_across_resta
             .post(format!("{base_url}/v1/documents/run"))
             .bearer_auth("pilot-operator-token")
             .json(&RunDocumentRequest {
-                dsl: coordination_dsl(
-                    "as_of e5",
+                dsl: coordination_pilot_dsl(
+                    &format!("as_of e{}", COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT),
                     "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
                 ),
             })
@@ -577,8 +619,8 @@ async fn authenticated_http_service_persists_semantic_audit_context_across_resta
             && entry.context.row_count == Some(1)
     }));
     assert!(run_entries.iter().any(|entry| {
-        entry.context.temporal_view.as_deref() == Some("as_of(e5)")
-            && entry.context.requested_element == Some(5)
+        entry.context.temporal_view.as_deref() == Some("as_of(e9)")
+            && entry.context.requested_element == Some(COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT)
             && entry.context.row_count == Some(1)
     }));
     assert!(explain_entries
@@ -656,117 +698,6 @@ async fn spawn_server_with_options(
 async fn stop_server(server: tokio::task::JoinHandle<()>) {
     server.abort();
     let _ = server.await;
-}
-
-fn coordination_dsl(view: &str, query_body: &str) -> String {
-    format!(
-        r#"
-schema v1 {{
-  attr task.depends_on: RefSet<Entity>
-  attr task.status: ScalarLWW<String>
-  attr task.claimed_by: ScalarLWW<String>
-  attr task.lease_epoch: ScalarLWW<U64>
-  attr task.lease_state: ScalarLWW<String>
-}}
-
-predicates {{
-  task(Entity)
-  worker(String)
-  worker_capability(String, String)
-  execution_attempt(Entity, String, U64)
-  task_depends_on(Entity, Entity)
-  task_status(Entity, String)
-  task_claimed_by(Entity, String)
-  task_lease_epoch(Entity, U64)
-  task_lease_state(Entity, String)
-  task_complete(Entity)
-  dependency_blocked(Entity)
-  lease_active(Entity, String, U64)
-  active_claim(Entity)
-  task_ready(Entity)
-  worker_can_claim(Entity, String)
-  execution_authorized(Entity, String, U64)
-  execution_rejected_stale(Entity, String, U64)
-}}
-
-facts {{
-  task(entity(1))
-  task(entity(2))
-  task(entity(3))
-  worker("worker-a")
-  worker("worker-b")
-  worker_capability("worker-a", "executor")
-  worker_capability("worker-b", "executor")
-  execution_attempt(entity(1), "worker-a", 1)
-  execution_attempt(entity(1), "worker-b", 1)
-  execution_attempt(entity(1), "worker-a", 2)
-  execution_attempt(entity(1), "worker-b", 2) @capability("executor") @visibility("ops")
-}}
-
-rules {{
-  task_complete(t) <- task_status(t, "done")
-  dependency_blocked(t) <- task_depends_on(t, dep), not task_complete(dep)
-  lease_active(t, w, epoch) <- task_claimed_by(t, w), task_lease_epoch(t, epoch), task_lease_state(t, "active")
-  active_claim(t) <- lease_active(t, w, epoch)
-  task_ready(t) <- task(t), not task_complete(t), not dependency_blocked(t), not active_claim(t)
-  worker_can_claim(t, w) <- task_ready(t), worker(w), worker_capability(w, "executor")
-  execution_authorized(t, w, epoch) <- execution_attempt(t, w, epoch), lease_active(t, w, epoch)
-  execution_rejected_stale(t, worker, epoch) <- execution_attempt(t, worker, epoch), not lease_active(t, worker, epoch)
-}}
-
-materialize {{
-  task_ready
-  worker_can_claim
-  execution_authorized
-  execution_rejected_stale
-}}
-
-query {{
-  {view}
-  {query_body}
-}}
-"#
-    )
-}
-
-fn coordination_history() -> Vec<Datom> {
-    vec![
-        dependency_datom(1, 2, 1),
-        datom(2, 2, Value::String("done".into()), 2),
-        datom(1, 3, Value::String("worker-a".into()), 3),
-        datom(1, 4, Value::U64(1), 4),
-        datom(1, 5, Value::String("active".into()), 5),
-        datom(1, 3, Value::String("worker-b".into()), 6),
-        datom(1, 4, Value::U64(2), 7),
-    ]
-}
-
-fn dependency_datom(entity: u64, value: u64, element: u64) -> Datom {
-    Datom {
-        entity: EntityId::new(entity),
-        attribute: AttributeId::new(1),
-        value: Value::Entity(EntityId::new(value)),
-        op: aether_ast::OperationKind::Add,
-        element: ElementId::new(element),
-        replica: aether_ast::ReplicaId::new(1),
-        causal_context: Default::default(),
-        provenance: DatomProvenance::default(),
-        policy: None,
-    }
-}
-
-fn datom(entity: u64, attribute: u64, value: Value, element: u64) -> Datom {
-    Datom {
-        entity: EntityId::new(entity),
-        attribute: AttributeId::new(attribute),
-        value,
-        op: aether_ast::OperationKind::Assert,
-        element: ElementId::new(element),
-        replica: aether_ast::ReplicaId::new(1),
-        causal_context: Default::default(),
-        provenance: DatomProvenance::default(),
-        policy: None,
-    }
 }
 
 struct TestDbPath {

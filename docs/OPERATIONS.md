@@ -63,7 +63,7 @@ Those audit entries now carry semantic context, not just endpoint metadata. For 
 | Demo | Purpose | Best use |
 | --- | --- | --- |
 | Demo 01 | Temporal replay and recursive closure | Introduce the semantic substrate and `AsOf` model |
-| Demo 02 | Multi-worker lease handoff | Show coordination semantics through the service path |
+| Demo 02 | Multi-worker lease handoff | Show heartbeat-backed authority and outcome fencing through the service path |
 | Demo 03 | Coordination situation room | Present the strongest current end-to-end story in one run |
 
 ## Which Demo To Use
@@ -76,14 +76,14 @@ Those audit entries now carry semantic context, not just endpoint metadata. For 
 
 ### Use Demo 02 when
 
-- the audience cares about handoff and stale fencing
+- the audience cares about handoff, heartbeats, and stale-result fencing
 - you want a smaller coordination story than the flagship showcase
 - you want a direct service-backed example without the larger narrative arc
 
 ### Use Demo 03 when
 
 - the audience wants the best available statement of AETHER’s current maturity
-- you need one run that shows replay, recursion, claim windows, leases, fencing, and proof traces together
+- you need one run that shows replay, recursion, claim windows, leases, heartbeat-backed authority, fencing, and proof traces together
 - you want the strongest current demo for review, strategy, or external presentation
 
 ## Running Demos
@@ -195,7 +195,7 @@ cargo test -p aether_api --test performance_stress --release -- --ignored --noca
 
 Use the dashboard when people want to watch the measurements arrive in real time. Use the markdown report when you need to hand someone a saved artifact afterward.
 
-Use the pilot report when someone asks, “Why is this worker authorized or fenced right now?” Use the drift report when someone asks, “Did this change materially slow the pilot path down?”
+Use the pilot report when someone asks, “Why is this worker authorized, or why was this reported result fenced right now?” Use the drift report when someone asks, “Did this change materially slow the pilot path down?”
 Use the launch validation pack when someone asks, “Is this exact pilot candidate ready to go?”
 
 ## How To Present The Output

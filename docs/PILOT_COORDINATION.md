@@ -8,7 +8,7 @@ It is intentionally narrow. The goal is not to prove that AETHER is already a ge
 
 The pilot asks one question:
 
-Can AETHER act as an authoritative coordination kernel for task readiness and lease authority, with durable replay and operator-legible answers?
+Can AETHER act as an authoritative coordination kernel for task readiness, heartbeat-backed lease authority, and execution outcome fencing, with durable replay and operator-legible answers?
 
 For this phase, that question is enough.
 
@@ -17,7 +17,7 @@ For this phase, that question is enough.
 The pilot includes exactly two coordination workloads:
 
 1. readiness and claimability across dependency graphs
-2. lease authority, handoff, and stale-attempt fencing
+2. lease authority, lease heartbeats, execution outcome acceptance, and stale-result fencing
 
 The pilot system is intentionally constrained:
 
@@ -54,10 +54,12 @@ Implemented:
 
 Those tests intentionally freeze the current answers for:
 
-- `AsOf(e5)` authorization
-- current authorization
+- authorization before the first lease heartbeat at `AsOf(e5)`
+- authorization after the first lease heartbeat at `AsOf(e9)`
+- current live authorization
 - current claimability
-- current stale-attempt rejection
+- current accepted outcomes
+- current rejected stale outcomes
 - tuple explanation availability
 
 ## Commands
@@ -143,7 +145,7 @@ Those are the next things to do. They are the post-launch hardening road for the
 
 These are deliberately outside the current pilot:
 
-- full canonical DSL completion
+- post-v1 DSL expansion beyond the current canonical surface
 - bounded aggregation
 - multi-tenant authorization semantics
 - cluster coordination or replica consensus

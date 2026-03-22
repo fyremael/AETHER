@@ -82,7 +82,7 @@ That means:
 
 - operational memory with durable replay
 - derived understanding of readiness and authority
-- governed action through claims, leases, handoff, and fencing
+- governed action through claims, lease heartbeats, handoff, outcome acceptance, and fencing
 - proof-backed explanation for operators and auditors
 
 The current design-partner pilot proves that story narrowly in the coordination
@@ -123,7 +123,7 @@ Implemented today:
 - source datom provenance threaded from resolved facts into derived tuples
 - derived tuple metadata with rule, SCC, stratum, iteration, parent tuple references, and source datom IDs
 - an in-memory explainer that reconstructs recursive tuple traces
-- a coordination acceptance slice for task readiness, claims, lease handoff, and stale-attempt rejection
+- a coordination acceptance slice for task readiness, claims, lease heartbeats, execution outcomes, lease handoff, and stale-result rejection
 - an in-memory kernel service over `aether_api` with end-to-end integration tests
 - a minimal HTTP JSON kernel service boundary over `aether_api`
 - a durable coordination-pilot HTTP service example over a SQLite journal
@@ -137,7 +137,7 @@ Implemented today:
 
 Deliberately still narrow:
 
-- the DSL parser is still a focused initial slice rather than the full canonical language
+- the DSL now covers the canonical v1 surface, but broader post-v1 ergonomics and modular authoring are still open
 - bounded aggregation is currently limited to non-recursive aggregate rules
 - Go and Python remain boundary placeholders rather than active implementations
 - sidecar integrations are specified, not yet implemented
@@ -156,7 +156,7 @@ That slice looks like this:
 6. derived tuples are emitted with iteration, parent-tuple, and source-datom provenance metadata
 7. the explainer can reconstruct a tuple-local proof trace from the derived graph
 
-That smallest initial proof has now widened into a first coordination workload: tasks, active claims, lease state, readiness, and stale-attempt rejection can all be derived and queried from the same kernel.
+That smallest initial proof has now widened into a first coordination workload: tasks, active claims, lease state, heartbeat-backed authority, accepted outcomes, rejected stale outcomes, and readiness can all be derived and queried from the same kernel.
 
 ## Semantic Invariants
 
@@ -279,11 +279,11 @@ Supported today:
 - source datom provenance on derived tuples
 - recursive tuple trace reconstruction
 - query execution over `Current` and `AsOf` views
-- coordination-style readiness and stale-attempt derivations
+- coordination-style readiness, heartbeat-backed authority, and outcome-fencing derivations
 
 Not yet supported in the runtime:
 
-- bounded aggregation
+- recursive or generalized aggregation beyond the current non-recursive head-term slice
 - optimizer-grade plan selection beyond the current semi-naive slice
 
 This is intentional. The project is building from semantic bedrock upward. The right next steps are to preserve correctness while widening expressive power, not to rush into breadth and backfill meaning later.
@@ -301,7 +301,7 @@ The milestone sequence remains the governing roadmap.
 
 In practical terms, the most immediate work now is:
 
-- widening the DSL from the current focused slice to the full canonical language
+- deciding which post-v1 DSL ergonomics matter beyond the now-implemented canonical v1 surface
 - adding bounded aggregation and deeper runtime optimization
 - widening explainability from tuple traces to richer operator-facing proof and incident surfaces
 - hardening the API boundary from the current authenticated, audited, and reportable pilot service to richer operator-facing and production-credible integrations

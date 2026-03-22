@@ -1,8 +1,9 @@
 use aether_api::{
-    build_coordination_pilot_report, coordination_pilot_seed_history, http_router_with_options,
-    AppendRequest, AuditEntry, AuditLogResponse, AuthScope, ExplainTupleRequest, HistoryResponse,
-    HttpAuthConfig, HttpKernelOptions, KernelService, RunDocumentRequest, RunDocumentResponse,
-    SqliteKernelService,
+    build_coordination_pilot_report, coordination_pilot_dsl, coordination_pilot_seed_history,
+    http_router_with_options, AppendRequest, AuditEntry, AuditLogResponse, AuthScope,
+    ExplainTupleRequest, HistoryResponse, HttpAuthConfig, HttpKernelOptions, KernelService,
+    RunDocumentRequest, RunDocumentResponse, SqliteKernelService,
+    COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
 use aether_ast::{ElementId, EntityId, TupleId, Value};
 use reqwest::Client;
@@ -61,7 +62,7 @@ async fn soak_authenticated_pilot_service_survives_restarts() {
             &client,
             &base_url,
             "pilot-operator-token",
-            coordination_dsl(
+            coordination_pilot_dsl(
                 "current",
                 "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
@@ -98,15 +99,34 @@ async fn soak_authenticated_pilot_service_survives_restarts() {
                 &client,
                 &base_url,
                 "pilot-operator-token",
-                coordination_dsl(
-                    "as_of e5",
+                coordination_pilot_dsl(
+                    &format!("as_of e{}", COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT),
                     "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
                 ),
             )
             .await;
-            assert_eq!(as_of.state.as_of, Some(ElementId::new(5)));
             assert_eq!(
-                as_of.query.expect("as_of query result").rows[0].values,
+                as_of.state.as_of,
+                Some(ElementId::new(COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT))
+            );
+            assert!(as_of.query.expect("as_of query result").rows.is_empty());
+
+            let authorized_as_of = run_document_authorized(
+                &client,
+                &base_url,
+                "pilot-operator-token",
+                coordination_pilot_dsl(
+                    &format!("as_of e{}", COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT),
+                    "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
+                ),
+            )
+            .await;
+            assert_eq!(
+                authorized_as_of
+                    .query
+                    .expect("authorized as_of query result")
+                    .rows[0]
+                    .values,
                 vec![
                     Value::Entity(EntityId::new(1)),
                     Value::String("worker-a".into()),
@@ -163,7 +183,7 @@ async fn soak_authenticated_pilot_service_survives_restarts() {
 
     let mut service = SqliteKernelService::open(temp.path()).expect("reopen sqlite kernel service");
     let report = build_coordination_pilot_report(&mut service).expect("build final pilot report");
-    assert_eq!(report.history_len, 7);
+    assert_eq!(report.history_len, 25);
     assert_eq!(
         report.current_authorized[0].values,
         vec![
@@ -214,7 +234,7 @@ async fn misuse_paths_are_rejected_cleanly_and_audited() {
     let unauthorized = client
         .post(format!("{base_url}/v1/documents/run"))
         .json(&RunDocumentRequest {
-            dsl: coordination_dsl(
+            dsl: coordination_pilot_dsl(
                 "current",
                 "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
@@ -239,7 +259,7 @@ async fn misuse_paths_are_rejected_cleanly_and_audited() {
         &client,
         &base_url,
         "pilot-operator-token",
-        coordination_dsl(
+        coordination_pilot_dsl(
             "current",
             "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
         ),
@@ -274,7 +294,7 @@ async fn misuse_paths_are_rejected_cleanly_and_audited() {
             .expect("history response")
             .datoms
             .len(),
-        7
+        25
     );
 
     let audit_entries = client
@@ -291,7 +311,7 @@ async fn misuse_paths_are_rejected_cleanly_and_audited() {
     assert!(audit_entries.iter().any(|entry| {
         entry.path == "/v1/append"
             && entry.status == reqwest::StatusCode::CONFLICT.as_u16()
-            && entry.context.datom_count == Some(7)
+            && entry.context.datom_count == Some(25)
     }));
     assert!(audit_entries.iter().any(|entry| {
         entry.path == "/v1/documents/run"
@@ -370,77 +390,6 @@ async fn spawn_server_with_options(
 async fn stop_server(server: tokio::task::JoinHandle<()>) {
     server.abort();
     let _ = server.await;
-}
-
-fn coordination_dsl(view: &str, query_body: &str) -> String {
-    format!(
-        r#"
-schema v1 {{
-  attr task.depends_on: RefSet<Entity>
-  attr task.status: ScalarLWW<String>
-  attr task.claimed_by: ScalarLWW<String>
-  attr task.lease_epoch: ScalarLWW<U64>
-  attr task.lease_state: ScalarLWW<String>
-}}
-
-predicates {{
-  task(Entity)
-  worker(String)
-  worker_capability(String, String)
-  execution_attempt(Entity, String, U64)
-  task_depends_on(Entity, Entity)
-  task_status(Entity, String)
-  task_claimed_by(Entity, String)
-  task_lease_epoch(Entity, U64)
-  task_lease_state(Entity, String)
-  task_complete(Entity)
-  dependency_blocked(Entity)
-  lease_active(Entity, String, U64)
-  active_claim(Entity)
-  task_ready(Entity)
-  worker_can_claim(Entity, String)
-  execution_authorized(Entity, String, U64)
-  execution_rejected_stale(Entity, String, U64)
-}}
-
-facts {{
-  task(entity(1))
-  task(entity(2))
-  task(entity(3))
-  worker("worker-a")
-  worker("worker-b")
-  worker_capability("worker-a", "executor")
-  worker_capability("worker-b", "executor")
-  execution_attempt(entity(1), "worker-a", 1)
-  execution_attempt(entity(1), "worker-b", 1)
-  execution_attempt(entity(1), "worker-a", 2)
-  execution_attempt(entity(1), "worker-b", 2) @capability("executor") @visibility("ops")
-}}
-
-rules {{
-  task_complete(t) <- task_status(t, "done")
-  dependency_blocked(t) <- task_depends_on(t, dep), not task_complete(dep)
-  lease_active(t, w, epoch) <- task_claimed_by(t, w), task_lease_epoch(t, epoch), task_lease_state(t, "active")
-  active_claim(t) <- lease_active(t, w, epoch)
-  task_ready(t) <- task(t), not task_complete(t), not dependency_blocked(t), not active_claim(t)
-  worker_can_claim(t, w) <- task_ready(t), worker(w), worker_capability(w, "executor")
-  execution_authorized(t, w, epoch) <- execution_attempt(t, w, epoch), lease_active(t, w, epoch)
-  execution_rejected_stale(t, worker, epoch) <- execution_attempt(t, worker, epoch), not lease_active(t, worker, epoch)
-}}
-
-materialize {{
-  task_ready
-  worker_can_claim
-  execution_authorized
-  execution_rejected_stale
-}}
-
-query {{
-  {view}
-  {query_body}
-}}
-"#
-    )
 }
 
 fn pilot_auth() -> HttpAuthConfig {

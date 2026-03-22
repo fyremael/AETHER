@@ -9,7 +9,7 @@ The phrase matters. It does not mean “production platform complete.” It mean
 The launch target is the current narrow pilot:
 
 1. readiness and claimability across dependency graphs
-2. lease authority, handoff, and stale-attempt fencing
+2. lease authority, lease heartbeats, outcome acceptance, handoff, and stale-result fencing
 
 The launch target is not:
 
@@ -25,7 +25,7 @@ The pilot is launch-ready when all of these are true:
 
 1. durable replay is exact before and after restart
 2. authenticated HTTP answers are exact before and after restart
-3. operator reports explain why a worker is authorized or fenced
+3. operator reports explain why a worker is authorized, why a result is accepted, or why it is fenced
 4. semantic audit logs preserve the cut, goal, tuple, and count context operators need
 5. benchmark baselines exist and drift is checked against them
 6. longer-run soak and misuse drills pass on the launch candidate
