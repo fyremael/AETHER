@@ -27,7 +27,8 @@ after this file. That pack explains the long-range vision, buyer story,
 messaging discipline, and commercialization wedge while staying anchored to the
 current pilot proof. It also now includes a reference-pattern note for
 TupleSpace-style or semantic-blackboard coordination on top of AETHER, plus a
-canonical use-case ladder from pilot proof to platform horizon.
+canonical use-case ladder from pilot proof to platform horizon, an executive
+summary, and a seed investor pitch for early market placement.
 
 ## Thesis
 
