@@ -14,6 +14,7 @@ Implemented today:
 - `aether_sdk.AetherClient`, a minimal HTTP client for the stable Rust service boundary
 - live integration coverage against `crates/aether_api/examples/http_kernel_service.rs`
 - core document execution calls plus sidecar artifact/vector calls
+- sidecar flows that anchor artifact/vector registrations to real journal cuts before semantic search
 
 Current test command:
 

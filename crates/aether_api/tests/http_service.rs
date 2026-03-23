@@ -8,7 +8,10 @@ use aether_api::{
     SqliteKernelService, VectorFactProjection, VectorMetric,
     COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
-use aether_ast::{DatomProvenance, ElementId, EntityId, PredicateId, PredicateRef, Value};
+use aether_ast::{
+    AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PredicateId,
+    PredicateRef, ReplicaId, Value,
+};
 use reqwest::Client;
 use std::collections::BTreeMap;
 use std::{
@@ -641,6 +644,16 @@ async fn http_service_registers_and_searches_sidecar_records() {
     let (base_url, server) = spawn_server(InMemoryKernelService::new()).await;
     let client = Client::new();
 
+    let append = client
+        .post(format!("{base_url}/v1/append"))
+        .json(&AppendRequest {
+            datoms: vec![anchor_datom(1)],
+        })
+        .send()
+        .await
+        .expect("append artifact anchor request");
+    assert!(append.status().is_success());
+
     let artifact = client
         .post(format!("{base_url}/v1/sidecars/artifacts/register"))
         .json(&RegisterArtifactReferenceRequest {
@@ -662,6 +675,16 @@ async fn http_service_registers_and_searches_sidecar_records() {
         .await
         .expect("register artifact request");
     assert!(artifact.status().is_success());
+
+    let append = client
+        .post(format!("{base_url}/v1/append"))
+        .json(&AppendRequest {
+            datoms: vec![anchor_datom(2)],
+        })
+        .send()
+        .await
+        .expect("append vector anchor request");
+    assert!(append.status().is_success());
 
     let vector = client
         .post(format!("{base_url}/v1/sidecars/vectors/register"))
@@ -730,10 +753,24 @@ async fn http_service_registers_and_searches_sidecar_records() {
             .as_ref()
             .expect("fact provenance")
             .source_datom_ids,
-        vec![ElementId::new(2)]
+        vec![ElementId::new(2), ElementId::new(1)]
     );
 
     server.abort();
+}
+
+fn anchor_datom(element: u64) -> Datom {
+    Datom {
+        entity: EntityId::new(1),
+        attribute: AttributeId::new(1),
+        value: Value::String(format!("sidecar-anchor-{element}")),
+        op: OperationKind::Annotate,
+        element: ElementId::new(element),
+        replica: ReplicaId::new(1),
+        causal_context: Default::default(),
+        provenance: DatomProvenance::default(),
+        policy: None,
+    }
 }
 
 async fn run_document(client: &Client, base_url: &str, dsl: String) -> RunDocumentResponse {

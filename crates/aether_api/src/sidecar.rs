@@ -1,5 +1,5 @@
 use aether_ast::{
-    DatomProvenance, ElementId, EntityId, ExtensionalFact, FactProvenance, PolicyEnvelope,
+    Datom, DatomProvenance, ElementId, EntityId, ExtensionalFact, FactProvenance, PolicyEnvelope,
     PredicateRef, SidecarKind, SidecarOrigin, SourceRef, Value,
 };
 use indexmap::IndexMap;
@@ -7,7 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -17,6 +17,7 @@ pub trait SidecarFederation {
     fn register_artifact_reference(
         &mut self,
         request: RegisterArtifactReferenceRequest,
+        journal: &JournalCatalog,
     ) -> Result<RegisterArtifactReferenceResponse, SidecarError>;
     fn get_artifact_reference(
         &self,
@@ -25,11 +26,67 @@ pub trait SidecarFederation {
     fn register_vector_record(
         &mut self,
         request: RegisterVectorRecordRequest,
+        journal: &JournalCatalog,
     ) -> Result<RegisterVectorRecordResponse, SidecarError>;
     fn search_vectors(
         &self,
         request: SearchVectorsRequest,
+        journal: &JournalCatalog,
     ) -> Result<SearchVectorsResponse, SidecarError>;
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct JournalCatalog {
+    positions: BTreeMap<ElementId, usize>,
+    latest: Option<ElementId>,
+}
+
+impl JournalCatalog {
+    pub fn from_history(history: &[Datom]) -> Self {
+        let mut positions = BTreeMap::new();
+        let mut latest = None;
+        for (position, datom) in history.iter().enumerate() {
+            positions.insert(datom.element, position);
+            latest = Some(datom.element);
+        }
+
+        Self { positions, latest }
+    }
+
+    fn ensure_known(&self, element: ElementId) -> Result<usize, SidecarError> {
+        self.positions
+            .get(&element)
+            .copied()
+            .ok_or(SidecarError::UnknownJournalElement(element))
+    }
+
+    fn ensure_current_tail(&self, element: ElementId) -> Result<(), SidecarError> {
+        self.ensure_known(element)?;
+        match self.latest {
+            Some(current_tail) if current_tail == element => Ok(()),
+            Some(current_tail) => Err(SidecarError::NonCurrentJournalElement {
+                element,
+                current_tail,
+            }),
+            None => Err(SidecarError::UnknownJournalElement(element)),
+        }
+    }
+
+    fn position_of(&self, element: ElementId) -> Result<usize, SidecarError> {
+        self.ensure_known(element)
+    }
+
+    fn is_visible_at(
+        &self,
+        element: ElementId,
+        as_of: Option<ElementId>,
+    ) -> Result<bool, SidecarError> {
+        let position = self.position_of(element)?;
+        match as_of {
+            Some(cutoff) => Ok(position <= self.position_of(cutoff)?),
+            None => Ok(true),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -139,7 +196,7 @@ pub struct SearchVectorsResponse {
 pub struct InMemorySidecarFederation {
     artifacts: IndexMap<(String, String), ArtifactReference>,
     vectors: IndexMap<(String, String), StoredVectorRecord>,
-    catalog_positions: IndexMap<ElementId, usize>,
+    catalog_elements: BTreeSet<ElementId>,
 }
 
 #[derive(Debug)]
@@ -165,8 +222,9 @@ impl SidecarFederation for InMemorySidecarFederation {
     fn register_artifact_reference(
         &mut self,
         request: RegisterArtifactReferenceRequest,
+        journal: &JournalCatalog,
     ) -> Result<RegisterArtifactReferenceResponse, SidecarError> {
-        self.ensure_catalog_element_is_available(request.reference.registered_at)?;
+        self.ensure_catalog_element_is_available(request.reference.registered_at, journal)?;
         let key = artifact_key(
             &request.reference.sidecar_id,
             &request.reference.artifact_id,
@@ -204,8 +262,9 @@ impl SidecarFederation for InMemorySidecarFederation {
     fn register_vector_record(
         &mut self,
         request: RegisterVectorRecordRequest,
+        journal: &JournalCatalog,
     ) -> Result<RegisterVectorRecordResponse, SidecarError> {
-        self.ensure_catalog_element_is_available(request.record.registered_at)?;
+        self.ensure_catalog_element_is_available(request.record.registered_at, journal)?;
         if request.record.dimensions != request.embedding.len() {
             return Err(SidecarError::EmbeddingDimensionMismatch {
                 vector_id: request.record.vector_id.clone(),
@@ -215,12 +274,13 @@ impl SidecarFederation for InMemorySidecarFederation {
         }
         if let Some(artifact_id) = &request.record.source_artifact_id {
             let artifact_key = artifact_key(&request.record.sidecar_id, artifact_id);
-            if !self.artifacts.contains_key(&artifact_key) {
+            let Some(artifact) = self.artifacts.get(&artifact_key) else {
                 return Err(SidecarError::UnknownArtifactId {
                     sidecar_id: request.record.sidecar_id.clone(),
                     artifact_id: artifact_id.clone(),
                 });
-            }
+            };
+            ensure_artifact_precedes_vector(artifact, &request.record, journal)?;
         }
 
         let key = vector_key(&request.record.sidecar_id, &request.record.vector_id);
@@ -247,64 +307,49 @@ impl SidecarFederation for InMemorySidecarFederation {
     fn search_vectors(
         &self,
         request: SearchVectorsRequest,
+        journal: &JournalCatalog,
     ) -> Result<SearchVectorsResponse, SidecarError> {
         validate_projection(request.projection.as_ref())?;
-        let cutoff_position = match request.as_of {
-            Some(element) => Some(self.catalog_position(element)?),
-            None => None,
-        };
-        let records = self
-            .vectors
-            .values()
-            .filter(|record| {
-                record.metadata.sidecar_id == request.sidecar_id
-                    && record.metadata.metric == request.metric
-                    && record.metadata.dimensions == request.query_embedding.len()
-                    && match cutoff_position {
-                        Some(cutoff) => self
-                            .catalog_positions
-                            .get(&record.metadata.registered_at)
-                            .copied()
-                            .map(|position| position <= cutoff)
-                            .unwrap_or(false),
-                        None => true,
-                    }
-            })
-            .map(|record| {
-                let artifact = record
-                    .metadata
-                    .source_artifact_id
-                    .as_ref()
-                    .and_then(|artifact_id| {
-                        self.artifacts
-                            .get(&artifact_key(&record.metadata.sidecar_id, artifact_id))
-                    })
-                    .cloned();
-                (record.clone(), artifact)
-            })
-            .collect::<Vec<_>>();
+        let mut records = Vec::new();
+        for record in self.vectors.values() {
+            if record.metadata.sidecar_id != request.sidecar_id
+                || record.metadata.metric != request.metric
+                || record.metadata.dimensions != request.query_embedding.len()
+                || !journal.is_visible_at(record.metadata.registered_at, request.as_of)?
+            {
+                continue;
+            }
+
+            let artifact = record
+                .metadata
+                .source_artifact_id
+                .as_ref()
+                .and_then(|artifact_id| {
+                    self.artifacts
+                        .get(&artifact_key(&record.metadata.sidecar_id, artifact_id))
+                })
+                .cloned();
+            records.push((record.clone(), artifact));
+        }
         build_search_response(request, records)
     }
 }
 
 impl InMemorySidecarFederation {
-    fn ensure_catalog_element_is_available(&self, element: ElementId) -> Result<(), SidecarError> {
-        if self.catalog_positions.contains_key(&element) {
+    fn ensure_catalog_element_is_available(
+        &self,
+        element: ElementId,
+        journal: &JournalCatalog,
+    ) -> Result<(), SidecarError> {
+        journal.ensure_current_tail(element)?;
+        if self.catalog_elements.contains(&element) {
             return Err(SidecarError::DuplicateCatalogElement(element));
         }
         Ok(())
     }
 
     fn record_catalog_element(&mut self, element: ElementId) {
-        let index = self.catalog_positions.len();
-        self.catalog_positions.insert(element, index);
-    }
-
-    fn catalog_position(&self, element: ElementId) -> Result<usize, SidecarError> {
-        self.catalog_positions
-            .get(&element)
-            .copied()
-            .ok_or(SidecarError::UnknownCatalogElement(element))
+        self.catalog_elements.insert(element);
     }
 }
 
@@ -323,18 +368,6 @@ impl SqliteSidecarFederation {
 
     pub fn path(&self) -> &Path {
         &self.path
-    }
-
-    fn catalog_position(&self, element: ElementId) -> Result<usize, SidecarError> {
-        self.connection
-            .query_row(
-                "SELECT seq FROM sidecar_catalog WHERE element = ?1",
-                params![element_key(element)],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?
-            .map(|seq| seq as usize)
-            .ok_or(SidecarError::UnknownCatalogElement(element))
     }
 
     fn artifact_exists(&self, sidecar_id: &str, artifact_id: &str) -> Result<bool, SidecarError> {
@@ -394,7 +427,7 @@ impl SqliteSidecarFederation {
     fn visible_vector_records(
         &self,
         request: &SearchVectorsRequest,
-        cutoff_position: Option<usize>,
+        journal: &JournalCatalog,
     ) -> Result<Vec<(StoredVectorRecord, Option<ArtifactReference>)>, SidecarError> {
         let mut statement = self.connection.prepare(
             "SELECT metadata_json, embedding_json
@@ -414,11 +447,8 @@ impl SqliteSidecarFederation {
             {
                 continue;
             }
-            if let Some(cutoff) = cutoff_position {
-                let position = self.catalog_position(metadata.registered_at)?;
-                if position > cutoff {
-                    continue;
-                }
+            if !journal.is_visible_at(metadata.registered_at, request.as_of)? {
+                continue;
             }
             let embedding: Vec<f32> = serde_json::from_str(&embedding_json)?;
             let artifact = match &metadata.source_artifact_id {
@@ -441,7 +471,9 @@ impl SidecarFederation for SqliteSidecarFederation {
     fn register_artifact_reference(
         &mut self,
         request: RegisterArtifactReferenceRequest,
+        journal: &JournalCatalog,
     ) -> Result<RegisterArtifactReferenceResponse, SidecarError> {
+        journal.ensure_current_tail(request.reference.registered_at)?;
         if self.catalog_element_exists(request.reference.registered_at)? {
             return Err(SidecarError::DuplicateCatalogElement(
                 request.reference.registered_at,
@@ -502,7 +534,9 @@ impl SidecarFederation for SqliteSidecarFederation {
     fn register_vector_record(
         &mut self,
         request: RegisterVectorRecordRequest,
+        journal: &JournalCatalog,
     ) -> Result<RegisterVectorRecordResponse, SidecarError> {
+        journal.ensure_current_tail(request.record.registered_at)?;
         if self.catalog_element_exists(request.record.registered_at)? {
             return Err(SidecarError::DuplicateCatalogElement(
                 request.record.registered_at,
@@ -516,12 +550,14 @@ impl SidecarFederation for SqliteSidecarFederation {
             });
         }
         if let Some(artifact_id) = &request.record.source_artifact_id {
-            if !self.artifact_exists(&request.record.sidecar_id, artifact_id)? {
+            let Some(artifact) = self.lookup_artifact(&request.record.sidecar_id, artifact_id)?
+            else {
                 return Err(SidecarError::UnknownArtifactId {
                     sidecar_id: request.record.sidecar_id.clone(),
                     artifact_id: artifact_id.clone(),
                 });
-            }
+            };
+            ensure_artifact_precedes_vector(&artifact, &request.record, journal)?;
         }
         if self.vector_exists(&request.record.sidecar_id, &request.record.vector_id)? {
             return Err(SidecarError::DuplicateVectorId {
@@ -562,13 +598,10 @@ impl SidecarFederation for SqliteSidecarFederation {
     fn search_vectors(
         &self,
         request: SearchVectorsRequest,
+        journal: &JournalCatalog,
     ) -> Result<SearchVectorsResponse, SidecarError> {
         validate_projection(request.projection.as_ref())?;
-        let cutoff_position = match request.as_of {
-            Some(element) => Some(self.catalog_position(element)?),
-            None => None,
-        };
-        let records = self.visible_vector_records(&request, cutoff_position)?;
+        let records = self.visible_vector_records(&request, journal)?;
         build_search_response(request, records)
     }
 }
@@ -641,7 +674,7 @@ fn build_search_response(
         .into_iter()
         .map(|(record, artifact)| {
             let provenance = FactProvenance {
-                source_datom_ids: vec![record.metadata.registered_at],
+                source_datom_ids: source_datom_ids_for_record(&record.metadata, artifact.as_ref()),
                 sidecar_origin: Some(SidecarOrigin {
                     kind: SidecarKind::Vector,
                     sidecar_id: record.metadata.sidecar_id.clone(),
@@ -703,6 +736,35 @@ fn build_search_response(
     Ok(SearchVectorsResponse { matches, facts })
 }
 
+fn ensure_artifact_precedes_vector(
+    artifact: &ArtifactReference,
+    record: &VectorRecordMetadata,
+    journal: &JournalCatalog,
+) -> Result<(), SidecarError> {
+    let artifact_position = journal.position_of(artifact.registered_at)?;
+    let vector_position = journal.position_of(record.registered_at)?;
+    if artifact_position > vector_position {
+        return Err(SidecarError::SourceArtifactRegisteredAfterVector {
+            vector_id: record.vector_id.clone(),
+            artifact_id: artifact.artifact_id.clone(),
+        });
+    }
+    Ok(())
+}
+
+fn source_datom_ids_for_record(
+    record: &VectorRecordMetadata,
+    artifact: Option<&ArtifactReference>,
+) -> Vec<ElementId> {
+    let mut source_datom_ids = vec![record.registered_at];
+    if let Some(artifact) = artifact {
+        if artifact.registered_at != record.registered_at {
+            source_datom_ids.push(artifact.registered_at);
+        }
+    }
+    source_datom_ids
+}
+
 fn similarity_score(metric: VectorMetric, query: &[f32], candidate: &[f32]) -> f64 {
     match metric {
         VectorMetric::Cosine => cosine_similarity(query, candidate),
@@ -741,8 +803,15 @@ fn dot_product(query: &[f32], candidate: &[f32]) -> f64 {
 pub enum SidecarError {
     #[error("sidecar catalog already contains element {0}")]
     DuplicateCatalogElement(ElementId),
-    #[error("sidecar catalog does not contain element {0}")]
-    UnknownCatalogElement(ElementId),
+    #[error("journal does not contain element {0}")]
+    UnknownJournalElement(ElementId),
+    #[error(
+        "sidecar registration element {element} must match the current journal tail {current_tail}"
+    )]
+    NonCurrentJournalElement {
+        element: ElementId,
+        current_tail: ElementId,
+    },
     #[error("sidecar {sidecar_id} already contains artifact {artifact_id}")]
     DuplicateArtifactId {
         sidecar_id: String,
@@ -764,6 +833,13 @@ pub enum SidecarError {
         expected: usize,
         actual: usize,
     },
+    #[error(
+        "vector {vector_id} cannot point at artifact {artifact_id} registered later in the journal"
+    )]
+    SourceArtifactRegisteredAfterVector {
+        vector_id: String,
+        artifact_id: String,
+    },
     #[error("vector fact projection for predicate {predicate} requires arity 3, found {arity}")]
     UnsupportedProjectionArity { predicate: String, arity: usize },
     #[error(transparent)]
@@ -777,18 +853,39 @@ pub enum SidecarError {
 #[cfg(test)]
 mod tests {
     use super::{
-        ArtifactReference, GetArtifactReferenceRequest, InMemorySidecarFederation,
+        ArtifactReference, GetArtifactReferenceRequest, InMemorySidecarFederation, JournalCatalog,
         RegisterArtifactReferenceRequest, RegisterVectorRecordRequest, SearchVectorsRequest,
         SidecarError, SidecarFederation, VectorFactProjection, VectorMetric, VectorRecordMetadata,
     };
     use aether_ast::{
-        DatomProvenance, ElementId, EntityId, PredicateId, PredicateRef, SidecarKind, Value,
+        AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PredicateId,
+        PredicateRef, ReplicaId, SidecarKind, Value,
     };
     use std::collections::BTreeMap;
+
+    fn journal_catalog(elements: &[u64]) -> JournalCatalog {
+        JournalCatalog::from_history(
+            &elements
+                .iter()
+                .map(|element| Datom {
+                    entity: EntityId::new(1),
+                    attribute: AttributeId::new(1),
+                    value: Value::String(format!("anchor-{element}")),
+                    op: OperationKind::Annotate,
+                    element: ElementId::new(*element),
+                    replica: ReplicaId::new(1),
+                    causal_context: Default::default(),
+                    provenance: DatomProvenance::default(),
+                    policy: None,
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
 
     #[test]
     fn artifact_references_remain_external_metadata() {
         let mut federation = InMemorySidecarFederation::default();
+        let journal = journal_catalog(&[1]);
         let reference = ArtifactReference {
             sidecar_id: "artifact-store".into(),
             artifact_id: "artifact-1".into(),
@@ -804,9 +901,12 @@ mod tests {
         };
 
         federation
-            .register_artifact_reference(RegisterArtifactReferenceRequest {
-                reference: reference.clone(),
-            })
+            .register_artifact_reference(
+                RegisterArtifactReferenceRequest {
+                    reference: reference.clone(),
+                },
+                &journal,
+            )
             .expect("register artifact reference");
         let fetched = federation
             .get_artifact_reference(GetArtifactReferenceRequest {
@@ -823,61 +923,72 @@ mod tests {
     #[test]
     fn vector_search_projects_provenance_bearing_semantic_facts() {
         let mut federation = InMemorySidecarFederation::default();
+        let artifact_journal = journal_catalog(&[1]);
         federation
-            .register_artifact_reference(RegisterArtifactReferenceRequest {
-                reference: ArtifactReference {
-                    sidecar_id: "vector-store".into(),
-                    artifact_id: "doc-1".into(),
-                    entity: EntityId::new(21),
-                    uri: "s3://aether/docs/doc-1.md".into(),
-                    media_type: "text/markdown".into(),
-                    byte_length: 512,
-                    digest: Some("sha256:doc-1".into()),
-                    metadata: BTreeMap::new(),
-                    provenance: DatomProvenance::default(),
-                    policy: None,
-                    registered_at: ElementId::new(1),
+            .register_artifact_reference(
+                RegisterArtifactReferenceRequest {
+                    reference: ArtifactReference {
+                        sidecar_id: "vector-store".into(),
+                        artifact_id: "doc-1".into(),
+                        entity: EntityId::new(21),
+                        uri: "s3://aether/docs/doc-1.md".into(),
+                        media_type: "text/markdown".into(),
+                        byte_length: 512,
+                        digest: Some("sha256:doc-1".into()),
+                        metadata: BTreeMap::new(),
+                        provenance: DatomProvenance::default(),
+                        policy: None,
+                        registered_at: ElementId::new(1),
+                    },
                 },
-            })
+                &artifact_journal,
+            )
             .expect("register artifact");
+        let vector_journal = journal_catalog(&[1, 2]);
         federation
-            .register_vector_record(RegisterVectorRecordRequest {
-                record: VectorRecordMetadata {
-                    sidecar_id: "vector-store".into(),
-                    vector_id: "vec-1".into(),
-                    entity: EntityId::new(21),
-                    source_artifact_id: Some("doc-1".into()),
-                    embedding_ref: "s3://aether/vectors/vec-1.bin".into(),
-                    dimensions: 3,
-                    metric: VectorMetric::Cosine,
-                    metadata: BTreeMap::from([(
-                        "topic".into(),
-                        Value::String("coordination".into()),
-                    )]),
-                    provenance: DatomProvenance::default(),
-                    policy: None,
-                    registered_at: ElementId::new(2),
+            .register_vector_record(
+                RegisterVectorRecordRequest {
+                    record: VectorRecordMetadata {
+                        sidecar_id: "vector-store".into(),
+                        vector_id: "vec-1".into(),
+                        entity: EntityId::new(21),
+                        source_artifact_id: Some("doc-1".into()),
+                        embedding_ref: "s3://aether/vectors/vec-1.bin".into(),
+                        dimensions: 3,
+                        metric: VectorMetric::Cosine,
+                        metadata: BTreeMap::from([(
+                            "topic".into(),
+                            Value::String("coordination".into()),
+                        )]),
+                        provenance: DatomProvenance::default(),
+                        policy: None,
+                        registered_at: ElementId::new(2),
+                    },
+                    embedding: vec![0.8, 0.1, 0.0],
                 },
-                embedding: vec![0.8, 0.1, 0.0],
-            })
+                &vector_journal,
+            )
             .expect("register vector");
 
         let response = federation
-            .search_vectors(SearchVectorsRequest {
-                sidecar_id: "vector-store".into(),
-                query_embedding: vec![1.0, 0.0, 0.0],
-                top_k: 1,
-                metric: VectorMetric::Cosine,
-                as_of: Some(ElementId::new(2)),
-                projection: Some(VectorFactProjection {
-                    predicate: PredicateRef {
-                        id: PredicateId::new(90),
-                        name: "similar_document".into(),
-                        arity: 3,
-                    },
-                    query_entity: EntityId::new(1),
-                }),
-            })
+            .search_vectors(
+                SearchVectorsRequest {
+                    sidecar_id: "vector-store".into(),
+                    query_embedding: vec![1.0, 0.0, 0.0],
+                    top_k: 1,
+                    metric: VectorMetric::Cosine,
+                    as_of: Some(ElementId::new(2)),
+                    projection: Some(VectorFactProjection {
+                        predicate: PredicateRef {
+                            id: PredicateId::new(90),
+                            name: "similar_document".into(),
+                            arity: 3,
+                        },
+                        query_entity: EntityId::new(1),
+                    }),
+                },
+                &vector_journal,
+            )
             .expect("search vectors");
 
         assert_eq!(response.matches.len(), 1);
@@ -899,45 +1010,59 @@ mod tests {
                 .as_ref()
                 .expect("fact provenance")
                 .source_datom_ids,
-            vec![ElementId::new(2)]
+            vec![ElementId::new(2), ElementId::new(1)]
         );
     }
 
     #[test]
     fn vector_search_respects_catalog_as_of_cut() {
         let mut federation = InMemorySidecarFederation::default();
+        let first_journal = journal_catalog(&[1]);
+        let second_journal = journal_catalog(&[1, 2]);
         for (vector_id, element, embedding) in
             [("vec-1", 1, vec![1.0, 0.0]), ("vec-2", 2, vec![0.0, 1.0])]
         {
+            let journal = if element == 1 {
+                &first_journal
+            } else {
+                &second_journal
+            };
             federation
-                .register_vector_record(RegisterVectorRecordRequest {
-                    record: VectorRecordMetadata {
-                        sidecar_id: "vector-store".into(),
-                        vector_id: vector_id.into(),
-                        entity: EntityId::new(element),
-                        source_artifact_id: None,
-                        embedding_ref: format!("mem://{}", vector_id),
-                        dimensions: 2,
-                        metric: VectorMetric::DotProduct,
-                        metadata: BTreeMap::new(),
-                        provenance: DatomProvenance::default(),
-                        policy: None,
-                        registered_at: ElementId::new(element),
+                .register_vector_record(
+                    RegisterVectorRecordRequest {
+                        record: VectorRecordMetadata {
+                            sidecar_id: "vector-store".into(),
+                            vector_id: vector_id.into(),
+                            entity: EntityId::new(element),
+                            source_artifact_id: None,
+                            embedding_ref: format!("mem://{}", vector_id),
+                            dimensions: 2,
+                            metric: VectorMetric::DotProduct,
+                            metadata: BTreeMap::new(),
+                            provenance: DatomProvenance::default(),
+                            policy: None,
+                            registered_at: ElementId::new(element),
+                        },
+                        embedding,
                     },
-                    embedding,
-                })
+                    journal,
+                )
                 .expect("register vector");
         }
 
+        let current_journal = journal_catalog(&[1, 2]);
         let before_second = federation
-            .search_vectors(SearchVectorsRequest {
-                sidecar_id: "vector-store".into(),
-                query_embedding: vec![0.0, 1.0],
-                top_k: 4,
-                metric: VectorMetric::DotProduct,
-                as_of: Some(ElementId::new(1)),
-                projection: None,
-            })
+            .search_vectors(
+                SearchVectorsRequest {
+                    sidecar_id: "vector-store".into(),
+                    query_embedding: vec![0.0, 1.0],
+                    top_k: 4,
+                    metric: VectorMetric::DotProduct,
+                    as_of: Some(ElementId::new(1)),
+                    projection: None,
+                },
+                &current_journal,
+            )
             .expect("search vectors before second insert");
         assert_eq!(
             before_second
@@ -948,17 +1073,53 @@ mod tests {
             vec!["vec-1"]
         );
 
-        let unknown = federation.search_vectors(SearchVectorsRequest {
-            sidecar_id: "vector-store".into(),
-            query_embedding: vec![0.0, 1.0],
-            top_k: 4,
-            metric: VectorMetric::DotProduct,
-            as_of: Some(ElementId::new(9)),
-            projection: None,
-        });
+        let unknown = federation.search_vectors(
+            SearchVectorsRequest {
+                sidecar_id: "vector-store".into(),
+                query_embedding: vec![0.0, 1.0],
+                top_k: 4,
+                metric: VectorMetric::DotProduct,
+                as_of: Some(ElementId::new(9)),
+                projection: None,
+            },
+            &current_journal,
+        );
         assert!(matches!(
             unknown,
-            Err(SidecarError::UnknownCatalogElement(id)) if id == ElementId::new(9)
+            Err(SidecarError::UnknownJournalElement(id)) if id == ElementId::new(9)
+        ));
+    }
+
+    #[test]
+    fn sidecar_registration_requires_the_current_journal_tail() {
+        let mut federation = InMemorySidecarFederation::default();
+        let journal = journal_catalog(&[1, 2]);
+
+        let result = federation.register_artifact_reference(
+            RegisterArtifactReferenceRequest {
+                reference: ArtifactReference {
+                    sidecar_id: "artifact-store".into(),
+                    artifact_id: "artifact-1".into(),
+                    entity: EntityId::new(10),
+                    uri: "s3://aether/artifacts/artifact-1.pdf".into(),
+                    media_type: "application/pdf".into(),
+                    byte_length: 4096,
+                    digest: Some("sha256:artifact-1".into()),
+                    metadata: BTreeMap::new(),
+                    provenance: DatomProvenance::default(),
+                    policy: None,
+                    registered_at: ElementId::new(1),
+                },
+            },
+            &journal,
+        );
+
+        assert!(matches!(
+            result,
+            Err(SidecarError::NonCurrentJournalElement {
+                element,
+                current_tail,
+            }) if element == ElementId::new(1) && current_tail == ElementId::new(2)
         ));
     }
 }

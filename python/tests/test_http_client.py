@@ -90,6 +90,32 @@ query current_cut {
             [{"Entity": 1}],
         )
 
+        client.append(
+            [
+                {
+                    "entity": 1,
+                    "attribute": 1,
+                    "value": {"String": "sidecar-anchor-1"},
+                    "op": "Annotate",
+                    "element": 1,
+                    "replica": 1,
+                    "causal_context": {"frontier": []},
+                    "provenance": {
+                        "author_principal": "",
+                        "agent_id": "",
+                        "tool_id": "",
+                        "session_id": "",
+                        "source_ref": {"uri": "", "digest": None},
+                        "parent_datom_ids": [],
+                        "confidence": 1.0,
+                        "trust_domain": "",
+                        "schema_version": "",
+                    },
+                    "policy": None,
+                },
+            ]
+        )
+
         client.register_artifact_reference(
             {
                 "sidecar_id": "semantic-memory",
@@ -114,6 +140,31 @@ query current_cut {
                 "policy": None,
                 "registered_at": 1,
             }
+        )
+        client.append(
+            [
+                {
+                    "entity": 1,
+                    "attribute": 1,
+                    "value": {"String": "sidecar-anchor-2"},
+                    "op": "Annotate",
+                    "element": 2,
+                    "replica": 1,
+                    "causal_context": {"frontier": []},
+                    "provenance": {
+                        "author_principal": "",
+                        "agent_id": "",
+                        "tool_id": "",
+                        "session_id": "",
+                        "source_ref": {"uri": "", "digest": None},
+                        "parent_datom_ids": [],
+                        "confidence": 1.0,
+                        "trust_domain": "",
+                        "schema_version": "",
+                    },
+                    "policy": None,
+                }
+            ]
         )
         client.register_vector_record(
             record={
@@ -172,7 +223,7 @@ query current_cut {
         self.assertEqual(len(search["facts"]), 1)
         self.assertEqual(
             search["facts"][0]["provenance"]["source_datom_ids"],
-            [2],
+            [2, 1],
         )
 
     @staticmethod

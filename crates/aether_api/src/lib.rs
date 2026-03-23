@@ -35,10 +35,11 @@ pub use report::{
 };
 pub use sidecar::{
     ArtifactReference, GetArtifactReferenceRequest, GetArtifactReferenceResponse,
-    InMemorySidecarFederation, RegisterArtifactReferenceRequest, RegisterArtifactReferenceResponse,
-    RegisterVectorRecordRequest, RegisterVectorRecordResponse, SearchVectorsRequest,
-    SearchVectorsResponse, SidecarError, SidecarFederation, SqliteSidecarFederation,
-    VectorFactProjection, VectorMetric, VectorRecordMetadata, VectorSearchMatch,
+    InMemorySidecarFederation, JournalCatalog, RegisterArtifactReferenceRequest,
+    RegisterArtifactReferenceResponse, RegisterVectorRecordRequest, RegisterVectorRecordResponse,
+    SearchVectorsRequest, SearchVectorsResponse, SidecarError, SidecarFederation,
+    SqliteSidecarFederation, VectorFactProjection, VectorMetric, VectorRecordMetadata,
+    VectorSearchMatch,
 };
 
 pub trait KernelService {
@@ -136,6 +137,10 @@ impl<J: Journal, S: SidecarFederation> KernelServiceCore<J, S> {
     fn cache_derived(&mut self, derived: DerivedSet) -> DerivedSet {
         self.last_derived = Some(derived.clone());
         derived
+    }
+
+    fn sidecar_journal_catalog(&self) -> Result<JournalCatalog, ApiError> {
+        Ok(JournalCatalog::from_history(&self.journal.history()?))
     }
 
     fn document_evaluation<'a>(
@@ -368,7 +373,10 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         &mut self,
         request: RegisterArtifactReferenceRequest,
     ) -> Result<RegisterArtifactReferenceResponse, ApiError> {
-        Ok(self.sidecars.register_artifact_reference(request)?)
+        let journal = self.sidecar_journal_catalog()?;
+        Ok(self
+            .sidecars
+            .register_artifact_reference(request, &journal)?)
     }
 
     fn get_artifact_reference(
@@ -382,14 +390,16 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         &mut self,
         request: RegisterVectorRecordRequest,
     ) -> Result<RegisterVectorRecordResponse, ApiError> {
-        Ok(self.sidecars.register_vector_record(request)?)
+        let journal = self.sidecar_journal_catalog()?;
+        Ok(self.sidecars.register_vector_record(request, &journal)?)
     }
 
     fn search_vectors(
         &self,
         request: SearchVectorsRequest,
     ) -> Result<SearchVectorsResponse, ApiError> {
-        Ok(self.sidecars.search_vectors(request)?)
+        let journal = self.sidecar_journal_catalog()?;
+        Ok(self.sidecars.search_vectors(request, &journal)?)
     }
 }
 

@@ -134,7 +134,7 @@ Implemented today:
 - a live console performance dashboard for real-time and collected instrument views
 - machine-readable performance baseline capture and point-in-time drift reporting for the pilot path
 - a one-command pilot launch validation pack with soak, stress, and artifact capture
-- an artifact/vector sidecar federation boundary with external artifact references, SQLite-backed durability for the pilot service, HTTP endpoints, and provenance-bearing semantic fact projection
+- a journal-anchored artifact/vector sidecar federation boundary with external artifact references, SQLite-backed durability for the pilot service, HTTP endpoints, and provenance-bearing semantic fact projection
 - a scheduled/manual GitHub Actions pilot-validation workflow that runs the launch pack and uploads report/drift artifacts
 - a first real Python boundary client over the HTTP API with integration coverage against a live Rust server
 
@@ -143,7 +143,7 @@ Deliberately still narrow:
 - the DSL now covers the canonical v1 surface, but broader post-v1 ergonomics and modular authoring are still open
 - bounded aggregation is currently limited to non-recursive aggregate rules
 - Go remains a placeholder and the Python client is still a minimal v1 boundary rather than a broad SDK surface
-- sidecar federation is now durable for the SQLite-backed pilot path, but it is not yet replicated, distributed, or policy-enforced end to end
+- sidecar federation is now journal-subordinated and temporally exact on the SQLite-backed pilot path, but it is not yet replicated, distributed, or policy-enforced end to end
 
 ## First Working Vertical Slice
 

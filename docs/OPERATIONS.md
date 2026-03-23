@@ -120,6 +120,7 @@ The authenticated pilot boundary currently adds:
 - persisted audit logging for pilot requests
 - semantic audit context for pilot query and explain actions
 - SQLite-backed sidecar replay for artifact and vector registrations on the durable pilot path
+- journal-anchored sidecar registration: append the anchor datom first, then register the artifact or vector payload against that current tail element
 
 Available endpoints today:
 

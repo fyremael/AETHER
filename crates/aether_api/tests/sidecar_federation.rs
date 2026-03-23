@@ -1,11 +1,11 @@
 use aether_api::{
-    GetArtifactReferenceRequest, InMemoryKernelService, KernelService,
+    AppendRequest, GetArtifactReferenceRequest, InMemoryKernelService, KernelService,
     RegisterArtifactReferenceRequest, RegisterVectorRecordRequest, SearchVectorsRequest,
     SqliteKernelService, VectorFactProjection, VectorMetric, VectorRecordMetadata,
 };
 use aether_ast::{
-    DatomProvenance, ElementId, EntityId, PredicateId, PredicateRef, RuleAst, RuleId, RuleProgram,
-    Term, Value, Variable,
+    AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PredicateId,
+    PredicateRef, ReplicaId, RuleAst, RuleId, RuleProgram, Term, Value, Variable,
 };
 use aether_rules::{DefaultRuleCompiler, RuleCompiler};
 use aether_runtime::{RuleRuntime, SemiNaiveRuntime};
@@ -23,6 +23,11 @@ static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(1);
 fn vector_search_results_reenter_the_semantic_layer_with_provenance() {
     let mut service = InMemoryKernelService::new();
     service
+        .append(AppendRequest {
+            datoms: vec![anchor_datom(1)],
+        })
+        .expect("append artifact anchor");
+    service
         .register_artifact_reference(RegisterArtifactReferenceRequest {
             reference: aether_api::ArtifactReference {
                 sidecar_id: "semantic-memory".into(),
@@ -39,6 +44,11 @@ fn vector_search_results_reenter_the_semantic_layer_with_provenance() {
             },
         })
         .expect("register artifact reference");
+    service
+        .append(AppendRequest {
+            datoms: vec![anchor_datom(2)],
+        })
+        .expect("append vector anchor");
     service
         .register_vector_record(RegisterVectorRecordRequest {
             record: VectorRecordMetadata {
@@ -92,7 +102,7 @@ fn vector_search_results_reenter_the_semantic_layer_with_provenance() {
             .as_ref()
             .expect("fact provenance")
             .source_datom_ids,
-        vec![ElementId::new(2)]
+        vec![ElementId::new(2), ElementId::new(1)]
     );
 
     let mut schema = Schema::new("sidecar-v1");
@@ -165,7 +175,7 @@ fn vector_search_results_reenter_the_semantic_layer_with_provenance() {
     );
     assert_eq!(
         derived.tuples[0].metadata.source_datom_ids,
-        vec![ElementId::new(2)]
+        vec![ElementId::new(2), ElementId::new(1)]
     );
 }
 
@@ -174,6 +184,11 @@ fn sqlite_sidecar_federation_survives_restart() {
     let temp = TestDbPath::new("sidecar-federation");
     {
         let mut service = SqliteKernelService::open(temp.path()).expect("open sqlite kernel");
+        service
+            .append(AppendRequest {
+                datoms: vec![anchor_datom(1)],
+            })
+            .expect("append artifact anchor");
         service
             .register_artifact_reference(RegisterArtifactReferenceRequest {
                 reference: aether_api::ArtifactReference {
@@ -191,6 +206,11 @@ fn sqlite_sidecar_federation_survives_restart() {
                 },
             })
             .expect("register artifact");
+        service
+            .append(AppendRequest {
+                datoms: vec![anchor_datom(2)],
+            })
+            .expect("append vector anchor");
         service
             .register_vector_record(RegisterVectorRecordRequest {
                 record: VectorRecordMetadata {
@@ -245,8 +265,22 @@ fn sqlite_sidecar_federation_survives_restart() {
             .as_ref()
             .expect("fact provenance")
             .source_datom_ids,
-        vec![ElementId::new(2)]
+        vec![ElementId::new(2), ElementId::new(1)]
     );
+}
+
+fn anchor_datom(element: u64) -> Datom {
+    Datom {
+        entity: EntityId::new(1),
+        attribute: AttributeId::new(1),
+        value: Value::String(format!("sidecar-anchor-{element}")),
+        op: OperationKind::Annotate,
+        element: ElementId::new(element),
+        replica: ReplicaId::new(1),
+        causal_context: Default::default(),
+        provenance: DatomProvenance::default(),
+        policy: None,
+    }
 }
 
 struct TestDbPath {
