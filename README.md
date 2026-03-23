@@ -91,6 +91,8 @@ That means:
 The current design-partner pilot proves that story narrowly in the coordination
 domain. The longer-range platform vision is documented in
 [`docs/COMMERCIALIZATION/VISION.md`](./docs/COMMERCIALIZATION/VISION.md).
+The distributed scale posture is now explicit too:
+[`docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md`](./docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md).
 
 ## Design Position
 

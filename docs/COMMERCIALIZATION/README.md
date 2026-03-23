@@ -47,9 +47,10 @@ Read these in order:
 
 1. `docs/COMMERCIALIZATION/EXECUTIVE_SUMMARY.md`
 2. `docs/COMMERCIALIZATION/SCALING_PLAN.md`
-3. `docs/ARCHITECTURE.md`
-4. `docs/PERFORMANCE.md`
-5. `docs/KNOWN_LIMITATIONS.md`
+3. `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md`
+4. `docs/ARCHITECTURE.md`
+5. `docs/PERFORMANCE.md`
+6. `docs/KNOWN_LIMITATIONS.md`
 
 That path grounds the company story in present proof, scaling sequence, system
 shape, and remaining hard constraints.
@@ -79,6 +80,7 @@ That path keeps the visual system, copy system, and public front door aligned.
 | `docs/COMMERCIALIZATION/CATEGORY_MAP.md` | Where AETHER sits relative to adjacent categories and why it is distinct |
 | `docs/COMMERCIALIZATION/EXECUTIVE_BRIEF.md` | One-page outward-facing summary for sponsors, executives, and evaluators |
 | `docs/COMMERCIALIZATION/SCALING_PLAN.md` | Technical scaling and execution plan for advisors, diligence, and long-range architecture review |
+| `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md` | Distributed consensus and truth-federation stance for scaling AETHER without weakening semantic authority |
 | `docs/COMMERCIALIZATION/CUSTOMER_DECK.md` | Presentation-ready customer deck script with slide-level copy guidance |
 | `docs/COMMERCIALIZATION/SEED_INVESTOR_PITCH.md` | Seed-stage investor narrative for early vision, market placement, and wedge |
 | `docs/COMMERCIALIZATION/PITCH_DECK_OUTLINE.md` | Suggested slide sequence and evidence hooks for presentations |

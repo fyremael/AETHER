@@ -73,7 +73,33 @@ Every scaling phase must preserve these properties:
 
 Any scaling move that compromises those is not scaling. It is semantic debt.
 
-## 4. Phase Plan
+## 4. Distributed Truth Model
+
+The scaling posture is:
+
+**not one giant truth, but a fabric of exact local truths.**
+
+That means AETHER should scale by replicating authoritative journals inside
+semantic domains, then federating across those domains explicitly.
+
+In practice:
+
+- each authority partition owns a committed journal
+- `Current` and `AsOf` are exact inside that partition
+- derived state is replayed deterministically from that committed prefix
+- cross-partition reads use federated cuts, not a fake global element ID
+- imported facts cross partitions with provenance
+- sidecars stay subordinate to journal truth
+
+The concise rule is:
+
+- consensus governs source order
+- deterministic replay governs derived meaning
+
+This is how we scale without turning AETHER into a distributed system that is
+technically impressive but semantically vague.
+
+## 5. Phase Plan
 
 ## Phase 1: Single-Node Scale-Up
 
@@ -192,7 +218,7 @@ Turn the kernel and service into a broader product surface.
 - AETHER is not just a technically interesting runtime
 - it is becoming a usable, repeatable control layer for governed autonomous work
 
-## 5. Sidecar-Specific Scale Plan
+## 6. Sidecar-Specific Scale Plan
 
 The sidecar seam deserves its own section because it is one of the easiest ways
 to accidentally break the thesis.
@@ -217,7 +243,7 @@ to accidentally break the thesis.
 Sidecars may widen operationally, but they may not become an independent truth
 authority.
 
-## 6. Performance And Capacity Discipline
+## 7. Performance And Capacity Discipline
 
 We already have the beginnings of a scaling culture:
 
@@ -244,7 +270,7 @@ The right claim is:
 - “AETHER has a disciplined capacity-and-regression program, and it will widen
   by proof.”
 
-## 7. Team And Execution Shape
+## 8. Team And Execution Shape
 
 Scaling AETHER is not just a code problem. It is a sequencing problem.
 
@@ -261,7 +287,7 @@ The execution model should separate four responsibilities:
 
 The mistake would be to let all four blur together into opportunistic work.
 
-## 8. What We Will Not Do Prematurely
+## 9. What We Will Not Do Prematurely
 
 To scale credibly, we need explicit non-goals.
 
@@ -273,8 +299,10 @@ We should not:
   undeniable
 - build broad SDK surfaces before the core service contract is steady
 - chase distributed sophistication at the expense of replay and explainability
+- centralize all truth into one global consensus log just to simplify language
+- run consensus over derived state, reports, or sidecar indexes
 
-## 9. Why This Is Executable
+## 10. Why This Is Executable
 
 The key execution argument is that the hard semantic pieces are already real.
 
@@ -292,7 +320,7 @@ It is:
 That is still significant execution work, but it is more tractable than trying
 to prove the kernel from scratch.
 
-## 10. The Message For Technical Advisors
+## 11. The Message For Technical Advisors
 
 The concise answer is:
 
@@ -307,3 +335,6 @@ At each layer, the semantic invariants stay fixed.
 
 That is how we preserve the thing that makes AETHER valuable while still
 growing it into a serious systems product.
+
+The longer-form distributed-systems statement for that posture lives in
+`docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md`.

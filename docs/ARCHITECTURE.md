@@ -130,6 +130,31 @@ These invariants are architectural, not incidental:
 
 Any change that weakens one of these invariants is an architecture change and should be treated as such.
 
+## Distributed Truth Stance
+
+AETHER should not scale by forcing all semantic authority into one global log.
+
+The correct distributed shape is:
+
+- exact journal truth inside an authority partition
+- deterministic replay and derivation inside that partition
+- explicit imported facts with provenance across partitions
+
+That means consensus is for source order, not for every derived answer.
+
+Inside a partition, `Current` and `AsOf` remain exact against committed journal
+prefixes. Across partitions, the honest model is a federated cut rather than a
+fake global scalar element. Claims, leases, heartbeats, outcomes, and fencing
+facts should stay inside one authority partition whenever possible so that safe
+action remains a local semantic decision instead of a broad distributed
+transaction.
+
+Sidecars follow the same rule. Artifact and vector memory may widen
+operationally, but they remain subordinate to committed journal history.
+
+The longer-form strategy for this lives in
+`docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md`.
+
 ## Current Boundaries
 
 The current implementation line is intentionally clear:

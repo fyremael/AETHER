@@ -59,10 +59,11 @@ That path moves from category ambition to buyer story to the actual pilot proof.
 Read:
 
 1. `docs/COMMERCIALIZATION/SCALING_PLAN.md`
-2. `docs/ARCHITECTURE.md`
-3. `docs/PERFORMANCE.md`
-4. `docs/KNOWN_LIMITATIONS.md`
-5. `docs/PILOT_LAUNCH.md`
+2. `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md`
+3. `docs/ARCHITECTURE.md`
+4. `docs/PERFORMANCE.md`
+5. `docs/KNOWN_LIMITATIONS.md`
+6. `docs/PILOT_LAUNCH.md`
 
 That path shows how the current kernel is shaped, how it is being measured, and
 how we intend to scale it without dissolving the semantic center.
@@ -136,6 +137,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 | `docs/PILOT_LAUNCH.md` | Launch-readiness contract and validation pack for the current design-partner pilot |
 | `docs/PERFORMANCE.md` | Performance workloads, runner commands, benchmark harness, and interpretation guidance |
 | `docs/COMMERCIALIZATION/README.md` | Hub for commercialization, product framing, buyer narrative, and messaging |
+| `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md` | Distributed truth and consensus strategy for partitioned AETHER scale |
 | `docs/GLOSSARY.md` | Canonical vocabulary for the codebase and its semantics |
 | `docs/DOCUMENTATION_STANDARD.md` | Documentation quality bar, update triggers, and maintenance rules |
 | `docs/STATUS.md` | What is implemented now |
