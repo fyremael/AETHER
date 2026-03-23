@@ -41,6 +41,19 @@ Read these in order:
 That path gives you the narrative, language discipline, buyer map, and
 presentation structure.
 
+### If you are a technical advisor, architect, or diligence partner
+
+Read these in order:
+
+1. `docs/COMMERCIALIZATION/EXECUTIVE_SUMMARY.md`
+2. `docs/COMMERCIALIZATION/SCALING_PLAN.md`
+3. `docs/ARCHITECTURE.md`
+4. `docs/PERFORMANCE.md`
+5. `docs/KNOWN_LIMITATIONS.md`
+
+That path grounds the company story in present proof, scaling sequence, system
+shape, and remaining hard constraints.
+
 ### If you are working on brand, web, or demo presentation
 
 Read these in order:
@@ -65,6 +78,7 @@ That path keeps the visual system, copy system, and public front door aligned.
 | `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md` | Buyer personas, pains, use cases, and wedge-entry motions |
 | `docs/COMMERCIALIZATION/CATEGORY_MAP.md` | Where AETHER sits relative to adjacent categories and why it is distinct |
 | `docs/COMMERCIALIZATION/EXECUTIVE_BRIEF.md` | One-page outward-facing summary for sponsors, executives, and evaluators |
+| `docs/COMMERCIALIZATION/SCALING_PLAN.md` | Technical scaling and execution plan for advisors, diligence, and long-range architecture review |
 | `docs/COMMERCIALIZATION/CUSTOMER_DECK.md` | Presentation-ready customer deck script with slide-level copy guidance |
 | `docs/COMMERCIALIZATION/SEED_INVESTOR_PITCH.md` | Seed-stage investor narrative for early vision, market placement, and wedge |
 | `docs/COMMERCIALIZATION/PITCH_DECK_OUTLINE.md` | Suggested slide sequence and evidence hooks for presentations |

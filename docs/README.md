@@ -54,6 +54,19 @@ Read:
 
 That path moves from category ambition to buyer story to the actual pilot proof.
 
+### If you are doing technical diligence or advisor review
+
+Read:
+
+1. `docs/COMMERCIALIZATION/SCALING_PLAN.md`
+2. `docs/ARCHITECTURE.md`
+3. `docs/PERFORMANCE.md`
+4. `docs/KNOWN_LIMITATIONS.md`
+5. `docs/PILOT_LAUNCH.md`
+
+That path shows how the current kernel is shaped, how it is being measured, and
+how we intend to scale it without dissolving the semantic center.
+
 ### If you are working on the coordination pilot
 
 Read:
