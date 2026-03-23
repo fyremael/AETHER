@@ -113,6 +113,9 @@ Best wedge examples:
 Speaker line:
 - "We do not need to start with every workflow. We need to start where readiness, ownership, and authority are materially valuable."
 
+Support note:
+- use `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md` as the follow-on ladder if the audience wants to see how the wedge expands from pilot proof to platform horizon
+
 ## Slide 10: What This Becomes
 
 Title:

@@ -16,8 +16,9 @@ Read these in order:
 1. `docs/COMMERCIALIZATION/EXECUTIVE_BRIEF.md`
 2. `docs/COMMERCIALIZATION/VISION.md`
 3. `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md`
-4. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
-5. `docs/PILOT_COORDINATION.md`
+4. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
+5. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
+6. `docs/PILOT_COORDINATION.md`
 
 That path answers what AETHER is for, why it matters, where it can go, and what
 the current pilot already proves.
@@ -28,11 +29,12 @@ Read these in order:
 
 1. `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md`
 2. `docs/COMMERCIALIZATION/CUSTOMER_DECK.md`
-3. `docs/COMMERCIALIZATION/MESSAGING_ARCHITECTURE.md`
-4. `docs/COMMERCIALIZATION/CONCEPT_TRANSLATION.md`
-5. `docs/COMMERCIALIZATION/TUPLESPACE_OVER_AETHER.md`
-6. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
-7. `docs/COMMERCIALIZATION/PITCH_DECK_OUTLINE.md`
+3. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
+4. `docs/COMMERCIALIZATION/MESSAGING_ARCHITECTURE.md`
+5. `docs/COMMERCIALIZATION/CONCEPT_TRANSLATION.md`
+6. `docs/COMMERCIALIZATION/TUPLESPACE_OVER_AETHER.md`
+7. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
+8. `docs/COMMERCIALIZATION/PITCH_DECK_OUTLINE.md`
 
 That path gives you the narrative, language discipline, buyer map, and
 presentation structure.
@@ -43,9 +45,10 @@ Read these in order:
 
 1. `docs/COMMERCIALIZATION/VISUAL_DIRECTION.md`
 2. `docs/COMMERCIALIZATION/MESSAGING_ARCHITECTURE.md`
-3. `docs/COMMERCIALIZATION/CONCEPT_TRANSLATION.md`
-4. `site/showcase.html`
-5. `site/index.html`
+3. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
+4. `docs/COMMERCIALIZATION/CONCEPT_TRANSLATION.md`
+5. `site/showcase.html`
+6. `site/index.html`
 
 That path keeps the visual system, copy system, and public front door aligned.
 
@@ -55,6 +58,7 @@ That path keeps the visual system, copy system, and public front door aligned.
 | --- | --- |
 | `docs/COMMERCIALIZATION/VISION.md` | Long-range product vision and category ambition |
 | `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md` | Main commercial story: what problem AETHER solves and how to explain it |
+| `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md` | Canonical ladder of increasing use-case complexity and scale for external storytelling |
 | `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md` | Buyer personas, pains, use cases, and wedge-entry motions |
 | `docs/COMMERCIALIZATION/CATEGORY_MAP.md` | Where AETHER sits relative to adjacent categories and why it is distinct |
 | `docs/COMMERCIALIZATION/EXECUTIVE_BRIEF.md` | One-page outward-facing summary for sponsors, executives, and evaluators |

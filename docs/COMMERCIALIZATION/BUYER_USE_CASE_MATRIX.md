@@ -28,6 +28,10 @@ That means the first wedge should remain:
 
 ## Use-Case Ladder
 
+The fuller canonical sequence now lives in
+`docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`. The ladder below is the short
+buyer-facing compression of that series.
+
 ### Proven now
 
 - task readiness across dependency chains
