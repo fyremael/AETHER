@@ -154,6 +154,8 @@ operationally, but they remain subordinate to committed journal history.
 
 The longer-form strategy for this lives in
 `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md`.
+The governing ADR is
+`docs/ADR/0001-authority-partitions-and-federated-cuts.md`.
 
 ## Current Boundaries
 

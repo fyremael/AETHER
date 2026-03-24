@@ -241,3 +241,7 @@ That is how truth scales in AETHER:
 
 not as one giant truth,
 but as a fabric of exact local truths.
+
+The governing architecture decision for that posture is now recorded in
+`docs/ADR/0001-authority-partitions-and-federated-cuts.md`, and the next
+execution slice is laid out in `docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md`.

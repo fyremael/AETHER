@@ -60,13 +60,27 @@ Read:
 
 1. `docs/COMMERCIALIZATION/SCALING_PLAN.md`
 2. `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md`
-3. `docs/ARCHITECTURE.md`
-4. `docs/PERFORMANCE.md`
-5. `docs/KNOWN_LIMITATIONS.md`
-6. `docs/PILOT_LAUNCH.md`
+3. `docs/ADR/0001-authority-partitions-and-federated-cuts.md`
+4. `docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md`
+5. `docs/ARCHITECTURE.md`
+6. `docs/PERFORMANCE.md`
+7. `docs/KNOWN_LIMITATIONS.md`
+8. `docs/PILOT_LAUNCH.md`
 
 That path shows how the current kernel is shaped, how it is being measured, and
 how we intend to scale it without dissolving the semantic center.
+
+### If you are implementing the partitioned-truth architecture
+
+Read:
+
+1. `docs/ADR/0001-authority-partitions-and-federated-cuts.md`
+2. `docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md`
+3. `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md`
+4. `docs/ARCHITECTURE.md`
+
+That path moves from governing decision to build sequence to the broader system
+story that decision supports.
 
 ### If you are working on the coordination pilot
 
@@ -138,6 +152,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 | `docs/PERFORMANCE.md` | Performance workloads, runner commands, benchmark harness, and interpretation guidance |
 | `docs/COMMERCIALIZATION/README.md` | Hub for commercialization, product framing, buyer narrative, and messaging |
 | `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md` | Distributed truth and consensus strategy for partitioned AETHER scale |
+| `docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md` | Concrete build plan for authority partitions, federated cuts, and imported facts |
 | `docs/GLOSSARY.md` | Canonical vocabulary for the codebase and its semantics |
 | `docs/DOCUMENTATION_STANDARD.md` | Documentation quality bar, update triggers, and maintenance rules |
 | `docs/STATUS.md` | What is implemented now |

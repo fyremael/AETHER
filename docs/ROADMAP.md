@@ -36,3 +36,17 @@
 - operator shell
 - SDK ergonomics
 - benchmark and fixture harnesses
+
+## Next architecture track
+
+The next concrete architecture slice after the current pilot is:
+
+- authority partitions
+- federated cuts
+- imported facts with provenance
+- partition-aware operator and explain surfaces
+
+The governing decision is
+`docs/ADR/0001-authority-partitions-and-federated-cuts.md`.
+The execution plan is
+`docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md`.

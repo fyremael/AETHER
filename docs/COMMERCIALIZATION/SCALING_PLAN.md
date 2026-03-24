@@ -338,3 +338,5 @@ growing it into a serious systems product.
 
 The longer-form distributed-systems statement for that posture lives in
 `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md`.
+The concrete next-step build plan is in
+`docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md`.
