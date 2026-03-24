@@ -21,6 +21,11 @@ covers, and proof snapshots generated from the same presentation system.
 
 If you are joining the project fresh, read [`docs/README.md`](./docs/README.md) and [`CONTRIBUTING.md`](./CONTRIBUTING.md) after this file and then walk through [`examples/demo-03-coordination-situation-room.md`](./examples/demo-03-coordination-situation-room.md). That is the fastest path from architectural stance to executable behavior.
 
+If you want the gentler, plain-language on-ramp first, start with
+[`docs/EDUCATION/README.md`](./docs/EDUCATION/README.md). That set explains the
+system with analogies, figures, and worked examples before it asks readers to
+care about compiler stages or runtime strata.
+
 If you are evaluating AETHER as a product category or design-partner platform,
 start with [`docs/COMMERCIALIZATION/README.md`](./docs/COMMERCIALIZATION/README.md)
 after this file. That pack explains the long-range vision, buyer story,

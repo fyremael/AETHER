@@ -13,12 +13,27 @@ The GitHub Pages site is the published front door for this material. It hosts th
 Read these in order:
 
 1. `README.md`
-2. `examples/demo-03-coordination-situation-room.md`
-3. `docs/ARCHITECTURE.md`
-4. `docs/STATUS.md`
-5. `docs/KNOWN_LIMITATIONS.md`
+2. `docs/EDUCATION/README.md`
+3. `examples/demo-03-coordination-situation-room.md`
+4. `docs/ARCHITECTURE.md`
+5. `docs/STATUS.md`
+6. `docs/KNOWN_LIMITATIONS.md`
 
 That path gets you from thesis to running system to current boundary.
+
+### If you need the beginner-friendly explanation set
+
+Read:
+
+1. `docs/EDUCATION/README.md`
+2. `docs/EDUCATION/WHAT_AETHER_IS.md`
+3. `docs/EDUCATION/TIME_CUTS_AND_MEMORY.md`
+4. `docs/EDUCATION/RECURSIVE_CLOSURE.md`
+5. `docs/EDUCATION/COORDINATION_AUTHORITY_AND_PROOF.md`
+6. `docs/EDUCATION/FEDERATED_TRUTH.md`
+
+That path is the plain-language curriculum: figures, analogies, examples, and
+the technical names only after the intuition is already clear.
 
 ### If you are implementing features
 
@@ -145,6 +160,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 | Document | Purpose |
 | --- | --- |
 | `docs/ARCHITECTURE.md` | How the current kernel is shaped and how data moves through it |
+| `docs/EDUCATION/README.md` | Plain-language education hub for new users, evaluators, and non-specialists |
 | `docs/DEVELOPER_WORKFLOW.md` | Day-to-day engineering loop, verification contract, and definition of done |
 | `docs/OPERATIONS.md` | Operator-facing guidance for demos, reports, and presentations |
 | `docs/PILOT_COORDINATION.md` | Scope, exit gates, and run path for the current coordination pilot |

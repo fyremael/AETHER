@@ -313,6 +313,16 @@ h3 {
     url("./assets/geometry-orbits.svg") right -220px center / 62% auto no-repeat;
 }
 
+.explanation-band::before {
+  background:
+    url("./assets/geometry-orbits.svg") left -180px center / 58% auto no-repeat;
+}
+
+.figure-band::before {
+  background:
+    url("./assets/geometry-cells.svg") right -220px center / 64% auto no-repeat;
+}
+
 .teaching-band::before {
   background:
     url("./assets/geometry-orbits.svg") center top / 108% auto no-repeat;
