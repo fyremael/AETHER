@@ -1,6 +1,6 @@
 # Go Boundary
 
-This directory is reserved for the AETHER operator shell and service wrappers.
+This directory now contains the first real Go operator shell for AETHER.
 
 Scope for Go in v1:
 
@@ -9,9 +9,31 @@ Scope for Go in v1:
 - service lifecycle integration
 - narrow API boundary consumers
 
+Implemented today:
+
+- `cmd/aetherctl`, a real CLI over the stable HTTP boundary
+- `internal/client`, a typed Go HTTP client for health, history, document runs, and tuple explanation
+- request-level policy-context support for document execution
+- Go unit coverage via `go test ./...`
+
+Current commands:
+
+```bash
+go run ./cmd/aetherctl --base-url http://127.0.0.1:3000 health
+go run ./cmd/aetherctl --base-url http://127.0.0.1:3000 history
+go run ./cmd/aetherctl --base-url http://127.0.0.1:3000 run --file ./document.aether
+go run ./cmd/aetherctl --base-url http://127.0.0.1:3000 run --file ./document.aether --capabilities executor --visibilities ops
+go run ./cmd/aetherctl --base-url http://127.0.0.1:3000 explain --tuple-id 7
+```
+
+Current test command:
+
+```bash
+go test ./...
+```
+
 Out of scope:
 
 - authoritative semantic execution
 - resolver duplication
 - rule-engine ownership
-

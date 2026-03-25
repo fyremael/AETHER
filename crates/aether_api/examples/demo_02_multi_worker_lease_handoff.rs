@@ -25,6 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &format!("as_of e{}", COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT),
             "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
         ),
+        policy_context: None,
     })?;
     print_query(
         "Authorization before heartbeat at AsOf(e5)",
@@ -41,6 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &format!("as_of e{}", COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT),
             "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
         ),
+        policy_context: None,
     })?;
     print_query(
         "Authorized execution after heartbeat at AsOf(e9)",
@@ -57,6 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "current",
             "goal live_authority(t, worker, epoch, beat)\n  keep t, worker, epoch, beat",
         ),
+        policy_context: None,
     })?;
     print_query(
         "Live heartbeats at Current",
@@ -73,6 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "current",
             "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
         ),
+        policy_context: None,
     })?;
     let authorized_rows = current_authorized
         .query
@@ -97,6 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "current",
             "goal worker_can_claim(t, worker)\n  keep t, worker",
         ),
+        policy_context: None,
     })?;
     print_query(
         "Claimable tasks at Current",
@@ -113,6 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "current",
             "goal execution_outcome_accepted(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
         ),
+        policy_context: None,
     })?;
     print_query(
         "Accepted outcomes at Current",
@@ -129,6 +135,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "current",
             "goal execution_outcome_rejected_stale(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
         ),
+        policy_context: None,
     })?;
     print_query(
         "Fenced stale outcomes at Current",

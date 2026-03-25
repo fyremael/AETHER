@@ -238,6 +238,7 @@ async fn misuse_paths_are_rejected_cleanly_and_audited() {
                 "current",
                 "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
+            policy_context: None,
         })
         .send()
         .await
@@ -358,7 +359,10 @@ async fn run_document_authorized(
     let response = client
         .post(format!("{base_url}/v1/documents/run"))
         .bearer_auth(token)
-        .json(&RunDocumentRequest { dsl })
+        .json(&RunDocumentRequest {
+            dsl,
+            policy_context: None,
+        })
         .send()
         .await
         .expect("authorized run request");

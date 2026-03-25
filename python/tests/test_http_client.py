@@ -15,7 +15,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PYTHON_ROOT = REPO_ROOT / "python"
 sys.path.insert(0, str(PYTHON_ROOT))
 
-from aether_sdk import AetherClient  # noqa: E402
+from aether_sdk import (  # noqa: E402
+    AetherClient,
+    make_artifact_reference,
+    make_datom,
+    make_policy,
+    make_policy_context,
+    make_vector_record,
+    value_string,
+)
 
 
 @unittest.skipUnless(shutil.which("cargo"), "cargo is required for HTTP client integration tests")
@@ -90,112 +98,133 @@ query current_cut {
             [{"Entity": 1}],
         )
 
+        policy_document = """
+schema {
+  attr task.status: ScalarLWW<String>
+}
+
+predicates {
+  task_status(Entity, String)
+  protected_fact(Entity)
+  visible_task(Entity)
+}
+
+rules {
+  visible_task(t) <- task_status(t, "ready")
+  visible_task(t) <- protected_fact(t)
+}
+
+materialize {
+  visible_task
+}
+
+facts {
+  protected_fact(entity(1))
+  protected_fact(entity(2)) @capability("executor")
+}
+
+query current_cut {
+  current
+  goal visible_task(t)
+  keep t
+}
+"""
         client.append(
             [
-                {
-                    "entity": 1,
-                    "attribute": 1,
-                    "value": {"String": "sidecar-anchor-1"},
-                    "op": "Annotate",
-                    "element": 1,
-                    "replica": 1,
-                    "causal_context": {"frontier": []},
-                    "provenance": {
-                        "author_principal": "",
-                        "agent_id": "",
-                        "tool_id": "",
-                        "session_id": "",
-                        "source_ref": {"uri": "", "digest": None},
-                        "parent_datom_ids": [],
-                        "confidence": 1.0,
-                        "trust_domain": "",
-                        "schema_version": "",
-                    },
-                    "policy": None,
-                },
+                make_datom(
+                    entity=1,
+                    attribute=1,
+                    value=value_string("ready"),
+                    element=1,
+                ),
+                make_datom(
+                    entity=3,
+                    attribute=1,
+                    value=value_string("ready"),
+                    element=2,
+                    policy=make_policy(capability="executor"),
+                ),
+            ]
+        )
+
+        default_policy_run = client.run_document(policy_document)
+        self.assertEqual(
+            [row["values"] for row in default_policy_run["query"]["rows"]],
+            [[{"Entity": 1}]],
+        )
+
+        executor_policy_run = client.run_document(
+            policy_document,
+            policy_context=make_policy_context(capabilities=["executor"]),
+        )
+        self.assertEqual(
+            [row["values"] for row in executor_policy_run["query"]["rows"]],
+            [[{"Entity": 1}], [{"Entity": 2}], [{"Entity": 3}]],
+        )
+
+        client.append(
+            [
+                make_datom(
+                    entity=1,
+                    attribute=1,
+                    value=value_string("sidecar-anchor-1"),
+                    element=3,
+                    op="Annotate",
+                ),
             ]
         )
 
         client.register_artifact_reference(
-            {
-                "sidecar_id": "semantic-memory",
-                "artifact_id": "doc-1",
-                "entity": 41,
-                "uri": "s3://aether/docs/doc-1.md",
-                "media_type": "text/markdown",
-                "byte_length": 256,
-                "digest": "sha256:doc-1",
-                "metadata": {"kind": {"String": "runbook"}},
-                "provenance": {
-                    "author_principal": "",
-                    "agent_id": "",
-                    "tool_id": "",
-                    "session_id": "",
-                    "source_ref": {"uri": "", "digest": None},
-                    "parent_datom_ids": [],
-                    "confidence": 1.0,
-                    "trust_domain": "",
-                    "schema_version": "",
-                },
-                "policy": None,
-                "registered_at": 1,
-            }
+            make_artifact_reference(
+                sidecar_id="semantic-memory",
+                artifact_id="doc-1",
+                entity=41,
+                uri="s3://aether/docs/doc-1.md",
+                media_type="text/markdown",
+                byte_length=256,
+                digest="sha256:doc-1",
+                metadata={"kind": {"String": "runbook"}},
+                registered_at=3,
+                policy=make_policy(capability="memory_reader"),
+            )
         )
         client.append(
             [
-                {
-                    "entity": 1,
-                    "attribute": 1,
-                    "value": {"String": "sidecar-anchor-2"},
-                    "op": "Annotate",
-                    "element": 2,
-                    "replica": 1,
-                    "causal_context": {"frontier": []},
-                    "provenance": {
-                        "author_principal": "",
-                        "agent_id": "",
-                        "tool_id": "",
-                        "session_id": "",
-                        "source_ref": {"uri": "", "digest": None},
-                        "parent_datom_ids": [],
-                        "confidence": 1.0,
-                        "trust_domain": "",
-                        "schema_version": "",
-                    },
-                    "policy": None,
-                }
+                make_datom(
+                    entity=1,
+                    attribute=1,
+                    value=value_string("sidecar-anchor-2"),
+                    element=4,
+                    op="Annotate",
+                )
             ]
         )
         client.register_vector_record(
-            record={
-                "sidecar_id": "semantic-memory",
-                "vector_id": "vec-1",
-                "entity": 41,
-                "source_artifact_id": "doc-1",
-                "embedding_ref": "s3://aether/vectors/vec-1.bin",
-                "dimensions": 3,
-                "metric": "cosine",
-                "metadata": {"topic": {"String": "handoff"}},
-                "provenance": {
-                    "author_principal": "",
-                    "agent_id": "",
-                    "tool_id": "",
-                    "session_id": "",
-                    "source_ref": {"uri": "", "digest": None},
-                    "parent_datom_ids": [],
-                    "confidence": 1.0,
-                    "trust_domain": "",
-                    "schema_version": "",
-                },
-                "policy": None,
-                "registered_at": 2,
-            },
+            record=make_vector_record(
+                sidecar_id="semantic-memory",
+                vector_id="vec-1",
+                entity=41,
+                source_artifact_id="doc-1",
+                embedding_ref="s3://aether/vectors/vec-1.bin",
+                dimensions=3,
+                metric="cosine",
+                metadata={"topic": {"String": "handoff"}},
+                registered_at=4,
+                policy=make_policy(capability="memory_reader"),
+            ),
             embedding=[0.9, 0.1, 0.0],
         )
+
+        with self.assertRaisesRegex(Exception, "policy denied"):
+            client.get_artifact_reference(
+                sidecar_id="semantic-memory",
+                artifact_id="doc-1",
+            )
 
         artifact = client.get_artifact_reference(
             sidecar_id="semantic-memory",
             artifact_id="doc-1",
+            policy_context=make_policy_context(capabilities=["memory_reader"]),
         )
         self.assertEqual(
             artifact["reference"]["uri"],
@@ -208,7 +237,7 @@ query current_cut {
                 "query_embedding": [1.0, 0.0, 0.0],
                 "top_k": 1,
                 "metric": "cosine",
-                "as_of": 2,
+                "as_of": 4,
                 "projection": {
                     "predicate": {
                         "id": 81,
@@ -217,13 +246,14 @@ query current_cut {
                     },
                     "query_entity": 999,
                 },
+                "policy_context": make_policy_context(capabilities=["memory_reader"]),
             }
         )
         self.assertEqual(len(search["matches"]), 1)
         self.assertEqual(len(search["facts"]), 1)
         self.assertEqual(
             search["facts"][0]["provenance"]["source_datom_ids"],
-            [2, 1],
+            [4, 3],
         )
 
     @staticmethod

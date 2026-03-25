@@ -458,6 +458,7 @@ pub fn build_coordination_service_fixture(task_count: usize) -> Result<ServiceFi
         service,
         request: RunDocumentRequest {
             dsl: coordination_claimability_dsl(task_count),
+            policy_context: None,
         },
         expected_row_count: ready_tasks * 2,
         task_count,

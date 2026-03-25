@@ -131,6 +131,36 @@ pub struct PolicyEnvelope {
     pub visibility: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PolicyContext {
+    pub capabilities: Vec<String>,
+    pub visibilities: Vec<String>,
+}
+
+impl PolicyContext {
+    pub fn allows(&self, envelope: &PolicyEnvelope) -> bool {
+        let capability_allowed = match envelope.capability.as_ref() {
+            Some(capability) => self.capabilities.iter().any(|value| value == capability),
+            None => true,
+        };
+        let visibility_allowed = match envelope.visibility.as_ref() {
+            Some(visibility) => self.visibilities.iter().any(|value| value == visibility),
+            None => true,
+        };
+        capability_allowed && visibility_allowed
+    }
+}
+
+pub fn policy_allows(context: Option<&PolicyContext>, envelope: Option<&PolicyEnvelope>) -> bool {
+    match envelope {
+        None => true,
+        Some(envelope) => match context {
+            Some(context) => context.allows(envelope),
+            None => envelope.capability.is_none() && envelope.visibility.is_none(),
+        },
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Datom {
     pub entity: EntityId,
@@ -355,8 +385,9 @@ pub struct PlanExplanation {
 #[cfg(test)]
 mod tests {
     use super::{
-        AttributeId, Datom, DatomProvenance, ElementId, EntityId, FactProvenance, OperationKind,
-        ReplicaId, SidecarKind, SidecarOrigin, SourceRef, Value,
+        policy_allows, AttributeId, Datom, DatomProvenance, ElementId, EntityId, FactProvenance,
+        OperationKind, PolicyContext, PolicyEnvelope, ReplicaId, SidecarKind, SidecarOrigin,
+        SourceRef, Value,
     };
 
     #[test]
@@ -443,5 +474,26 @@ mod tests {
             serde_json::from_str(&json).expect("deserialize fact provenance");
 
         assert_eq!(decoded, provenance);
+    }
+
+    #[test]
+    fn policy_context_requires_capability_and_visibility_when_present() {
+        let envelope = PolicyEnvelope {
+            capability: Some("executor".into()),
+            visibility: Some("ops".into()),
+        };
+        let allowed = PolicyContext {
+            capabilities: vec!["executor".into()],
+            visibilities: vec!["ops".into()],
+        };
+        let missing_visibility = PolicyContext {
+            capabilities: vec!["executor".into()],
+            visibilities: vec![],
+        };
+
+        assert!(policy_allows(Some(&allowed), Some(&envelope)));
+        assert!(!policy_allows(Some(&missing_visibility), Some(&envelope)));
+        assert!(!policy_allows(None, Some(&envelope)));
+        assert!(policy_allows(None, None));
     }
 }

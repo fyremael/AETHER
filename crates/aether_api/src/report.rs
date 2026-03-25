@@ -56,6 +56,7 @@ pub fn build_coordination_pilot_report(
                 &format!("as_of e{}", COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT),
                 "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
+            policy_context: None,
         })?
         .query
         .unwrap_or_default()
@@ -66,6 +67,7 @@ pub fn build_coordination_pilot_report(
                 &format!("as_of e{}", COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT),
                 "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
+            policy_context: None,
         })?
         .query
         .unwrap_or_default()
@@ -76,6 +78,7 @@ pub fn build_coordination_pilot_report(
                 "current",
                 "goal live_authority(t, worker, epoch, beat)\n  keep t, worker, epoch, beat",
             ),
+            policy_context: None,
         })?
         .query
         .unwrap_or_default()
@@ -86,6 +89,7 @@ pub fn build_coordination_pilot_report(
                 "current",
                 "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
+            policy_context: None,
         })?
         .query
         .unwrap_or_default()
@@ -96,6 +100,7 @@ pub fn build_coordination_pilot_report(
                 "current",
                 "goal worker_can_claim(t, worker)\n  keep t, worker",
             ),
+            policy_context: None,
         })?
         .query
         .unwrap_or_default()
@@ -106,6 +111,7 @@ pub fn build_coordination_pilot_report(
                 "current",
                 "goal execution_outcome_accepted(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
             ),
+            policy_context: None,
         })?
         .query
         .unwrap_or_default()
@@ -116,6 +122,7 @@ pub fn build_coordination_pilot_report(
                 "current",
                 "goal execution_outcome_rejected_stale(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
             ),
+            policy_context: None,
         })?
         .query
         .unwrap_or_default()

@@ -1,9 +1,22 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any
 from urllib import error, request
+
+from .models import (
+    ArtifactReference,
+    AsOfRequest,
+    CurrentStateRequest,
+    Datom,
+    GetArtifactReferenceRequest,
+    PolicyContext,
+    RegisterVectorRecordRequest,
+    RunDocumentRequest,
+    SearchVectorsRequest,
+    VectorRecordMetadata,
+)
 
 
 JsonValue = dict[str, Any] | list[Any] | str | int | float | bool | None
@@ -37,19 +50,25 @@ class AetherClient:
     def history(self) -> dict[str, Any]:
         return self._request_json("GET", "/v1/history")
 
-    def append(self, datoms: list[dict[str, Any]]) -> dict[str, Any]:
+    def append(self, datoms: list[dict[str, Any] | Datom]) -> dict[str, Any]:
         return self._request_json("POST", "/v1/append", {"datoms": datoms})
 
     def current_state(
         self,
         *,
         schema: dict[str, Any],
-        datoms: list[dict[str, Any]] | None = None,
+        datoms: list[dict[str, Any] | Datom] | None = None,
+        policy_context: PolicyContext | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        payload = CurrentStateRequest(
+            schema=schema,
+            datoms=list(datoms or []),
+            policy_context=policy_context,
+        )
         return self._request_json(
             "POST",
             "/v1/state/current",
-            {"schema": schema, "datoms": datoms or []},
+            payload,
         )
 
     def as_of(
@@ -57,24 +76,60 @@ class AetherClient:
         *,
         schema: dict[str, Any],
         at: int,
-        datoms: list[dict[str, Any]] | None = None,
+        datoms: list[dict[str, Any] | Datom] | None = None,
+        policy_context: PolicyContext | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        payload = AsOfRequest(
+            schema=schema,
+            datoms=list(datoms or []),
+            at=at,
+            policy_context=policy_context,
+        )
         return self._request_json(
             "POST",
             "/v1/state/as-of",
-            {"schema": schema, "datoms": datoms or [], "at": at},
+            payload,
         )
 
     def parse_document(self, dsl: str) -> dict[str, Any]:
         return self._request_json("POST", "/v1/documents/parse", {"dsl": dsl})
 
-    def run_document(self, dsl: str) -> dict[str, Any]:
-        return self._request_json("POST", "/v1/documents/run", {"dsl": dsl})
+    def run_document(
+        self,
+        dsl: str,
+        *,
+        policy_context: PolicyContext | dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            "/v1/documents/run",
+            RunDocumentRequest(dsl=dsl, policy_context=policy_context),
+        )
+
+    def run_named_query(
+        self,
+        dsl: str,
+        *,
+        query_name: str,
+        policy_context: PolicyContext | dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        response = self.run_document(dsl, policy_context=policy_context)
+        for query in response.get("queries", []):
+            if query.get("name") == query_name:
+                return query
+        raise AetherApiError(
+            404,
+            f"named query not found: {query_name}",
+            {"query_name": query_name},
+        )
 
     def explain_tuple(self, tuple_id: int) -> dict[str, Any]:
         return self._request_json("POST", "/v1/explain/tuple", {"tuple_id": tuple_id})
 
-    def register_artifact_reference(self, reference: dict[str, Any]) -> dict[str, Any]:
+    def register_artifact_reference(
+        self,
+        reference: dict[str, Any] | ArtifactReference,
+    ) -> dict[str, Any]:
         return self._request_json(
             "POST",
             "/v1/sidecars/artifacts/register",
@@ -86,26 +141,34 @@ class AetherClient:
         *,
         sidecar_id: str,
         artifact_id: str,
+        policy_context: PolicyContext | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return self._request_json(
             "POST",
             "/v1/sidecars/artifacts/get",
-            {"sidecar_id": sidecar_id, "artifact_id": artifact_id},
+            GetArtifactReferenceRequest(
+                sidecar_id=sidecar_id,
+                artifact_id=artifact_id,
+                policy_context=policy_context,
+            ),
         )
 
     def register_vector_record(
         self,
         *,
-        record: dict[str, Any],
+        record: dict[str, Any] | VectorRecordMetadata,
         embedding: list[float],
     ) -> dict[str, Any]:
         return self._request_json(
             "POST",
             "/v1/sidecars/vectors/register",
-            {"record": record, "embedding": embedding},
+            RegisterVectorRecordRequest(record=record, embedding=embedding),
         )
 
-    def search_vectors(self, request_payload: dict[str, Any]) -> dict[str, Any]:
+    def search_vectors(
+        self,
+        request_payload: dict[str, Any] | SearchVectorsRequest,
+    ) -> dict[str, Any]:
         return self._request_json(
             "POST",
             "/v1/sidecars/vectors/search",
@@ -121,7 +184,7 @@ class AetherClient:
         body = None
         headers = {"Accept": "application/json"}
         if payload is not None:
-            body = json.dumps(payload).encode("utf-8")
+            body = json.dumps(_jsonable(payload)).encode("utf-8")
             headers["Content-Type"] = "application/json"
         if self._bearer_token:
             headers["Authorization"] = f"Bearer {self._bearer_token}"
@@ -151,3 +214,16 @@ class AetherClient:
             )
             raise AetherApiError(exc.code, str(message), payload_json) from exc
 
+
+def _jsonable(value: Any) -> Any:
+    if is_dataclass(value):
+        return _jsonable(asdict(value))
+    if isinstance(value, dict):
+        return {
+            key: _jsonable(item)
+            for key, item in value.items()
+            if item is not None
+        }
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    return value

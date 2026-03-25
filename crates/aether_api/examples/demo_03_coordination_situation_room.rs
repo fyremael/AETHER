@@ -30,6 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "as_of e2",
             "goal depends_transitive(task, dep)\n  keep task, dep",
         ),
+        policy_context: None,
     })?;
     print_section(
         "Act I: Before completion closes the chain (AsOf e2)",
@@ -44,6 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let blocked = service.run_document(RunDocumentRequest {
         dsl: showcase_dsl("as_of e2", "goal dependency_blocked(task)\n  keep task"),
+        policy_context: None,
     })?;
     print_section(
         "Blocked work at AsOf e2",
@@ -61,6 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "as_of e4",
             "goal worker_can_claim(task, worker)\n  keep task, worker",
         ),
+        policy_context: None,
     })?;
     print_section(
         "Act II: Claim window opens (AsOf e4)",
@@ -78,6 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "as_of e7",
             "goal execution_authorized(task, worker, epoch)\n  keep task, worker, epoch",
         ),
+        policy_context: None,
     })?;
     print_section(
         "Act III: Worker A is authoritative (AsOf e7)",
@@ -95,6 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "current",
             "goal execution_authorized(task, worker, epoch)\n  keep task, worker, epoch",
         ),
+        policy_context: None,
     })?;
     let authorized_rows = worker_b
         .query
@@ -120,6 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "current",
             "goal execution_rejected_stale(task, worker, epoch)\n  keep task, worker, epoch",
         ),
+        policy_context: None,
     })?;
     print_section(
         "Fenced stale work at Current",
@@ -137,6 +143,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "current",
             "goal worker_can_claim(task, worker)\n  keep task, worker",
         ),
+        policy_context: None,
     })?;
     print_section(
         "Open work at Current",

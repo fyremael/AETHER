@@ -9,8 +9,8 @@ use aether_api::{
     COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
 use aether_ast::{
-    AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PredicateId,
-    PredicateRef, ReplicaId, Value,
+    AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PolicyContext,
+    PolicyEnvelope, PredicateId, PredicateRef, ReplicaId, Value,
 };
 use reqwest::Client;
 use std::collections::BTreeMap;
@@ -251,6 +251,93 @@ async fn http_service_runs_documents_and_explains_tuples() {
 }
 
 #[tokio::test]
+async fn http_service_applies_policy_context_to_document_runs() {
+    let (base_url, server) = spawn_server(InMemoryKernelService::new()).await;
+    let client = Client::new();
+
+    let append = client
+        .post(format!("{base_url}/v1/append"))
+        .json(&AppendRequest {
+            datoms: vec![
+                policy_status_datom(1, "ready", 1, None),
+                policy_status_datom(
+                    3,
+                    "ready",
+                    2,
+                    Some(PolicyEnvelope {
+                        capability: Some("executor".into()),
+                        visibility: None,
+                    }),
+                ),
+            ],
+        })
+        .send()
+        .await
+        .expect("append policy datoms");
+    assert!(append.status().is_success());
+
+    let dsl = policy_document_dsl();
+    let default_response = client
+        .post(format!("{base_url}/v1/documents/run"))
+        .json(&RunDocumentRequest {
+            dsl: dsl.clone(),
+            policy_context: None,
+        })
+        .send()
+        .await
+        .expect("default run request");
+    assert!(default_response.status().is_success());
+    let default_rows = default_response
+        .json::<RunDocumentResponse>()
+        .await
+        .expect("default response")
+        .query
+        .expect("default query result")
+        .rows;
+    assert_eq!(
+        default_rows
+            .iter()
+            .map(|row| row.values.clone())
+            .collect::<Vec<_>>(),
+        vec![vec![Value::Entity(EntityId::new(1))]]
+    );
+
+    let executor_response = client
+        .post(format!("{base_url}/v1/documents/run"))
+        .json(&RunDocumentRequest {
+            dsl,
+            policy_context: Some(PolicyContext {
+                capabilities: vec!["executor".into()],
+                visibilities: Vec::new(),
+            }),
+        })
+        .send()
+        .await
+        .expect("executor run request");
+    assert!(executor_response.status().is_success());
+    let executor_rows = executor_response
+        .json::<RunDocumentResponse>()
+        .await
+        .expect("executor response")
+        .query
+        .expect("executor query result")
+        .rows;
+    assert_eq!(
+        executor_rows
+            .iter()
+            .map(|row| row.values.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            vec![Value::Entity(EntityId::new(1))],
+            vec![Value::Entity(EntityId::new(2))],
+            vec![Value::Entity(EntityId::new(3))],
+        ]
+    );
+
+    server.abort();
+}
+
+#[tokio::test]
 async fn http_service_preserves_coordination_history_across_sqlite_restart() {
     let temp = TestDbPath::new("http-pilot");
     {
@@ -391,6 +478,7 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
                 "current",
                 "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
+            policy_context: None,
         })
         .send()
         .await
@@ -502,6 +590,7 @@ async fn authenticated_http_service_audits_query_goal_for_find_alias() {
                 "current",
                 "find execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
+            policy_context: None,
         })
         .send()
         .await
@@ -590,6 +679,7 @@ async fn authenticated_http_service_persists_semantic_audit_context_across_resta
                     &format!("as_of e{}", COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT),
                     "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
                 ),
+                policy_context: None,
             })
             .send()
             .await
@@ -714,6 +804,7 @@ async fn http_service_registers_and_searches_sidecar_records() {
         .json(&GetArtifactReferenceRequest {
             sidecar_id: "semantic-memory".into(),
             artifact_id: "doc-1".into(),
+            policy_context: None,
         })
         .send()
         .await
@@ -736,6 +827,7 @@ async fn http_service_registers_and_searches_sidecar_records() {
                 },
                 query_entity: EntityId::new(999),
             }),
+            policy_context: None,
         })
         .send()
         .await
@@ -773,10 +865,67 @@ fn anchor_datom(element: u64) -> Datom {
     }
 }
 
+fn policy_status_datom(
+    entity: u64,
+    status: &str,
+    element: u64,
+    policy: Option<PolicyEnvelope>,
+) -> Datom {
+    Datom {
+        entity: EntityId::new(entity),
+        attribute: AttributeId::new(1),
+        value: Value::String(status.into()),
+        op: OperationKind::Assert,
+        element: ElementId::new(element),
+        replica: ReplicaId::new(1),
+        causal_context: Default::default(),
+        provenance: DatomProvenance::default(),
+        policy,
+    }
+}
+
+fn policy_document_dsl() -> String {
+    r#"
+schema {
+  attr task.status: ScalarLWW<String>
+}
+
+predicates {
+  task_status(Entity, String)
+  protected_fact(Entity)
+  visible_task(Entity)
+}
+
+rules {
+  visible_task(t) <- task_status(t, "ready")
+  visible_task(t) <- protected_fact(t)
+}
+
+materialize {
+  visible_task
+}
+
+facts {
+  protected_fact(entity(1))
+  protected_fact(entity(2)) @capability("executor")
+}
+
+query current_cut {
+  current
+  goal visible_task(t)
+  keep t
+}
+"#
+    .into()
+}
+
 async fn run_document(client: &Client, base_url: &str, dsl: String) -> RunDocumentResponse {
     let response = client
         .post(format!("{base_url}/v1/documents/run"))
-        .json(&RunDocumentRequest { dsl })
+        .json(&RunDocumentRequest {
+            dsl,
+            policy_context: None,
+        })
         .send()
         .await
         .expect("run request");
@@ -796,7 +945,10 @@ async fn run_document_authorized(
     let response = client
         .post(format!("{base_url}/v1/documents/run"))
         .bearer_auth(token)
-        .json(&RunDocumentRequest { dsl })
+        .json(&RunDocumentRequest {
+            dsl,
+            policy_context: None,
+        })
         .send()
         .await
         .expect("authorized run request");

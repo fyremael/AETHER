@@ -2,7 +2,7 @@
 
 ## Current state
 
-The repository has advanced from a pure specification bundle to a functioning early implementation workspace.
+The repository has advanced from a pure specification bundle to a functioning late-M4 single-node pilot semantic kernel workspace.
 
 Completed:
 
@@ -15,10 +15,10 @@ Completed:
 - first recursive tuple explainer implemented
 - whole-document DSL parser implemented for the current canonical v1 surface: schema, attribute classes, facts, repeated queries, explain directives, temporal views, and policy annotations
 - `Current` and `AsOf` query execution implemented
-- policy annotations supported on DSL-authored extensional facts
+- policy annotations turned into executable behavior through explicit policy-context filtering on state resolution, document execution, and sidecar reads/searches
 - semi-naive delta execution implemented for recursive SCC evaluation
 - executable stratified negation implemented for stratified programs
-- bounded aggregation implemented for non-recursive head-term `count`, `sum`, `min`, and `max` rules
+- bounded aggregation implemented for non-recursive head-term `count`, `sum`, `min`, and `max` rules; this is currently treated as good enough for the v1 pilot but not yet as full spec closure
 - first coordination acceptance slice implemented for readiness, claims, leases, lease heartbeats, execution outcomes, and stale-result rejection
 - in-memory kernel service implemented in `aether_api`
 - minimal HTTP JSON kernel service implemented over `aether_api`
@@ -35,7 +35,8 @@ Completed:
 - a one-command pilot launch validation pack added to produce the current report, drift, soak, and stress evidence set
 - artifact and vector sidecar federation implemented in `aether_api`, including journal-tail-anchored registration, journal-exact `AsOf` visibility, external artifact references, vector search, semantic fact projection with provenance, and SQLite-backed durability for the durable kernel service
 - scheduled/manual GitHub Actions automation added for the pilot launch-validation and drift artifact pack
-- first real Python boundary client implemented against the HTTP API with live integration coverage
+- first real Go operator shell implemented against the HTTP API with typed client coverage
+- broader typed Python SDK surface implemented against the HTTP API with fixture builders and live integration coverage
 - documentation portal, architecture guide, developer workflow guide, operator guide, glossary, and documentation standards now exist
 - GitHub Pages publishing pipeline added for the documentation portal and generated Rust API reference
 - unit tests added across the Rust core crates
@@ -48,7 +49,7 @@ Not yet completed:
 - post-v1 DSL ergonomics and document modularity beyond the current canonical surface
 - broader durable storage backends beyond the current SQLite journal
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
-- stable Go client and a broader Python SDK surface
+- mature Go/Python client ecosystems beyond the current first real boundary clients
 - historical benchmark dashboards and fully release-gated drift enforcement on the main CI path
 
 ## Immediate focus
@@ -60,4 +61,4 @@ The most immediate work now sits just beyond the launch-ready pilot slice and la
 - decide how far to widen audit context from the current semantic cut/query/tuple fields into fuller operator intent and semantic diffs
 - decide when the current drift comparison should graduate into CI enforcement
 - decide which post-v1 ergonomic DSL extensions matter beyond the now-implemented canonical surface
-- widen aggregation beyond the current non-recursive head-term slice and continue runtime optimization
+- decide whether to widen aggregation beyond the current pilot-good non-recursive head-term slice before claiming full spec closure, then continue runtime optimization

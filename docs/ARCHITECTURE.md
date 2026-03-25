@@ -180,8 +180,10 @@ This is not an omission of ambition. It is sequencing. The kernel is being made 
 - recursive and stratified runtime evaluation
 - service-backed query and explanation
 - bounded aggregation for the current non-recursive slice
+- policy-context-aware visibility filtering across datoms, DSL-authored facts, and sidecar reads/searches
 - artifact and vector sidecar federation with provenance-bearing semantic fact projection, journal-tail-anchored registration, and SQLite-backed replay on the durable pilot path
-- a first real Python HTTP client over the stable boundary
+- a first real Go operator shell plus typed Go client over the stable boundary
+- a broader typed Python SDK surface over the stable boundary
 - operator-facing demonstrations
 
 ### Deferred
@@ -189,7 +191,7 @@ This is not an omission of ambition. It is sequencing. The kernel is being made 
 - broader post-v1 DSL ergonomics
 - distributed or replicated sidecar federation backends
 - production-hardened multi-tenant service boundaries
-- stable Go client and a broader Python SDK surface
+- mature Go/Python client ecosystems beyond the current first real boundary clients
 
 Those deferrals are deliberate. They keep the semantic center stable while the kernel is still proving itself.
 

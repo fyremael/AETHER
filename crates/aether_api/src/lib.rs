@@ -1,7 +1,7 @@
 use aether_ast::{
-    Datom, DerivationTrace, ElementId, ExplainSpec, ExplainTarget, NamedExplainSpec,
-    NamedQuerySpec, PhaseGraph, PlanExplanation, QueryResult, QuerySpec, RuleProgram, TemporalView,
-    Term, TupleId,
+    policy_allows, Datom, DerivationTrace, ElementId, ExplainSpec, ExplainTarget, ExtensionalFact,
+    NamedExplainSpec, NamedQuerySpec, PhaseGraph, PlanExplanation, PolicyContext, QueryResult,
+    QuerySpec, RuleProgram, TemporalView, Term, TupleId,
 };
 use aether_explain::{ExplainError, Explainer, InMemoryExplainer};
 use aether_plan::CompiledProgram;
@@ -126,12 +126,17 @@ impl<J: Journal, S: SidecarFederation> KernelServiceCore<J, S> {
         }
     }
 
-    fn datoms_or_history(&self, datoms: &[Datom]) -> Result<Vec<Datom>, ApiError> {
-        if datoms.is_empty() {
-            Ok(self.journal.history()?)
+    fn datoms_or_history(
+        &self,
+        datoms: &[Datom],
+        policy_context: Option<&PolicyContext>,
+    ) -> Result<Vec<Datom>, ApiError> {
+        let datoms = if datoms.is_empty() {
+            self.journal.history()?
         } else {
-            Ok(datoms.to_vec())
-        }
+            datoms.to_vec()
+        };
+        Ok(filter_datoms(datoms, policy_context))
     }
 
     fn cache_derived(&mut self, derived: DerivedSet) -> DerivedSet {
@@ -171,6 +176,41 @@ impl<J: Journal, S: SidecarFederation> KernelServiceCore<J, S> {
     }
 }
 
+fn filter_datoms(datoms: Vec<Datom>, policy_context: Option<&PolicyContext>) -> Vec<Datom> {
+    datoms
+        .into_iter()
+        .filter(|datom| policy_allows(policy_context, datom.policy.as_ref()))
+        .collect()
+}
+
+fn filter_extensional_facts(
+    facts: Vec<ExtensionalFact>,
+    policy_context: Option<&PolicyContext>,
+) -> Vec<ExtensionalFact> {
+    facts
+        .into_iter()
+        .filter(|fact| policy_allows(policy_context, fact.policy.as_ref()))
+        .collect()
+}
+
+fn filter_rule_program(
+    program: &RuleProgram,
+    policy_context: Option<&PolicyContext>,
+) -> RuleProgram {
+    let mut filtered = program.clone();
+    filtered.facts = filter_extensional_facts(filtered.facts, policy_context);
+    filtered
+}
+
+fn filter_compiled_program(
+    program: &CompiledProgram,
+    policy_context: Option<&PolicyContext>,
+) -> CompiledProgram {
+    let mut filtered = program.clone();
+    filtered.facts = filter_extensional_facts(filtered.facts, policy_context);
+    filtered
+}
+
 impl<J, S> KernelServiceCore<J, S>
 where
     J: Journal,
@@ -206,19 +246,16 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         &self,
         request: CurrentStateRequest,
     ) -> Result<CurrentStateResponse, ApiError> {
+        let datoms = self.datoms_or_history(&request.datoms, request.policy_context.as_ref())?;
         Ok(CurrentStateResponse {
-            state: MaterializedResolver
-                .current(&request.schema, &self.datoms_or_history(&request.datoms)?)?,
+            state: MaterializedResolver.current(&request.schema, &datoms)?,
         })
     }
 
     fn as_of(&self, request: AsOfRequest) -> Result<AsOfResponse, ApiError> {
+        let datoms = self.datoms_or_history(&request.datoms, request.policy_context.as_ref())?;
         Ok(AsOfResponse {
-            state: MaterializedResolver.as_of(
-                &request.schema,
-                &self.datoms_or_history(&request.datoms)?,
-                &request.at,
-            )?,
+            state: MaterializedResolver.as_of(&request.schema, &datoms, &request.at)?,
         })
     }
 
@@ -235,7 +272,8 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         &mut self,
         request: EvaluateProgramRequest,
     ) -> Result<EvaluateProgramResponse, ApiError> {
-        let derived = SemiNaiveRuntime.evaluate(&request.state, &request.program)?;
+        let program = filter_compiled_program(&request.program, request.policy_context.as_ref());
+        let derived = SemiNaiveRuntime.evaluate(&request.state, &program)?;
         Ok(EvaluateProgramResponse {
             derived: self.cache_derived(derived),
         })
@@ -278,8 +316,10 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         request: RunDocumentRequest,
     ) -> Result<RunDocumentResponse, ApiError> {
         let document = DefaultDslParser.parse_document(&request.dsl)?;
-        let datoms = self.journal.history()?;
-        let program = DefaultRuleCompiler.compile(&document.schema, &document.program)?;
+        let datoms = self.datoms_or_history(&[], request.policy_context.as_ref())?;
+        let filtered_program_ast =
+            filter_rule_program(&document.program, request.policy_context.as_ref());
+        let program = DefaultRuleCompiler.compile(&document.schema, &filtered_program_ast)?;
         let mut evaluations = Vec::new();
         let primary_view = document
             .query
@@ -425,6 +465,8 @@ pub struct HistoryResponse {
 pub struct CurrentStateRequest {
     pub schema: Schema,
     pub datoms: Vec<Datom>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_context: Option<PolicyContext>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -437,6 +479,8 @@ pub struct AsOfRequest {
     pub schema: Schema,
     pub datoms: Vec<Datom>,
     pub at: ElementId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_context: Option<PolicyContext>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -459,6 +503,8 @@ pub struct CompileProgramResponse {
 pub struct EvaluateProgramRequest {
     pub state: ResolvedState,
     pub program: CompiledProgram,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_context: Option<PolicyContext>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -503,6 +549,8 @@ pub struct ParseDocumentResponse {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunDocumentRequest {
     pub dsl: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_context: Option<PolicyContext>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -608,12 +656,12 @@ pub enum ApiError {
 #[cfg(test)]
 mod tests {
     use super::{
-        coordination_pilot_dsl, coordination_pilot_seed_history, AppendRequest, ExplainArtifact,
-        ExplainTupleRequest, InMemoryKernelService, KernelService, ParseDocumentRequest,
-        RunDocumentRequest, COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
-        COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
+        coordination_pilot_dsl, coordination_pilot_seed_history, AppendRequest,
+        CurrentStateRequest, ExplainArtifact, ExplainTupleRequest, InMemoryKernelService,
+        KernelService, ParseDocumentRequest, RunDocumentRequest,
+        COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
     };
-    use aether_ast::{ElementId, EntityId, Value};
+    use aether_ast::{ElementId, EntityId, PolicyContext, PolicyEnvelope, Value};
 
     #[test]
     fn service_models_multi_worker_lease_handoff_and_fencing() {
@@ -640,6 +688,7 @@ mod tests {
                     &format!("as_of e{}", COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT),
                     "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
                 ),
+                policy_context: None,
             })
             .expect("run pre-heartbeat authorization document");
         assert_eq!(
@@ -659,6 +708,7 @@ mod tests {
                     &format!("as_of e{}", COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT),
                     "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
                 ),
+                policy_context: None,
             })
             .expect("run as_of authorization document");
         assert_eq!(
@@ -686,6 +736,7 @@ mod tests {
                     "current",
                     "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
                 ),
+                policy_context: None,
             })
             .expect("run current authorization document");
         let authorized_rows = &current_authorized
@@ -718,6 +769,7 @@ mod tests {
                     "current",
                     "goal worker_can_claim(t, worker)\n  keep t, worker",
                 ),
+                policy_context: None,
             })
             .expect("run claimability document");
         let claimable_rows = &claimable
@@ -749,6 +801,7 @@ mod tests {
                     "current",
                     "goal execution_outcome_accepted(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
                 ),
+                policy_context: None,
             })
             .expect("run accepted-outcome document");
         let accepted_rows = &accepted_outcomes
@@ -773,6 +826,7 @@ mod tests {
                     "current",
                     "goal execution_outcome_rejected_stale(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
                 ),
+                policy_context: None,
             })
             .expect("run rejected-outcome document");
         let rejected_rows = &rejected_outcomes
@@ -813,6 +867,7 @@ mod tests {
         let response = service
             .run_document(RunDocumentRequest {
                 dsl: transitive_document_dsl(),
+                policy_context: None,
             })
             .expect("run named-query document");
         assert_eq!(response.query, Some(response.queries[0].result.clone()));
@@ -842,6 +897,124 @@ mod tests {
             &response.explains[1].result,
             ExplainArtifact::Plan(explanation) if !explanation.phase_graph.nodes.is_empty()
         ));
+    }
+
+    #[test]
+    fn service_filters_state_and_derivation_by_policy_context() {
+        let mut service = InMemoryKernelService::new();
+        let dsl = r#"
+schema {
+  attr task.status: ScalarLWW<String>
+}
+
+predicates {
+  task_status(Entity, String)
+  protected_fact(Entity)
+  visible_task(Entity)
+}
+
+rules {
+  visible_task(t) <- task_status(t, "ready")
+  visible_task(t) <- protected_fact(t)
+}
+
+materialize {
+  visible_task
+}
+
+facts {
+  protected_fact(entity(1))
+  protected_fact(entity(2)) @capability("executor")
+}
+
+query current_cut {
+  current
+  goal visible_task(t)
+  keep t
+}
+"#;
+
+        let parsed = service
+            .parse_document(ParseDocumentRequest { dsl: dsl.into() })
+            .expect("parse policy document");
+        service
+            .append(AppendRequest {
+                datoms: vec![
+                    status_datom(1, "ready", 1, None),
+                    status_datom(
+                        3,
+                        "ready",
+                        2,
+                        Some(PolicyEnvelope {
+                            capability: Some("executor".into()),
+                            visibility: None,
+                        }),
+                    ),
+                ],
+            })
+            .expect("append policy datoms");
+
+        let default_state = service
+            .current_state(CurrentStateRequest {
+                schema: parsed.schema.clone(),
+                datoms: Vec::new(),
+                policy_context: None,
+            })
+            .expect("resolve default state");
+        assert_eq!(default_state.state.entities.len(), 1);
+
+        let executor_state = service
+            .current_state(CurrentStateRequest {
+                schema: parsed.schema.clone(),
+                datoms: Vec::new(),
+                policy_context: Some(PolicyContext {
+                    capabilities: vec!["executor".into()],
+                    visibilities: Vec::new(),
+                }),
+            })
+            .expect("resolve executor state");
+        assert_eq!(executor_state.state.entities.len(), 2);
+
+        let default_result = service
+            .run_document(RunDocumentRequest {
+                dsl: dsl.into(),
+                policy_context: None,
+            })
+            .expect("run default policy document");
+        assert_eq!(
+            default_result
+                .query
+                .expect("default query result")
+                .rows
+                .into_iter()
+                .map(|row| row.values)
+                .collect::<Vec<_>>(),
+            vec![vec![Value::Entity(EntityId::new(1))]]
+        );
+
+        let executor_result = service
+            .run_document(RunDocumentRequest {
+                dsl: dsl.into(),
+                policy_context: Some(PolicyContext {
+                    capabilities: vec!["executor".into()],
+                    visibilities: Vec::new(),
+                }),
+            })
+            .expect("run executor policy document");
+        assert_eq!(
+            executor_result
+                .query
+                .expect("executor query result")
+                .rows
+                .into_iter()
+                .map(|row| row.values)
+                .collect::<Vec<_>>(),
+            vec![
+                vec![Value::Entity(EntityId::new(1))],
+                vec![Value::Entity(EntityId::new(2))],
+                vec![Value::Entity(EntityId::new(3))],
+            ]
+        );
     }
 
     fn transitive_document_dsl() -> String {
@@ -898,6 +1071,25 @@ explain plan_shape {
             causal_context: Default::default(),
             provenance: aether_ast::DatomProvenance::default(),
             policy: None,
+        }
+    }
+
+    fn status_datom(
+        entity: u64,
+        status: &str,
+        element: u64,
+        policy: Option<PolicyEnvelope>,
+    ) -> aether_ast::Datom {
+        aether_ast::Datom {
+            entity: EntityId::new(entity),
+            attribute: aether_ast::AttributeId::new(1),
+            value: Value::String(status.into()),
+            op: aether_ast::OperationKind::Assert,
+            element: ElementId::new(element),
+            replica: aether_ast::ReplicaId::new(1),
+            causal_context: Default::default(),
+            provenance: aether_ast::DatomProvenance::default(),
+            policy,
         }
     }
 }

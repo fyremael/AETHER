@@ -1,5 +1,60 @@
 """Python boundary client for the AETHER HTTP API."""
 
 from .client import AetherApiError, AetherClient
+from .fixtures import (
+    make_artifact_reference,
+    make_datom,
+    make_policy,
+    make_policy_context,
+    make_provenance,
+    make_source_ref,
+    make_vector_record,
+    value_entity,
+    value_string,
+    value_u64,
+)
+from .models import (
+    ArtifactReference,
+    AsOfRequest,
+    CurrentStateRequest,
+    Datom,
+    DatomProvenance,
+    GetArtifactReferenceRequest,
+    PolicyContext,
+    PolicyEnvelope,
+    RegisterVectorRecordRequest,
+    RunDocumentRequest,
+    SearchVectorsRequest,
+    SourceRef,
+    VectorFactProjection,
+    VectorRecordMetadata,
+)
 
-__all__ = ["AetherApiError", "AetherClient"]
+__all__ = [
+    "AetherApiError",
+    "AetherClient",
+    "ArtifactReference",
+    "AsOfRequest",
+    "CurrentStateRequest",
+    "Datom",
+    "DatomProvenance",
+    "GetArtifactReferenceRequest",
+    "PolicyContext",
+    "PolicyEnvelope",
+    "RegisterVectorRecordRequest",
+    "RunDocumentRequest",
+    "SearchVectorsRequest",
+    "SourceRef",
+    "VectorFactProjection",
+    "VectorRecordMetadata",
+    "make_artifact_reference",
+    "make_datom",
+    "make_policy",
+    "make_policy_context",
+    "make_provenance",
+    "make_source_ref",
+    "make_vector_record",
+    "value_entity",
+    "value_string",
+    "value_u64",
+]

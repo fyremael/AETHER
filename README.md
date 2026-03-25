@@ -5,9 +5,9 @@
 [![Rust 1.78+](https://img.shields.io/badge/rust-1.78%2B-93450a?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-4b5563)](./LICENSE-MIT)
 
-AETHER is a semantic coordination runtime for distributed agent systems.
+AETHER is a late-M4 single-node pilot semantic kernel for agentic coordination.
 
-Its claim is simple, but not modest: the right center of gravity for agent coordination is not a queue, not a graph-walking convenience layer, not a pile of ad hoc service contracts, and not a host-language DSL masquerading as semantics. The right center of gravity is an authoritative semantic kernel: an append-only causal journal, a deterministic resolver, and a recursive rule engine that can state, derive, replay, and explain what a system believes.
+Its long-range claim is simple, but not modest: the right center of gravity for agent coordination is not a queue, not a graph-walking convenience layer, not a pile of ad hoc service contracts, and not a host-language DSL masquerading as semantics. The right center of gravity is an authoritative semantic kernel: an append-only causal journal, a deterministic resolver, and a recursive rule engine that can state, derive, replay, and explain what a system believes.
 
 This repository is the beginning of that kernel.
 
@@ -47,7 +47,7 @@ The first is the authoritative semantic substrate:
 - temporal replay
 - attribute-class-aware resolution
 - provenance-bearing facts
-- policy-aware semantic state
+- policy-aware semantic visibility
 
 The second is the recursive semantic closure:
 
@@ -66,11 +66,12 @@ The combination matters. A coordination system that stores facts without recursi
 AETHER is:
 
 - a semantic substrate for distributed coordination facts
+- a single-node pilot kernel for exact local truth and replay
 - a Datalog-native recursive derivation core
 - a temporal replay engine for deterministic `AsOf` views
 - a provenance-carrying kernel for explainable results
 - a Rust workspace with clear crate ownership boundaries
-- a foundation for future Go operational tooling and Python research tooling
+- a live Go operator shell and a typed Python boundary SDK over the stable HTTP seam
 
 AETHER is not:
 
@@ -128,7 +129,7 @@ Implemented today:
 - unstratified-negation rejection
 - predicate-stratum computation for executable stratified negation
 - semi-naive delta execution across recursive SCCs
-- bounded aggregation via non-recursive head-term `count`, `sum`, `min`, and `max` rules
+- bounded aggregation via non-recursive head-term `count`, `sum`, `min`, and `max` rules, which is good enough for the current v1 pilot but not yet treated as full spec closure
 - a first real recursive runtime slice for positive recursion and cross-stratum negation
 - source datom provenance threaded from resolved facts into derived tuples
 - derived tuple metadata with rule, SCC, stratum, iteration, parent tuple references, and source datom IDs
@@ -138,6 +139,7 @@ Implemented today:
 - a minimal HTTP JSON kernel service boundary over `aether_api`
 - a durable coordination-pilot HTTP service example over a SQLite journal
 - bearer-token authentication and endpoint-scope enforcement on the pilot HTTP path
+- explicit policy-context filtering for datoms, DSL-authored extensional facts, and sidecar reads/searches
 - auditable pilot request logging with semantic cut, query, tuple, and count context plus persisted JSONL output
 - operator-grade coordination pilot report generation in markdown and JSON
 - a release-mode performance report, Criterion benchmark suite, and ignored stress workloads for early regression tracking
@@ -146,13 +148,14 @@ Implemented today:
 - a one-command pilot launch validation pack with soak, stress, and artifact capture
 - a journal-anchored artifact/vector sidecar federation boundary with external artifact references, SQLite-backed durability for the pilot service, HTTP endpoints, and provenance-bearing semantic fact projection
 - a scheduled/manual GitHub Actions pilot-validation workflow that runs the launch pack and uploads report/drift artifacts
-- a first real Python boundary client over the HTTP API with integration coverage against a live Rust server
+- a first real Go operator shell plus typed Go client over the HTTP API
+- a broader typed Python SDK surface with fixture builders, policy-aware helpers, and live integration coverage against a Rust server
 
 Deliberately still narrow:
 
 - the DSL now covers the canonical v1 surface, but broader post-v1 ergonomics and modular authoring are still open
-- bounded aggregation is currently limited to non-recursive aggregate rules
-- Go remains a placeholder and the Python client is still a minimal v1 boundary rather than a broad SDK surface
+- bounded aggregation is currently limited to non-recursive aggregate rules, so AETHER treats it as pilot-good rather than full-spec-closed
+- the Go shell and Python SDK are now real, but they are still early boundary clients rather than mature multi-platform ecosystems
 - sidecar federation is now journal-subordinated and temporally exact on the SQLite-backed pilot path, but it is not yet replicated, distributed, or policy-enforced end to end
 
 ## First Working Vertical Slice
@@ -239,6 +242,8 @@ Recommended commands:
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test
+python -m unittest discover python/tests -v
+(cd go && go test ./...)
 ```
 
 WSL verification uses the same workspace and the same commands via the Linux toolchain.
@@ -315,7 +320,7 @@ The milestone sequence remains the governing roadmap.
 In practical terms, the most immediate work now is:
 
 - deciding which post-v1 DSL ergonomics matter beyond the now-implemented canonical v1 surface
-- adding bounded aggregation and deeper runtime optimization
+- deciding how far aggregation should widen beyond the current pilot-good slice before AETHER claims full spec closure
 - widening explainability from tuple traces to richer operator-facing proof and incident surfaces
 - hardening the API boundary from the current authenticated, audited, and reportable pilot service to richer operator-facing and production-credible integrations
 - introducing more boundary-level examples and operator-facing demonstrations

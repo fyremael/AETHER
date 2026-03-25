@@ -43,6 +43,23 @@ jobs:
       - name: cargo test
         run: cargo test
 
+  go-shell:
+    name: Go shell
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+
+      - name: Run Go tests
+        working-directory: go
+        run: go test ./...
+
   python-sdk:
     name: Python SDK
     runs-on: ubuntu-latest

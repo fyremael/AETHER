@@ -143,6 +143,7 @@ fn capture_contract(service: &mut impl KernelService) -> PilotContractSnapshot {
                 &format!("as_of e{}", COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT),
                 "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
+            policy_context: None,
         })
         .expect("run pre-heartbeat authorization")
         .query
@@ -155,6 +156,7 @@ fn capture_contract(service: &mut impl KernelService) -> PilotContractSnapshot {
                 &format!("as_of e{}", COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT),
                 "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
+            policy_context: None,
         })
         .expect("run as-of authorization")
         .query
@@ -167,6 +169,7 @@ fn capture_contract(service: &mut impl KernelService) -> PilotContractSnapshot {
                 "current",
                 "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
+            policy_context: None,
         })
         .expect("run current authorization");
     let current_authorized = current_authorized_response
@@ -187,6 +190,7 @@ fn capture_contract(service: &mut impl KernelService) -> PilotContractSnapshot {
                 "current",
                 "goal live_authority(t, worker, epoch, beat)\n  keep t, worker, epoch, beat",
             ),
+            policy_context: None,
         })
         .expect("run live heartbeat query")
         .query
@@ -199,6 +203,7 @@ fn capture_contract(service: &mut impl KernelService) -> PilotContractSnapshot {
                 "current",
                 "goal worker_can_claim(t, worker)\n  keep t, worker",
             ),
+            policy_context: None,
         })
         .expect("run claimability")
         .query
@@ -211,6 +216,7 @@ fn capture_contract(service: &mut impl KernelService) -> PilotContractSnapshot {
                 "current",
                 "goal execution_outcome_accepted(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
             ),
+            policy_context: None,
         })
         .expect("run accepted outcomes")
         .query
@@ -222,6 +228,7 @@ fn capture_contract(service: &mut impl KernelService) -> PilotContractSnapshot {
                 "current",
                 "goal execution_outcome_rejected_stale(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
             ),
+            policy_context: None,
         })
         .expect("run rejected outcomes")
         .query

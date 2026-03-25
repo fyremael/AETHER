@@ -72,6 +72,7 @@ fn vector_search_results_reenter_the_semantic_layer_with_provenance() {
         .get_artifact_reference(GetArtifactReferenceRequest {
             sidecar_id: "semantic-memory".into(),
             artifact_id: "runbook-1".into(),
+            policy_context: None,
         })
         .expect("fetch artifact")
         .reference;
@@ -92,6 +93,7 @@ fn vector_search_results_reenter_the_semantic_layer_with_provenance() {
                 },
                 query_entity: EntityId::new(900),
             }),
+            policy_context: None,
         })
         .expect("search vectors");
     assert_eq!(search.matches.len(), 1);
@@ -236,6 +238,7 @@ fn sqlite_sidecar_federation_survives_restart() {
         .get_artifact_reference(GetArtifactReferenceRequest {
             sidecar_id: "semantic-memory".into(),
             artifact_id: "doc-1".into(),
+            policy_context: None,
         })
         .expect("fetch persisted artifact")
         .reference;
@@ -256,6 +259,7 @@ fn sqlite_sidecar_federation_survives_restart() {
                 },
                 query_entity: EntityId::new(999),
             }),
+            policy_context: None,
         })
         .expect("search persisted vectors");
     assert_eq!(search.matches.len(), 1);

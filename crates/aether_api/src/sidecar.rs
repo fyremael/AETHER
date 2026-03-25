@@ -1,6 +1,6 @@
 use aether_ast::{
-    Datom, DatomProvenance, ElementId, EntityId, ExtensionalFact, FactProvenance, PolicyEnvelope,
-    PredicateRef, SidecarKind, SidecarOrigin, SourceRef, Value,
+    policy_allows, Datom, DatomProvenance, ElementId, EntityId, ExtensionalFact, FactProvenance,
+    PolicyContext, PolicyEnvelope, PredicateRef, SidecarKind, SidecarOrigin, SourceRef, Value,
 };
 use indexmap::IndexMap;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -147,6 +147,8 @@ pub struct RegisterArtifactReferenceResponse {
 pub struct GetArtifactReferenceRequest {
     pub sidecar_id: String,
     pub artifact_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_context: Option<PolicyContext>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -173,6 +175,8 @@ pub struct SearchVectorsRequest {
     pub metric: VectorMetric,
     pub as_of: Option<ElementId>,
     pub projection: Option<VectorFactProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_context: Option<PolicyContext>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -256,6 +260,7 @@ impl SidecarFederation for InMemorySidecarFederation {
                     sidecar_id: request.sidecar_id,
                     artifact_id: request.artifact_id,
                 })?;
+        ensure_policy_allows_artifact(&reference, request.policy_context.as_ref())?;
         Ok(GetArtifactReferenceResponse { reference })
     }
 
@@ -316,6 +321,10 @@ impl SidecarFederation for InMemorySidecarFederation {
                 || record.metadata.metric != request.metric
                 || record.metadata.dimensions != request.query_embedding.len()
                 || !journal.is_visible_at(record.metadata.registered_at, request.as_of)?
+                || !policy_allows(
+                    request.policy_context.as_ref(),
+                    record.metadata.policy.as_ref(),
+                )
             {
                 continue;
             }
@@ -329,6 +338,11 @@ impl SidecarFederation for InMemorySidecarFederation {
                         .get(&artifact_key(&record.metadata.sidecar_id, artifact_id))
                 })
                 .cloned();
+            if artifact.as_ref().is_some_and(|artifact| {
+                !policy_allows(request.policy_context.as_ref(), artifact.policy.as_ref())
+            }) {
+                continue;
+            }
             records.push((record.clone(), artifact));
         }
         build_search_response(request, records)
@@ -450,11 +464,19 @@ impl SqliteSidecarFederation {
             if !journal.is_visible_at(metadata.registered_at, request.as_of)? {
                 continue;
             }
+            if !policy_allows(request.policy_context.as_ref(), metadata.policy.as_ref()) {
+                continue;
+            }
             let embedding: Vec<f32> = serde_json::from_str(&embedding_json)?;
             let artifact = match &metadata.source_artifact_id {
                 Some(artifact_id) => self.lookup_artifact(&metadata.sidecar_id, artifact_id)?,
                 None => None,
             };
+            if artifact.as_ref().is_some_and(|artifact| {
+                !policy_allows(request.policy_context.as_ref(), artifact.policy.as_ref())
+            }) {
+                continue;
+            }
             records.push((
                 StoredVectorRecord {
                     metadata,
@@ -528,6 +550,7 @@ impl SidecarFederation for SqliteSidecarFederation {
                 artifact_id: request.artifact_id,
             });
         };
+        ensure_policy_allows_artifact(&reference, request.policy_context.as_ref())?;
         Ok(GetArtifactReferenceResponse { reference })
     }
 
@@ -664,6 +687,22 @@ fn validate_projection(projection: Option<&VectorFactProjection>) -> Result<(), 
         }
     }
     Ok(())
+}
+
+fn ensure_policy_allows_artifact(
+    reference: &ArtifactReference,
+    policy_context: Option<&PolicyContext>,
+) -> Result<(), SidecarError> {
+    if policy_allows(policy_context, reference.policy.as_ref()) {
+        Ok(())
+    } else {
+        Err(SidecarError::PolicyDenied {
+            subject: format!(
+                "artifact {}:{}",
+                reference.sidecar_id, reference.artifact_id
+            ),
+        })
+    }
 }
 
 fn build_search_response(
@@ -842,6 +881,8 @@ pub enum SidecarError {
     },
     #[error("vector fact projection for predicate {predicate} requires arity 3, found {arity}")]
     UnsupportedProjectionArity { predicate: String, arity: usize },
+    #[error("policy denied access to {subject}")]
+    PolicyDenied { subject: String },
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -858,8 +899,8 @@ mod tests {
         SidecarError, SidecarFederation, VectorFactProjection, VectorMetric, VectorRecordMetadata,
     };
     use aether_ast::{
-        AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PredicateId,
-        PredicateRef, ReplicaId, SidecarKind, Value,
+        AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PolicyContext,
+        PolicyEnvelope, PredicateId, PredicateRef, ReplicaId, SidecarKind, Value,
     };
     use std::collections::BTreeMap;
 
@@ -912,6 +953,7 @@ mod tests {
             .get_artifact_reference(GetArtifactReferenceRequest {
                 sidecar_id: "artifact-store".into(),
                 artifact_id: "artifact-1".into(),
+                policy_context: None,
             })
             .expect("fetch artifact reference")
             .reference;
@@ -986,6 +1028,7 @@ mod tests {
                         },
                         query_entity: EntityId::new(1),
                     }),
+                    policy_context: None,
                 },
                 &vector_journal,
             )
@@ -1060,6 +1103,7 @@ mod tests {
                     metric: VectorMetric::DotProduct,
                     as_of: Some(ElementId::new(1)),
                     projection: None,
+                    policy_context: None,
                 },
                 &current_journal,
             )
@@ -1081,6 +1125,7 @@ mod tests {
                 metric: VectorMetric::DotProduct,
                 as_of: Some(ElementId::new(9)),
                 projection: None,
+                policy_context: None,
             },
             &current_journal,
         );
@@ -1121,5 +1166,113 @@ mod tests {
                 current_tail,
             }) if element == ElementId::new(1) && current_tail == ElementId::new(2)
         ));
+    }
+
+    #[test]
+    fn sidecar_reads_and_searches_respect_policy_context() {
+        let mut federation = InMemorySidecarFederation::default();
+        let artifact_journal = journal_catalog(&[1]);
+        federation
+            .register_artifact_reference(
+                RegisterArtifactReferenceRequest {
+                    reference: ArtifactReference {
+                        sidecar_id: "vector-store".into(),
+                        artifact_id: "doc-1".into(),
+                        entity: EntityId::new(21),
+                        uri: "s3://aether/docs/doc-1.md".into(),
+                        media_type: "text/markdown".into(),
+                        byte_length: 512,
+                        digest: Some("sha256:doc-1".into()),
+                        metadata: BTreeMap::new(),
+                        provenance: DatomProvenance::default(),
+                        policy: Some(PolicyEnvelope {
+                            capability: Some("memory_reader".into()),
+                            visibility: None,
+                        }),
+                        registered_at: ElementId::new(1),
+                    },
+                },
+                &artifact_journal,
+            )
+            .expect("register artifact");
+        let vector_journal = journal_catalog(&[1, 2]);
+        federation
+            .register_vector_record(
+                RegisterVectorRecordRequest {
+                    record: VectorRecordMetadata {
+                        sidecar_id: "vector-store".into(),
+                        vector_id: "vec-1".into(),
+                        entity: EntityId::new(21),
+                        source_artifact_id: Some("doc-1".into()),
+                        embedding_ref: "s3://aether/vectors/vec-1.bin".into(),
+                        dimensions: 3,
+                        metric: VectorMetric::Cosine,
+                        metadata: BTreeMap::new(),
+                        provenance: DatomProvenance::default(),
+                        policy: Some(PolicyEnvelope {
+                            capability: Some("memory_reader".into()),
+                            visibility: None,
+                        }),
+                        registered_at: ElementId::new(2),
+                    },
+                    embedding: vec![0.8, 0.1, 0.0],
+                },
+                &vector_journal,
+            )
+            .expect("register vector");
+
+        let denied = federation.get_artifact_reference(GetArtifactReferenceRequest {
+            sidecar_id: "vector-store".into(),
+            artifact_id: "doc-1".into(),
+            policy_context: None,
+        });
+        assert!(matches!(denied, Err(SidecarError::PolicyDenied { .. })));
+
+        let allowed = federation
+            .get_artifact_reference(GetArtifactReferenceRequest {
+                sidecar_id: "vector-store".into(),
+                artifact_id: "doc-1".into(),
+                policy_context: Some(PolicyContext {
+                    capabilities: vec!["memory_reader".into()],
+                    visibilities: Vec::new(),
+                }),
+            })
+            .expect("fetch allowed artifact");
+        assert_eq!(allowed.reference.artifact_id, "doc-1");
+
+        let hidden_search = federation
+            .search_vectors(
+                SearchVectorsRequest {
+                    sidecar_id: "vector-store".into(),
+                    query_embedding: vec![1.0, 0.0, 0.0],
+                    top_k: 1,
+                    metric: VectorMetric::Cosine,
+                    as_of: Some(ElementId::new(2)),
+                    projection: None,
+                    policy_context: None,
+                },
+                &vector_journal,
+            )
+            .expect("search without policy");
+        assert!(hidden_search.matches.is_empty());
+
+        let visible_search = federation
+            .search_vectors(
+                SearchVectorsRequest {
+                    sidecar_id: "vector-store".into(),
+                    query_embedding: vec![1.0, 0.0, 0.0],
+                    top_k: 1,
+                    metric: VectorMetric::Cosine,
+                    as_of: Some(ElementId::new(2)),
+                    projection: None,
+                    policy_context: Some(PolicyContext {
+                        capabilities: vec!["memory_reader".into()],
+                        visibilities: Vec::new(),
+                    }),
+                },
+                &vector_journal,
+            )
+            .expect("search with policy");
+        assert_eq!(visible_search.matches.len(), 1);
     }
 }
