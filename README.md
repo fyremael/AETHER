@@ -140,6 +140,7 @@ Implemented today:
 - a durable coordination-pilot HTTP service example over a SQLite journal
 - bearer-token authentication, endpoint-scope enforcement, and token-bound semantic policy ceilings on the pilot HTTP path
 - explicit policy-context filtering for datoms, DSL-authored extensional facts, and sidecar reads/searches, with request policy now allowed to narrow token-granted visibility but not widen it
+- policy-matched explanation, visible-history filtering, and policy-aware coordination reports on the service/operator path
 - auditable pilot request logging with semantic cut, query, tuple, and count context plus persisted JSONL output
 - operator-grade coordination pilot report generation in markdown and JSON
 - a release-mode performance report, Criterion benchmark suite, and ignored stress workloads for early regression tracking

@@ -5,7 +5,8 @@ use crate::{
     },
     ApiError, ExplainTupleRequest, HistoryRequest, KernelService, RunDocumentRequest,
 };
-use aether_ast::{ElementId, QueryRow, TupleId, Value};
+use aether_ast::{ElementId, PolicyContext, QueryRow, TupleId, Value};
+use aether_resolver::ResolveError;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -13,6 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CoordinationPilotReport {
     pub generated_at_ms: u64,
+    pub policy_context: Option<PolicyContext>,
     pub history_len: usize,
     pub pre_heartbeat_authorized: Vec<ReportRow>,
     pub as_of_authorized: Vec<ReportRow>,
@@ -49,91 +51,99 @@ pub struct TraceTupleSummary {
 pub fn build_coordination_pilot_report(
     service: &mut impl KernelService,
 ) -> Result<CoordinationPilotReport, ApiError> {
-    let history_len = service.history(HistoryRequest)?.datoms.len();
-    let pre_heartbeat_authorized = service
-        .run_document(RunDocumentRequest {
+    build_coordination_pilot_report_with_policy(service, None)
+}
+
+pub fn build_coordination_pilot_report_with_policy(
+    service: &mut impl KernelService,
+    policy_context: Option<PolicyContext>,
+) -> Result<CoordinationPilotReport, ApiError> {
+    let history_len = service
+        .history(HistoryRequest {
+            policy_context: policy_context.clone(),
+        })?
+        .datoms
+        .len();
+    let pre_heartbeat_authorized = run_report_query(
+        service,
+        RunDocumentRequest {
             dsl: coordination_pilot_dsl(
                 &format!("as_of e{}", COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT),
                 "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
-            policy_context: None,
-        })?
-        .query
-        .unwrap_or_default()
-        .rows;
-    let as_of_authorized = service
-        .run_document(RunDocumentRequest {
+            policy_context: policy_context.clone(),
+        },
+    )?;
+    let as_of_authorized = run_report_query(
+        service,
+        RunDocumentRequest {
             dsl: coordination_pilot_dsl(
                 &format!("as_of e{}", COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT),
                 "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
-            policy_context: None,
-        })?
-        .query
-        .unwrap_or_default()
-        .rows;
-    let live_heartbeats = service
-        .run_document(RunDocumentRequest {
+            policy_context: policy_context.clone(),
+        },
+    )?;
+    let live_heartbeats = run_report_query(
+        service,
+        RunDocumentRequest {
             dsl: coordination_pilot_dsl(
                 "current",
                 "goal live_authority(t, worker, epoch, beat)\n  keep t, worker, epoch, beat",
             ),
-            policy_context: None,
-        })?
-        .query
-        .unwrap_or_default()
-        .rows;
-    let current_authorized = service
-        .run_document(RunDocumentRequest {
+            policy_context: policy_context.clone(),
+        },
+    )?;
+    let current_authorized = run_report_query(
+        service,
+        RunDocumentRequest {
             dsl: coordination_pilot_dsl(
                 "current",
                 "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             ),
-            policy_context: None,
-        })?
-        .query
-        .unwrap_or_default()
-        .rows;
-    let claimable = service
-        .run_document(RunDocumentRequest {
+            policy_context: policy_context.clone(),
+        },
+    )?;
+    let claimable = run_report_query(
+        service,
+        RunDocumentRequest {
             dsl: coordination_pilot_dsl(
                 "current",
                 "goal worker_can_claim(t, worker)\n  keep t, worker",
             ),
-            policy_context: None,
-        })?
-        .query
-        .unwrap_or_default()
-        .rows;
-    let accepted_outcomes = service
-        .run_document(RunDocumentRequest {
+            policy_context: policy_context.clone(),
+        },
+    )?;
+    let accepted_outcomes = run_report_query(
+        service,
+        RunDocumentRequest {
             dsl: coordination_pilot_dsl(
                 "current",
                 "goal execution_outcome_accepted(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
             ),
-            policy_context: None,
-        })?
-        .query
-        .unwrap_or_default()
-        .rows;
-    let rejected_outcomes = service
-        .run_document(RunDocumentRequest {
+            policy_context: policy_context.clone(),
+        },
+    )?;
+    let rejected_outcomes = run_report_query(
+        service,
+        RunDocumentRequest {
             dsl: coordination_pilot_dsl(
                 "current",
                 "goal execution_outcome_rejected_stale(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
             ),
-            policy_context: None,
-        })?
-        .query
-        .unwrap_or_default()
-        .rows;
+            policy_context: policy_context.clone(),
+        },
+    )?;
 
     let trace = current_authorized
         .first()
         .and_then(|row| row.tuple_id)
         .map(|tuple_id| -> Result<TraceSummary, ApiError> {
             let trace = service
-                .explain_tuple(ExplainTupleRequest { tuple_id })?
+                .explain_tuple(ExplainTupleRequest {
+                    tuple_id,
+                    policy_context: policy_context.clone(),
+                })?
                 .trace;
             Ok(TraceSummary {
                 root: trace.root,
@@ -155,6 +165,7 @@ pub fn build_coordination_pilot_report(
 
     Ok(CoordinationPilotReport {
         generated_at_ms: now_millis(),
+        policy_context,
         history_len,
         pre_heartbeat_authorized: into_report_rows(pre_heartbeat_authorized),
         as_of_authorized: into_report_rows(as_of_authorized),
@@ -172,6 +183,11 @@ pub fn render_coordination_pilot_report_markdown(report: &CoordinationPilotRepor
     let _ = writeln!(output, "# AETHER Coordination Pilot Report");
     let _ = writeln!(output);
     let _ = writeln!(output, "- Generated at: `{}`", report.generated_at_ms);
+    let _ = writeln!(
+        output,
+        "- Effective policy: `{}`",
+        format_policy_context(report.policy_context.as_ref())
+    );
     let _ = writeln!(output, "- Journal entries: `{}`", report.history_len);
     let _ = writeln!(output);
 
@@ -243,6 +259,25 @@ pub fn render_coordination_pilot_report_markdown(report: &CoordinationPilotRepor
     output
 }
 
+fn format_policy_context(policy_context: Option<&PolicyContext>) -> String {
+    match policy_context {
+        None => "public".into(),
+        Some(policy_context) => {
+            let capabilities = if policy_context.capabilities.is_empty() {
+                "-".into()
+            } else {
+                policy_context.capabilities.join(", ")
+            };
+            let visibilities = if policy_context.visibilities.is_empty() {
+                "-".into()
+            } else {
+                policy_context.visibilities.join(", ")
+            };
+            format!("capabilities=[{capabilities}] visibilities=[{visibilities}]")
+        }
+    }
+}
+
 fn into_report_rows(rows: Vec<QueryRow>) -> Vec<ReportRow> {
     rows.into_iter()
         .map(|row| ReportRow {
@@ -274,6 +309,17 @@ fn render_row_section(output: &mut String, title: &str, rows: &[ReportRow]) {
         );
     }
     let _ = writeln!(output);
+}
+
+fn run_report_query(
+    service: &mut impl KernelService,
+    request: RunDocumentRequest,
+) -> Result<Vec<QueryRow>, ApiError> {
+    match service.run_document(request) {
+        Ok(response) => Ok(response.query.unwrap_or_default().rows),
+        Err(ApiError::Resolve(ResolveError::UnknownElementId(_))) => Ok(Vec::new()),
+        Err(error) => Err(error),
+    }
 }
 
 fn format_values(values: &[Value]) -> String {
@@ -327,11 +373,11 @@ fn now_millis() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::build_coordination_pilot_report;
+    use super::{build_coordination_pilot_report, build_coordination_pilot_report_with_policy};
     use crate::{
         coordination_pilot_seed_history, AppendRequest, InMemoryKernelService, KernelService,
     };
-    use aether_ast::{EntityId, Value};
+    use aether_ast::{EntityId, PolicyContext, PolicyEnvelope, Value};
 
     #[test]
     fn coordination_pilot_report_captures_expected_answers() {
@@ -401,5 +447,50 @@ mod tests {
                 .unwrap_or(0)
                 > 0
         );
+    }
+
+    #[test]
+    fn coordination_pilot_report_respects_policy_context() {
+        let mut service = InMemoryKernelService::new();
+        let mut datoms = coordination_pilot_seed_history();
+        for datom in &mut datoms {
+            if datom.element.0 >= 6 {
+                datom.policy = Some(PolicyEnvelope {
+                    capability: Some("executor".into()),
+                    visibility: None,
+                });
+            }
+        }
+        service
+            .append(AppendRequest { datoms })
+            .expect("append policy-filtered seed history");
+
+        let public_report = build_coordination_pilot_report_with_policy(&mut service, None)
+            .expect("build public coordination report");
+        assert_eq!(public_report.policy_context, None);
+        assert_eq!(public_report.history_len, 5);
+        assert!(public_report.as_of_authorized.is_empty());
+        assert!(public_report.current_authorized.is_empty());
+        assert!(public_report.accepted_outcomes.is_empty());
+        assert!(public_report.trace.is_none());
+
+        let executor_report = build_coordination_pilot_report_with_policy(
+            &mut service,
+            Some(PolicyContext {
+                capabilities: vec!["executor".into()],
+                visibilities: Vec::new(),
+            }),
+        )
+        .expect("build executor coordination report");
+        assert_eq!(executor_report.history_len, 25);
+        assert_eq!(
+            executor_report.current_authorized[0].values,
+            vec![
+                Value::Entity(EntityId::new(1)),
+                Value::String("worker-b".into()),
+                Value::U64(2),
+            ]
+        );
+        assert!(executor_report.trace.is_some());
     }
 }

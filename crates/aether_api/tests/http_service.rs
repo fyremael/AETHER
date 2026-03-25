@@ -184,7 +184,10 @@ async fn http_service_runs_documents_and_explains_tuples() {
     let tuple_id = current_rows[0].tuple_id.expect("tuple id");
     let explain = client
         .post(format!("{base_url}/v1/explain/tuple"))
-        .json(&ExplainTupleRequest { tuple_id })
+        .json(&ExplainTupleRequest {
+            tuple_id,
+            policy_context: None,
+        })
         .send()
         .await
         .expect("explain request");
@@ -497,6 +500,7 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
         .bearer_auth("pilot-operator-token")
         .json(&ExplainTupleRequest {
             tuple_id: current_rows[0].tuple_id.expect("tuple id"),
+            policy_context: None,
         })
         .send()
         .await
@@ -610,7 +614,10 @@ async fn authenticated_http_service_audits_query_goal_for_find_alias() {
 
 #[tokio::test]
 async fn authenticated_http_service_binds_policy_context_to_tokens() {
-    let options = HttpKernelOptions::new().with_auth(pilot_auth());
+    let audit = TestAuditPath::new("policy-binding-audit");
+    let options = HttpKernelOptions::new()
+        .with_auth(pilot_auth())
+        .with_audit_log_path(audit.path().to_path_buf());
     let (base_url, server) = spawn_server_with_options(InMemoryKernelService::new(), options).await;
     let client = Client::new();
 
@@ -710,6 +717,31 @@ async fn authenticated_http_service_binds_policy_context_to_tokens() {
         reqwest::StatusCode::FORBIDDEN
     );
 
+    let audit_entries = client
+        .get(format!("{base_url}/v1/audit"))
+        .bearer_auth("pilot-operator-token")
+        .send()
+        .await
+        .expect("audit request")
+        .json::<AuditLogResponse>()
+        .await
+        .expect("audit response")
+        .entries;
+    assert!(audit_entries.iter().any(|entry| {
+        entry.path == "/v1/documents/run"
+            && entry.principal == "pilot-operator"
+            && entry.context.policy_decision.as_deref() == Some("token_default")
+            && entry.context.effective_capabilities == vec!["executor".to_string()]
+    }));
+    assert!(audit_entries.iter().any(|entry| {
+        entry.path == "/v1/documents/run"
+            && entry.principal == "query-client"
+            && entry.status == reqwest::StatusCode::FORBIDDEN.as_u16()
+            && entry.context.policy_decision.as_deref() == Some("denied_escalation")
+            && entry.context.requested_capabilities == vec!["executor".to_string()]
+            && entry.context.granted_capabilities.is_empty()
+    }));
+
     stop_server(server).await;
 }
 
@@ -758,7 +790,10 @@ async fn authenticated_http_service_persists_semantic_audit_context_across_resta
             let explain = client
                 .post(format!("{base_url}/v1/explain/tuple"))
                 .bearer_auth("pilot-operator-token")
-                .json(&ExplainTupleRequest { tuple_id })
+                .json(&ExplainTupleRequest {
+                    tuple_id,
+                    policy_context: None,
+                })
                 .send()
                 .await
                 .expect("explain request");

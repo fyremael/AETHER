@@ -83,6 +83,7 @@ async fn soak_authenticated_pilot_service_survives_restarts() {
             .bearer_auth("pilot-operator-token")
             .json(&ExplainTupleRequest {
                 tuple_id: current_rows[0].tuple_id.expect("tuple id"),
+                policy_context: None,
             })
             .send()
             .await
@@ -250,6 +251,7 @@ async fn misuse_paths_are_rejected_cleanly_and_audited() {
         .bearer_auth("pilot-query-token")
         .json(&ExplainTupleRequest {
             tuple_id: TupleId::new(1),
+            policy_context: None,
         })
         .send()
         .await
@@ -275,6 +277,7 @@ async fn misuse_paths_are_rejected_cleanly_and_audited() {
         .bearer_auth("pilot-operator-token")
         .json(&ExplainTupleRequest {
             tuple_id: TupleId::new(valid_tuple_id.0 + 10_000),
+            policy_context: None,
         })
         .send()
         .await

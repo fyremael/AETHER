@@ -72,7 +72,8 @@ impl HttpKernelState {
         F: FnOnce(
             &mut dyn KernelService,
             &AuthenticatedPrincipal,
-        ) -> Result<(T, AuditContext), HttpError>,
+            &mut AuditContext,
+        ) -> Result<T, HttpError>,
     {
         let principal = match self.authorize(headers, required_scope) {
             Ok(principal) => principal,
@@ -92,16 +93,13 @@ impl HttpKernelState {
 
         let result = {
             let mut service = self.service()?;
-            operation(service.as_mut(), &principal)
+            operation(service.as_mut(), &principal, &mut context)
         };
 
         let status = match &result {
             Ok(_) => StatusCode::OK,
             Err(error) => error.status_code(),
         };
-        if let Ok((_, response_context)) = &result {
-            context = response_context.clone();
-        }
         self.audit.record(AuditEntry::for_request(
             method,
             path,
@@ -111,7 +109,7 @@ impl HttpKernelState {
             context,
         ));
 
-        result.map(|(response, _)| response)
+        result
     }
 
     fn audit_entries(&self, headers: &HeaderMap) -> Result<AuditLogResponse, HttpError> {
@@ -263,6 +261,13 @@ pub struct AuditContext {
     pub derived_tuple_count: Option<usize>,
     pub trace_tuple_count: Option<usize>,
     pub last_element: Option<u64>,
+    pub requested_capabilities: Vec<String>,
+    pub requested_visibilities: Vec<String>,
+    pub granted_capabilities: Vec<String>,
+    pub granted_visibilities: Vec<String>,
+    pub effective_capabilities: Vec<String>,
+    pub effective_visibilities: Vec<String>,
+    pub policy_decision: Option<String>,
 }
 
 impl AuditEntry {
@@ -539,6 +544,68 @@ fn bound_policy_context(
     }
 }
 
+fn write_policy_context_fields(
+    target_capabilities: &mut Vec<String>,
+    target_visibilities: &mut Vec<String>,
+    policy_context: Option<&PolicyContext>,
+) {
+    target_capabilities.clear();
+    target_visibilities.clear();
+    if let Some(policy_context) = policy_context {
+        target_capabilities.extend(policy_context.capabilities.iter().cloned());
+        target_visibilities.extend(policy_context.visibilities.iter().cloned());
+    }
+}
+
+fn apply_policy_binding(
+    principal: &AuthenticatedPrincipal,
+    requested: Option<PolicyContext>,
+    context: &mut AuditContext,
+) -> Result<Option<PolicyContext>, HttpError> {
+    let requested = normalize_policy_context(requested);
+    write_policy_context_fields(
+        &mut context.requested_capabilities,
+        &mut context.requested_visibilities,
+        requested.as_ref(),
+    );
+    write_policy_context_fields(
+        &mut context.granted_capabilities,
+        &mut context.granted_visibilities,
+        principal.policy_context.as_ref(),
+    );
+
+    match bound_policy_context(principal, requested.clone()) {
+        Ok(effective) => {
+            write_policy_context_fields(
+                &mut context.effective_capabilities,
+                &mut context.effective_visibilities,
+                effective.as_ref(),
+            );
+            context.policy_decision = Some(
+                match (
+                    normalize_policy_context(principal.policy_context.clone()),
+                    requested,
+                    effective.clone(),
+                ) {
+                    (None, None, None) => "public".into(),
+                    (None, Some(_), Some(_)) => "request_supplied".into(),
+                    (Some(_), None, Some(_)) => "token_default".into(),
+                    (Some(granted), Some(requested), Some(_)) if requested == granted => {
+                        "request_exact".into()
+                    }
+                    (Some(_), Some(_), Some(_)) => "request_narrowed".into(),
+                    _ => "public".into(),
+                },
+            );
+            Ok(effective)
+        }
+        Err(error) => {
+            context.policy_decision = Some("denied_escalation".into());
+            Err(error)
+        }
+    }
+}
+
 #[derive(Debug)]
 enum HttpError {
     Api(ApiError),
@@ -630,12 +697,14 @@ async fn history(
         "/v1/history",
         AuthScope::Ops,
         request_context.clone(),
-        |service, _principal| {
-            let response = service.history(HistoryRequest).map_err(HttpError::Api)?;
-            let mut context = request_context;
+        |service, principal, context| {
+            let policy_context = apply_policy_binding(principal, None, context)?;
+            let response = service
+                .history(HistoryRequest { policy_context })
+                .map_err(HttpError::Api)?;
             context.datom_count = Some(response.datoms.len());
             context.last_element = response.datoms.last().map(|datom| datom.element.0);
-            Ok((response, context))
+            Ok(response)
         },
     )?;
     Ok(Json(response))
@@ -660,9 +729,9 @@ async fn append(
         "/v1/append",
         AuthScope::Append,
         request_context.clone(),
-        |service, _principal| {
+        |service, _principal, _context| {
             let response = service.append(request).map_err(HttpError::Api)?;
-            Ok((response, request_context))
+            Ok(response)
         },
     )?;
     Ok(Json(response))
@@ -684,14 +753,14 @@ async fn current_state(
         "/v1/state/current",
         AuthScope::Query,
         request_context.clone(),
-        |service, principal| {
+        |service, principal, context| {
             let mut request = request;
-            request.policy_context = bound_policy_context(principal, request.policy_context)?;
+            request.policy_context =
+                apply_policy_binding(principal, request.policy_context, context)?;
             let response = service.current_state(request).map_err(HttpError::Api)?;
-            let mut context = request_context;
             context.entity_count = Some(response.state.entities.len());
             context.last_element = response.state.as_of.map(|element| element.0);
-            Ok((response, context))
+            Ok(response)
         },
     )?;
     Ok(Json(response))
@@ -714,14 +783,14 @@ async fn as_of(
         "/v1/state/as-of",
         AuthScope::Query,
         request_context.clone(),
-        |service, principal| {
+        |service, principal, context| {
             let mut request = request;
-            request.policy_context = bound_policy_context(principal, request.policy_context)?;
+            request.policy_context =
+                apply_policy_binding(principal, request.policy_context, context)?;
             let response = service.as_of(request).map_err(HttpError::Api)?;
-            let mut context = request_context;
             context.entity_count = Some(response.state.entities.len());
             context.last_element = response.state.as_of.map(|element| element.0);
-            Ok((response, context))
+            Ok(response)
         },
     )?;
     Ok(Json(response))
@@ -739,9 +808,9 @@ async fn parse_document(
         "/v1/documents/parse",
         AuthScope::Query,
         request_context.clone(),
-        |service, _principal| {
+        |service, _principal, _context| {
             let response = service.parse_document(request).map_err(HttpError::Api)?;
-            Ok((response, request_context))
+            Ok(response)
         },
     )?;
     Ok(Json(response))
@@ -759,16 +828,16 @@ async fn run_document(
         "/v1/documents/run",
         AuthScope::Query,
         request_context.clone(),
-        |service, principal| {
+        |service, principal, context| {
             let mut request = request;
-            request.policy_context = bound_policy_context(principal, request.policy_context)?;
+            request.policy_context =
+                apply_policy_binding(principal, request.policy_context, context)?;
             let response = service.run_document(request).map_err(HttpError::Api)?;
-            let mut context = request_context;
             context.entity_count = Some(response.state.entities.len());
             context.last_element = response.state.as_of.map(|element| element.0);
             context.derived_tuple_count = Some(response.derived.tuples.len());
             context.row_count = response.query.as_ref().map(|query| query.rows.len());
-            Ok((response, context))
+            Ok(response)
         },
     )?;
     Ok(Json(response))
@@ -789,11 +858,13 @@ async fn explain_tuple(
         "/v1/explain/tuple",
         AuthScope::Explain,
         request_context.clone(),
-        |service, _principal| {
+        |service, principal, context| {
+            let mut request = request;
+            request.policy_context =
+                apply_policy_binding(principal, request.policy_context, context)?;
             let response = service.explain_tuple(request).map_err(HttpError::Api)?;
-            let mut context = request_context;
             context.trace_tuple_count = Some(response.trace.tuples.len());
-            Ok((response, context))
+            Ok(response)
         },
     )?;
     Ok(Json(response))
@@ -815,11 +886,11 @@ async fn register_artifact_reference(
         "/v1/sidecars/artifacts/register",
         AuthScope::Append,
         request_context.clone(),
-        |service, _principal| {
+        |service, _principal, _context| {
             let response = service
                 .register_artifact_reference(request)
                 .map_err(HttpError::Api)?;
-            Ok((response, request_context))
+            Ok(response)
         },
     )?;
     Ok(Json(response))
@@ -840,13 +911,14 @@ async fn get_artifact_reference(
         "/v1/sidecars/artifacts/get",
         AuthScope::Query,
         request_context.clone(),
-        |service, principal| {
+        |service, principal, context| {
             let mut request = request;
-            request.policy_context = bound_policy_context(principal, request.policy_context)?;
+            request.policy_context =
+                apply_policy_binding(principal, request.policy_context, context)?;
             let response = service
                 .get_artifact_reference(request)
                 .map_err(HttpError::Api)?;
-            Ok((response, request_context))
+            Ok(response)
         },
     )?;
     Ok(Json(response))
@@ -868,11 +940,11 @@ async fn register_vector_record(
         "/v1/sidecars/vectors/register",
         AuthScope::Append,
         request_context.clone(),
-        |service, _principal| {
+        |service, _principal, _context| {
             let response = service
                 .register_vector_record(request)
                 .map_err(HttpError::Api)?;
-            Ok((response, request_context))
+            Ok(response)
         },
     )?;
     Ok(Json(response))
@@ -894,13 +966,13 @@ async fn search_vectors(
         "/v1/sidecars/vectors/search",
         AuthScope::Query,
         request_context.clone(),
-        |service, principal| {
+        |service, principal, context| {
             let mut request = request;
-            request.policy_context = bound_policy_context(principal, request.policy_context)?;
+            request.policy_context =
+                apply_policy_binding(principal, request.policy_context, context)?;
             let response = service.search_vectors(request).map_err(HttpError::Api)?;
-            let mut context = request_context;
             context.row_count = Some(response.matches.len());
-            Ok((response, context))
+            Ok(response)
         },
     )?;
     Ok(Json(response))

@@ -179,6 +179,7 @@ fn capture_contract(service: &mut impl KernelService) -> PilotContractSnapshot {
     let trace_tuple_count = service
         .explain_tuple(ExplainTupleRequest {
             tuple_id: current_authorized[0].tuple_id.expect("authorized tuple id"),
+            policy_context: None,
         })
         .expect("explain current authorization")
         .trace

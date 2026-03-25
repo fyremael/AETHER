@@ -46,7 +46,8 @@ type RunDocumentRequest struct {
 }
 
 type ExplainTupleRequest struct {
-	TupleID uint64 `json:"tuple_id"`
+	TupleID       uint64         `json:"tuple_id"`
+	PolicyContext *PolicyContext `json:"policy_context,omitempty"`
 }
 
 func New(baseURL string, token string) *Client {
@@ -86,6 +87,17 @@ func (c *Client) RunDocument(ctx context.Context, request RunDocumentRequest) (m
 func (c *Client) ExplainTuple(ctx context.Context, tupleID uint64) (map[string]any, error) {
 	var response map[string]any
 	if err := c.doJSON(ctx, http.MethodPost, "/v1/explain/tuple", ExplainTupleRequest{TupleID: tupleID}, &response); err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
+func (c *Client) ExplainTupleWithPolicy(ctx context.Context, tupleID uint64, policy *PolicyContext) (map[string]any, error) {
+	var response map[string]any
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/explain/tuple", ExplainTupleRequest{
+		TupleID:       tupleID,
+		PolicyContext: policy,
+	}, &response); err != nil {
 		return nil, err
 	}
 	return response, nil

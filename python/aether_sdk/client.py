@@ -123,8 +123,16 @@ class AetherClient:
             {"query_name": query_name},
         )
 
-    def explain_tuple(self, tuple_id: int) -> dict[str, Any]:
-        return self._request_json("POST", "/v1/explain/tuple", {"tuple_id": tuple_id})
+    def explain_tuple(
+        self,
+        tuple_id: int,
+        *,
+        policy_context: PolicyContext | dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"tuple_id": tuple_id}
+        if policy_context is not None:
+            payload["policy_context"] = policy_context
+        return self._request_json("POST", "/v1/explain/tuple", payload)
 
     def register_artifact_reference(
         self,

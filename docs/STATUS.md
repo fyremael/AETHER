@@ -17,6 +17,7 @@ Completed:
 - `Current` and `AsOf` query execution implemented
 - policy annotations turned into executable behavior through explicit policy-context filtering on state resolution, document execution, and sidecar reads/searches
 - authenticated HTTP tokens now bind maximum semantic policy visibility, with request policy contexts only allowed to narrow that bound
+- explain, visible history, audit entries, and operator reports now all follow the same effective-policy cut instead of widening past the caller's semantic visibility
 - semi-naive delta execution implemented for recursive SCC evaluation
 - executable stratified negation implemented for stratified programs
 - bounded aggregation implemented for non-recursive grouped head-term `count`, `sum`, `min`, and `max` rules, including multiple aggregate terms per head; this now covers the v1 bounded-aggregation requirement

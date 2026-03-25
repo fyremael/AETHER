@@ -21,7 +21,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  - service-backed explanation");
     println!();
     println!("Journal:");
-    for datom in service.history(HistoryRequest)?.datoms {
+    for datom in service
+        .history(HistoryRequest {
+            policy_context: None,
+        })?
+        .datoms
+    {
         println!("  - {}", describe_datom(&datom));
     }
 
@@ -115,7 +120,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(tuple_id) = authorized_rows.first().and_then(|row| row.tuple_id) {
         let trace = service
-            .explain_tuple(ExplainTupleRequest { tuple_id })?
+            .explain_tuple(ExplainTupleRequest {
+                tuple_id,
+                policy_context: None,
+            })?
             .trace;
         print_trace_summary(&trace);
     }

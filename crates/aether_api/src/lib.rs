@@ -30,8 +30,9 @@ pub use pilot::{
     COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
 pub use report::{
-    build_coordination_pilot_report, render_coordination_pilot_report_markdown,
-    CoordinationPilotReport, ReportRow, TraceSummary, TraceTupleSummary,
+    build_coordination_pilot_report, build_coordination_pilot_report_with_policy,
+    render_coordination_pilot_report_markdown, CoordinationPilotReport, ReportRow, TraceSummary,
+    TraceTupleSummary,
 };
 pub use sidecar::{
     ArtifactReference, GetArtifactReferenceRequest, GetArtifactReferenceResponse,
@@ -92,7 +93,7 @@ pub type SqliteKernelService = KernelServiceCore<SqliteJournal, SqliteSidecarFed
 pub struct KernelServiceCore<J: Journal, S: SidecarFederation = InMemorySidecarFederation> {
     journal: J,
     sidecars: S,
-    last_derived: Option<DerivedSet>,
+    last_derived: Option<CachedDerivedSet>,
 }
 
 impl KernelServiceCore<InMemoryJournal, InMemorySidecarFederation> {
@@ -139,8 +140,15 @@ impl<J: Journal, S: SidecarFederation> KernelServiceCore<J, S> {
         Ok(filter_datoms(datoms, policy_context))
     }
 
-    fn cache_derived(&mut self, derived: DerivedSet) -> DerivedSet {
-        self.last_derived = Some(derived.clone());
+    fn cache_derived(
+        &mut self,
+        derived: DerivedSet,
+        policy_context: Option<PolicyContext>,
+    ) -> DerivedSet {
+        self.last_derived = Some(CachedDerivedSet {
+            derived: derived.clone(),
+            policy_context: normalize_policy_context(policy_context),
+        });
         derived
     }
 
@@ -181,6 +189,13 @@ fn filter_datoms(datoms: Vec<Datom>, policy_context: Option<&PolicyContext>) -> 
         .into_iter()
         .filter(|datom| policy_allows(policy_context, datom.policy.as_ref()))
         .collect()
+}
+
+fn normalize_policy_context(policy_context: Option<PolicyContext>) -> Option<PolicyContext> {
+    match policy_context {
+        Some(policy_context) if policy_context.is_empty() => None,
+        other => other,
+    }
 }
 
 fn filter_extensional_facts(
@@ -228,6 +243,12 @@ struct DocumentEvaluation {
     derived: DerivedSet,
 }
 
+#[derive(Clone, Debug)]
+struct CachedDerivedSet {
+    derived: DerivedSet,
+    policy_context: Option<PolicyContext>,
+}
+
 impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S> {
     fn append(&mut self, request: AppendRequest) -> Result<AppendResponse, ApiError> {
         self.journal.append(&request.datoms)?;
@@ -236,9 +257,9 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         })
     }
 
-    fn history(&self, _request: HistoryRequest) -> Result<HistoryResponse, ApiError> {
+    fn history(&self, request: HistoryRequest) -> Result<HistoryResponse, ApiError> {
         Ok(HistoryResponse {
-            datoms: self.journal.history()?,
+            datoms: filter_datoms(self.journal.history()?, request.policy_context.as_ref()),
         })
     }
 
@@ -275,7 +296,7 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         let program = filter_compiled_program(&request.program, request.policy_context.as_ref());
         let derived = SemiNaiveRuntime.evaluate(&request.state, &program)?;
         Ok(EvaluateProgramResponse {
-            derived: self.cache_derived(derived),
+            derived: self.cache_derived(derived, request.policy_context),
         })
     }
 
@@ -283,12 +304,18 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         &self,
         request: ExplainTupleRequest,
     ) -> Result<ExplainTupleResponse, ApiError> {
-        let derived = self
+        let cached = self
             .last_derived
             .as_ref()
             .ok_or_else(|| ApiError::Validation("no derived tuples are cached".into()))?;
-        let trace =
-            InMemoryExplainer::from_derived_set(derived).explain_tuple(&request.tuple_id)?;
+        let requested_policy = normalize_policy_context(request.policy_context);
+        if requested_policy != cached.policy_context {
+            return Err(ApiError::Validation(
+                "explain request policy does not match cached derived visibility".into(),
+            ));
+        }
+        let trace = InMemoryExplainer::from_derived_set(&cached.derived)
+            .explain_tuple(&request.tuple_id)?;
         Ok(ExplainTupleResponse { trace })
     }
 
@@ -397,7 +424,7 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
                 })
             })
             .collect::<Result<Vec<_>, ApiError>>()?;
-        let derived = self.cache_derived(primary_derived.clone());
+        let derived = self.cache_derived(primary_derived.clone(), request.policy_context);
 
         Ok(RunDocumentResponse {
             state: primary_state,
@@ -454,7 +481,10 @@ pub struct AppendResponse {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct HistoryRequest;
+pub struct HistoryRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_context: Option<PolicyContext>,
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct HistoryResponse {
@@ -515,6 +545,8 @@ pub struct EvaluateProgramResponse {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ExplainTupleRequest {
     pub tuple_id: TupleId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_context: Option<PolicyContext>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -656,7 +688,7 @@ pub enum ApiError {
 #[cfg(test)]
 mod tests {
     use super::{
-        coordination_pilot_dsl, coordination_pilot_seed_history, AppendRequest,
+        coordination_pilot_dsl, coordination_pilot_seed_history, ApiError, AppendRequest,
         CurrentStateRequest, ExplainArtifact, ExplainTupleRequest, InMemoryKernelService,
         KernelService, ParseDocumentRequest, RunDocumentRequest,
         COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
@@ -758,6 +790,7 @@ mod tests {
                 tuple_id: authorized_rows[0]
                     .tuple_id
                     .expect("execution_authorized tuple id"),
+                policy_context: None,
             })
             .expect("explain authorization tuple")
             .trace;
@@ -1001,11 +1034,14 @@ query current_cut {
                 }),
             })
             .expect("run executor policy document");
+        let executor_rows = executor_result
+            .query
+            .as_ref()
+            .expect("executor query result")
+            .rows
+            .clone();
         assert_eq!(
-            executor_result
-                .query
-                .expect("executor query result")
-                .rows
+            executor_rows
                 .into_iter()
                 .map(|row| row.values)
                 .collect::<Vec<_>>(),
@@ -1015,6 +1051,38 @@ query current_cut {
                 vec![Value::Entity(EntityId::new(3))],
             ]
         );
+
+        let protected_tuple = executor_result
+            .query
+            .as_ref()
+            .expect("executor query result")
+            .rows
+            .iter()
+            .find(|row| row.values == vec![Value::Entity(EntityId::new(3))])
+            .and_then(|row| row.tuple_id)
+            .expect("protected tuple id");
+        let mismatch = service
+            .explain_tuple(ExplainTupleRequest {
+                tuple_id: protected_tuple,
+                policy_context: None,
+            })
+            .expect_err("explain should reject mismatched policy context");
+        assert!(matches!(
+            mismatch,
+            ApiError::Validation(message)
+                if message == "explain request policy does not match cached derived visibility"
+        ));
+        let executor_trace = service
+            .explain_tuple(ExplainTupleRequest {
+                tuple_id: protected_tuple,
+                policy_context: Some(PolicyContext {
+                    capabilities: vec!["executor".into()],
+                    visibilities: Vec::new(),
+                }),
+            })
+            .expect("explain protected tuple with matching policy")
+            .trace;
+        assert!(!executor_trace.tuples.is_empty());
     }
 
     fn transitive_document_dsl() -> String {

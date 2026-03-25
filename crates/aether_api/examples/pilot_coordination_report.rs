@@ -17,7 +17,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let report_dir = PathBuf::from("artifacts/pilot/reports");
     let mut service = SqliteKernelService::open(&database_path)?;
 
-    let seeded = if service.history(HistoryRequest)?.datoms.is_empty() {
+    let seeded = if service
+        .history(HistoryRequest {
+            policy_context: None,
+        })?
+        .datoms
+        .is_empty()
+    {
         service.append(AppendRequest {
             datoms: coordination_pilot_seed_history(),
         })?;
