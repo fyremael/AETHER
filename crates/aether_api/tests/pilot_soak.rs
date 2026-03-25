@@ -166,14 +166,21 @@ async fn soak_authenticated_pilot_service_survives_restarts() {
     assert!(run_entries.len() >= cycles + cycles / 2);
     assert!(run_entries
         .iter()
-        .all(|entry| entry.context.row_count == Some(1)));
+        .all(|entry| matches!(entry.context.row_count, Some(0 | 1))));
     assert!(run_entries.iter().any(|entry| {
         entry.context.temporal_view.as_deref() == Some("current")
             && entry.context.query_goal.as_deref() == Some("execution_authorized(t, worker, epoch)")
+            && entry.context.row_count == Some(1)
     }));
     assert!(run_entries.iter().any(|entry| {
         entry.context.temporal_view.as_deref() == Some("as_of(e5)")
             && entry.context.requested_element == Some(5)
+            && entry.context.row_count == Some(0)
+    }));
+    assert!(run_entries.iter().any(|entry| {
+        entry.context.temporal_view.as_deref() == Some("as_of(e9)")
+            && entry.context.requested_element == Some(9)
+            && entry.context.row_count == Some(1)
     }));
     assert!(explain_entries
         .iter()

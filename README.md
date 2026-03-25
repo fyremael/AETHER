@@ -141,6 +141,7 @@ Implemented today:
 - bearer-token authentication, endpoint-scope enforcement, and token-bound semantic policy ceilings on the pilot HTTP path
 - explicit policy-context filtering for datoms, DSL-authored extensional facts, and sidecar reads/searches, with request policy now allowed to narrow token-granted visibility but not widen it
 - policy-matched explanation, visible-history filtering, and policy-aware coordination reports on the service/operator path
+- a config-backed pilot service binary with secret-file/env token resolution and packaged single-node deployment bundles
 - auditable pilot request logging with semantic cut, query, tuple, and count context plus persisted JSONL output
 - operator-grade coordination pilot report generation in markdown and JSON
 - a release-mode performance report, Criterion benchmark suite, and ignored stress workloads for early regression tracking
@@ -148,6 +149,7 @@ Implemented today:
 - machine-readable performance baseline capture and point-in-time drift reporting for the pilot path
 - a one-command pilot launch validation pack with soak, stress, and artifact capture
 - a journal-anchored artifact/vector sidecar federation boundary with external artifact references, SQLite-backed durability for the pilot service, HTTP endpoints, and provenance-bearing semantic fact projection
+- a required mainline CI launch/drift gate plus a packaged pilot-service artifact build on Windows
 - a scheduled/manual GitHub Actions pilot-validation workflow that runs the launch pack and uploads report/drift artifacts
 - a first real Go operator shell plus typed Go client over the HTTP API
 - a broader typed Python SDK surface with fixture builders, policy-aware helpers, and live integration coverage against a Rust server
@@ -245,6 +247,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test
 python -m unittest discover python/tests -v
 (cd go && go test ./...)
+cargo build -p aether_api --bin aether_pilot_service --release
 ```
 
 WSL verification uses the same workspace and the same commands via the Linux toolchain.
@@ -261,6 +264,12 @@ cargo test -p aether_api --test performance_stress --release -- --ignored --noca
 ```
 
 For reproducible launch review on a fresh machine, the repo also carries a tracked accepted baseline at `fixtures/performance/accepted-baseline.windows-x86_64.json`.
+
+For packaged pilot deployment review on Windows:
+
+```text
+double-click scripts/build-pilot-package.cmd
+```
 
 The workspace is currently verified under:
 
@@ -347,6 +356,7 @@ That clarity is part of the implementation.
 - `docs/ARCHITECTURE.md` is the current implementation architecture guide.
 - `docs/DEVELOPER_WORKFLOW.md` explains the engineering loop and definition of done.
 - `docs/OPERATIONS.md` explains the operator path, demo catalog, and report workflow.
+- `docs/PILOT_DEPLOYMENT.md` explains the hardened packaged deployment path for the pilot service.
 - `docs/PERFORMANCE.md` explains the benchmark harness, stress tests, and performance-report path.
 - `docs/PILOT_LAUNCH.md` defines the current launch-readiness contract and validation pack for the design-partner pilot.
 - `docs/GLOSSARY.md` defines canonical project vocabulary.

@@ -215,6 +215,7 @@ struct MeasurementPlan {
     unit_label: &'static str,
     notes: Vec<String>,
     samples: usize,
+    iterations_per_sample: usize,
 }
 
 pub fn build_append_fixture(count: usize) -> AppendFixture {
@@ -489,6 +490,7 @@ fn benchmark_append_impl(
             unit_label: "datoms/s",
             notes,
             samples,
+            iterations_per_sample: 1,
         },
         observer,
         move || {
@@ -526,6 +528,7 @@ fn benchmark_resolve_current_impl(
             unit_label: "entities/s",
             notes,
             samples,
+            iterations_per_sample: 1,
         },
         observer,
         move || {
@@ -564,6 +567,7 @@ fn benchmark_resolve_as_of_impl(
             unit_label: "entities/s",
             notes,
             samples,
+            iterations_per_sample: 1,
         },
         observer,
         move || {
@@ -588,11 +592,14 @@ fn benchmark_compile_scc_impl(
     observer: &mut Option<&mut dyn FnMut(PerfEvent)>,
 ) -> Result<PerfMeasurement, ApiError> {
     let fixture = build_compile_fixture(scc_width);
-    let notes = vec![format!(
-        "{} predicates and {} rules with one large recursive SCC",
-        format_count(fixture.program.predicates.len()),
-        format_count(fixture.program.rules.len())
-    )];
+    let notes = vec![
+        format!(
+            "{} predicates and {} rules with one large recursive SCC",
+            format_count(fixture.program.predicates.len()),
+            format_count(fixture.program.rules.len())
+        ),
+        "128 compiler passes per sample to reduce timer jitter on this microbenchmark".into(),
+    ];
 
     benchmark_measurement(
         MeasurementPlan {
@@ -602,6 +609,7 @@ fn benchmark_compile_scc_impl(
             unit_label: "predicates/s",
             notes,
             samples,
+            iterations_per_sample: 128,
         },
         observer,
         move || {
@@ -639,6 +647,7 @@ fn benchmark_runtime_closure_impl(
             unit_label: "tuples/s",
             notes,
             samples,
+            iterations_per_sample: 1,
         },
         observer,
         move || {
@@ -690,6 +699,7 @@ fn benchmark_explain_trace_impl(
             unit_label: "trace-tuples/s",
             notes,
             samples,
+            iterations_per_sample: 1,
         },
         observer,
         move || {
@@ -731,6 +741,7 @@ fn benchmark_service_coordination_impl(
             unit_label: "rows/s",
             notes,
             samples,
+            iterations_per_sample: 1,
         },
         observer,
         move || fixture.service.run_document(fixture.request.clone()),
@@ -1115,6 +1126,8 @@ where
     F: FnMut() -> Result<T, ApiError>,
 {
     let samples = plan.samples.max(1);
+    let iterations_per_sample = plan.iterations_per_sample.max(1);
+    let effective_units = plan.units.saturating_mul(iterations_per_sample);
     let mut durations = Vec::with_capacity(samples);
     emit_event(
         observer,
@@ -1122,7 +1135,7 @@ where
             workload: plan.workload,
             scale: plan.scale.clone(),
             total_samples: samples,
-            units: plan.units,
+            units: effective_units,
             unit_label: plan.unit_label,
             notes: plan.notes.clone(),
         },
@@ -1133,8 +1146,10 @@ where
     let mut max = Duration::default();
     for _ in 0..samples {
         let started = Instant::now();
-        let result = operation()?;
-        black_box(result);
+        for _ in 0..iterations_per_sample {
+            let result = operation()?;
+            black_box(result);
+        }
         let elapsed = started.elapsed();
         durations.push(elapsed);
         total += elapsed;
@@ -1148,7 +1163,7 @@ where
         let sample_throughput = if elapsed.is_zero() {
             0.0
         } else {
-            plan.units as f64 / elapsed.as_secs_f64()
+            effective_units as f64 / elapsed.as_secs_f64()
         };
         emit_event(
             observer,
@@ -1170,13 +1185,13 @@ where
     let throughput_per_second = if mean.is_zero() {
         0.0
     } else {
-        plan.units as f64 / mean.as_secs_f64()
+        effective_units as f64 / mean.as_secs_f64()
     };
 
     let measurement = PerfMeasurement {
         workload: plan.workload.into(),
         scale: plan.scale,
-        units: plan.units,
+        units: effective_units,
         unit_label: plan.unit_label.into(),
         latency: LatencyStats {
             samples,

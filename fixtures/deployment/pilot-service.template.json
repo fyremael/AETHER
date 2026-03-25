@@ -1,0 +1,25 @@
+{
+  "bind_addr": "127.0.0.1:3000",
+  "database_path": "../data/coordination.sqlite",
+  "audit_log_path": "../logs/audit.jsonl",
+  "auth": {
+    "tokens": [
+      {
+        "principal": "pilot-operator",
+        "scopes": [
+          "append",
+          "query",
+          "explain",
+          "ops"
+        ],
+        "policy_context": {
+          "capabilities": [
+            "executor"
+          ],
+          "visibilities": []
+        },
+        "token_file": "pilot-operator.token"
+      }
+    ]
+  }
+}

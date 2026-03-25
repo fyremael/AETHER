@@ -11,8 +11,8 @@
 - HTTP authorization still uses coarse endpoint scopes, but tokens now also bind maximum semantic policy visibility for history, state, documents, explanation, sidecar access, and reports. The remaining gap is finer-grained policy governance, not the absence of token-bound semantic policy.
 - Audit entries now capture effective policy decisions plus requested, granted, and effective semantic visibility, but they still do not capture full operator intent or semantic diffs between cuts.
 - Operator reports are now policy-aware fixed-format incident summaries in markdown and JSON, but they are still not interactive investigation tools.
-- The performance suite now supports local baseline capture, drift comparison, and stress fixtures, but it does not yet maintain historical benchmark trends or CI-enforced drift budgets.
-- The pilot launch validation pack now has a scheduled/manual GitHub Actions workflow, but it is not yet a required gate on every mainline change.
+- The pilot service now has a packaged deployment path with config-backed startup and secret-file/env token resolution, but it is still a single-node bundle rather than a fully managed deployment story with rotation services, revocation, or external secret-manager integration.
+- The performance suite now supports local baseline capture, drift comparison, stress fixtures, and a required CI launch/drift gate, but it does not yet maintain historical benchmark trends beyond uploaded workflow artifacts.
 - Memory figures in the performance report are structural lower-bound estimates rather than allocator-exact telemetry.
 - Durable storage is currently limited to a local SQLite journal; there is no snapshotting, replication, compaction, or backup story yet.
 - The Go shell and Python SDK are now real, but both remain early boundary clients rather than mature ecosystem surfaces with richer async/notebook/admin layers.

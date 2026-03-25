@@ -102,6 +102,7 @@ It is deliberately modest. Today it provides:
 - authenticated tokens that bind endpoint scopes and maximum semantic policy visibility
 - policy-aware explanation, visible-history replay, semantic audit context, and operator report generation that all stay inside the caller's effective policy cut
 - artifact and vector sidecar federation for external artifact references, vector-match projection, and durable sidecar replay on the SQLite-backed path, with visibility anchored to real journal cuts
+- a config-backed pilot service binary and packaged single-node deployment bundle with secret-file or env-backed token resolution
 
 It is responsible for answering the question: “How does an external caller talk to the kernel without re-implementing its semantics?”
 
@@ -167,7 +168,7 @@ The current implementation line is intentionally clear:
 - the DSL is the public semantic language
 - Go and Python remain boundary layers, not semantic authorities
 - journal storage is in-memory or SQLite-backed
-- the kernel service is in-memory or SQLite-backed, with a minimal authenticated HTTP path
+- the kernel service is in-memory or SQLite-backed, with a minimal authenticated HTTP path plus a hardened packaged pilot-service startup path
 - sidecar federation is implemented at the API boundary and durable on the SQLite-backed path, with registration and `AsOf` semantics subordinated to the kernel journal
 
 This is not an omission of ambition. It is sequencing. The kernel is being made semantically credible before it is made infrastructurally broad.
@@ -185,6 +186,7 @@ This is not an omission of ambition. It is sequencing. The kernel is being made 
 - policy-context-aware visibility filtering across datoms, DSL-authored facts, and sidecar reads/searches
 - token-bound semantic policy ceilings on the authenticated HTTP path
 - artifact and vector sidecar federation with provenance-bearing semantic fact projection, journal-tail-anchored registration, and SQLite-backed replay on the durable pilot path
+- packaged pilot deployment and CI-enforced launch/drift gating around the single-node service path
 - a first real Go operator shell plus typed Go client over the stable boundary
 - a broader typed Python SDK surface over the stable boundary
 - operator-facing demonstrations

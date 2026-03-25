@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use thiserror::Error;
 
+pub mod deployment;
 pub mod http;
 #[doc(hidden)]
 pub mod perf;
@@ -21,6 +22,10 @@ pub mod pilot;
 pub mod report;
 pub mod sidecar;
 
+pub use deployment::{
+    default_audit_log_path, serve_pilot_http_service, DeploymentError, PilotAuthConfig,
+    PilotServiceConfig, PilotTokenConfig, ResolvedPilotServiceConfig, ResolvedPilotTokenSummary,
+};
 pub use http::{
     http_router, http_router_with_options, AuditContext, AuditEntry, AuditLogResponse, AuthScope,
     HealthResponse, HttpAccessToken, HttpAuthConfig, HttpKernelOptions, HttpKernelState,

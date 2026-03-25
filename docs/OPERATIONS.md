@@ -48,13 +48,19 @@ If you need the full launch candidate validation pack for the current design-par
 double-click scripts/run-pilot-launch-validation.cmd
 ```
 
+If you need a packaged pilot service bundle for deployment review or handoff, run:
+
+```text
+double-click scripts/build-pilot-package.cmd
+```
+
 If you need the current durable pilot service rather than a demo, run:
 
 ```bash
-cargo run -p aether_api --example pilot_http_kernel_service --release
+cargo run -p aether_api --bin aether_pilot_service --release -- --config <path-to-config>
 ```
 
-That pilot service now starts with bearer-token auth enabled. By default it prints the local pilot token at startup and writes audit events beside the SQLite database as JSONL.
+That hardened pilot service now starts only from an explicit deployment config and uses a secret-backed auth token source instead of a baked-in default token. The packaged deployment path keeps the bearer token in a config-relative secret file by default and writes audit events beside the SQLite database as JSONL.
 
 Those audit entries now carry semantic context, not just endpoint metadata. For the current pilot path that includes the temporal cut, the query goal, tuple IDs for explain requests, and result-count summaries where they exist.
 
@@ -192,7 +198,10 @@ Each run produces:
 
 The launch transcript also records which accepted baseline was used: explicit override, local artifact, or tracked fixture.
 
-The same launch pack now also runs in GitHub Actions through the dedicated pilot-validation workflow, which uploads the generated report, drift, and launch transcript artifacts for review.
+The same launch pack now runs in two GitHub Actions paths:
+
+- the required `pilot-launch-gate` job in the main `CI` workflow
+- the dedicated scheduled/manual `pilot-validation` workflow, which uploads the generated report, drift, and launch transcript artifacts for review
 
 For the full engineering-facing performance suite, also run:
 

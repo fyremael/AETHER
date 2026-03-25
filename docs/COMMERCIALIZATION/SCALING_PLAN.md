@@ -132,6 +132,12 @@ single-node product surface.”
 - restart time and replay time are measured and tracked for larger fixtures
 - operator reports are strong enough to support real incident review
 
+The first three items in scope are now complete on the current pilot path:
+
+- packaged Windows pilot bundle
+- config-backed secret-file/env token handling
+- required launch/drift gate in mainline CI
+
 ## Phase 2: Production-Credible Service Plane
 
 ### Objective
@@ -256,7 +262,6 @@ The next maturity step is to institutionalize that evidence.
 
 ### Immediate improvements
 
-- make drift a required release or pilot gate
 - retain historical trend data instead of only the latest accepted baseline
 - add restart-time and replay-time benchmarks
 - add service-boundary benchmarks distinct from in-process kernel benchmarks

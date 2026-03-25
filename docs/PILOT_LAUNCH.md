@@ -32,7 +32,10 @@ The pilot is launch-ready when all of these are true:
 
 The repository now contains all of those gates for the current pilot.
 
-The repo also now contains a dedicated GitHub Actions workflow, `pilot-validation.yml`, that runs this same validation pack on Windows on a schedule or by manual dispatch and uploads the resulting artifacts.
+The repo now contains two GitHub Actions paths for this same pack:
+
+- `ci.yml`, where `pilot-launch-gate` makes the launch pack and drift check a required mainline gate
+- `pilot-validation.yml`, which keeps the same validation pack available on a schedule or by manual dispatch and uploads the resulting artifacts
 
 ## One-Command Validation
 
@@ -48,11 +51,14 @@ Technical path:
 powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1
 ```
 
-CI path:
+CI paths:
 
+- GitHub Actions workflow: `CI`
+  - required gate: `pilot-launch-gate`
+  - artifacts: pilot report, performance report, drift report, launch transcript
 - GitHub Actions workflow: `Pilot Validation`
-- triggers: manual dispatch and scheduled weekly run
-- artifacts: pilot report, performance report, drift report, launch transcript
+  - triggers: manual dispatch and scheduled weekly run
+  - artifacts: pilot report, performance report, drift report, launch transcript
 
 That validation pack performs these steps in order:
 
@@ -117,9 +123,9 @@ Treat warning-level drift as a review point, not an automatic block. The launch 
 
 After launch, the next hardening priorities are:
 
-- CI or scheduled automation for release-mode pilot validation
 - deeper operator-intent and semantic-diff audit context
 - longer-duration soak windows
+- packaged deployment promotion beyond the current single-node Windows pilot bundle
 - service hardening beyond the current single-node bearer-token boundary
 
 That is the post-launch road, not a prerequisite for the current pilot launch.

@@ -30,6 +30,10 @@ jobs:
         shell: pwsh
         run: ./scripts/run-pilot-launch-validation.ps1
 
+      - name: Build packaged pilot bundle
+        shell: pwsh
+        run: ./scripts/build-pilot-package.ps1
+
       - name: Upload pilot validation artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -39,6 +43,7 @@ jobs:
             artifacts/pilot/reports
             artifacts/performance
             artifacts/pilot/launch
+            artifacts/pilot/packages
           if-no-files-found: warn
 
       - name: Publish workflow summary
@@ -51,3 +56,4 @@ jobs:
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- `artifacts/performance/latest.md`"
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- `artifacts/performance/latest-drift.md`"
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- `artifacts/pilot/launch/latest.txt`"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- `artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip`"

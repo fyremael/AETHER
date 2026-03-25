@@ -4,6 +4,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
 
 $repoRoot = Split-Path -Path $PSScriptRoot -Parent
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -88,8 +91,33 @@ function Invoke-Step([string]$Label, [string]$Command, [string[]]$Arguments) {
     Add-TranscriptLine("")
     Add-TranscriptLine('```text')
 
-    $outputLines = & $Command @Arguments 2>&1
-    $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
+    $stdoutPath = Join-Path ([System.IO.Path]::GetTempPath()) ("aether-launch-" + [guid]::NewGuid().ToString() + ".out")
+    $stderrPath = Join-Path ([System.IO.Path]::GetTempPath()) ("aether-launch-" + [guid]::NewGuid().ToString() + ".err")
+    try {
+        $process = Start-Process `
+            -FilePath $Command `
+            -ArgumentList $Arguments `
+            -NoNewWindow `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath
+
+        $outputLines = [System.Collections.Generic.List[string]]::new()
+        if (Test-Path $stdoutPath) {
+            foreach ($line in Get-Content -Path $stdoutPath) {
+                $outputLines.Add($line)
+            }
+        }
+        if (Test-Path $stderrPath) {
+            foreach ($line in Get-Content -Path $stderrPath) {
+                $outputLines.Add($line)
+            }
+        }
+        $exitCode = $process.ExitCode
+    } finally {
+        Remove-Item -Force -ErrorAction SilentlyContinue $stdoutPath, $stderrPath
+    }
 
     foreach ($line in $outputLines) {
         $text = $line.ToString()

@@ -1,6 +1,6 @@
 {
   "label": "pilot-accepted-baseline.windows-x86_64",
-  "generated_at": "1773986937",
+  "generated_at": "1774433566",
   "report": {
     "samples_per_workload": 5,
     "measurements": [
@@ -13,18 +13,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 1902140
+            "nanos": 2551280
           },
           "min": {
             "secs": 0,
-            "nanos": 1732400
+            "nanos": 2280600
           },
           "max": {
             "secs": 0,
-            "nanos": 2169000
+            "nanos": 2950900
           }
         },
-        "throughput_per_second": 5257236.58616085,
+        "throughput_per_second": 3919601.1413878524,
         "notes": [
           "10,000 unique element IDs appended into an empty journal each sample"
         ]
@@ -38,18 +38,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 12580920
+            "nanos": 12234920
           },
           "min": {
             "secs": 0,
-            "nanos": 11473800
+            "nanos": 11374100
           },
           "max": {
             "secs": 0,
-            "nanos": 13529000
+            "nanos": 12558300
           }
         },
-        "throughput_per_second": 3974272.1517981193,
+        "throughput_per_second": 4086663.4191314694,
         "notes": [
           "50,000 unique element IDs appended into an empty journal each sample"
         ]
@@ -63,18 +63,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 2573400
+            "nanos": 2717980
           },
           "min": {
             "secs": 0,
-            "nanos": 2326900
+            "nanos": 2494600
           },
           "max": {
             "secs": 0,
-            "nanos": 3064600
+            "nanos": 3240800
           }
         },
-        "throughput_per_second": 388590.96914587705,
+        "throughput_per_second": 367920.2937475625,
         "notes": [
           "4,332 datoms across scalar, set, and ref attributes"
         ]
@@ -88,18 +88,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 1205640
+            "nanos": 1324740
           },
           "min": {
             "secs": 0,
-            "nanos": 1146500
+            "nanos": 1223300
           },
           "max": {
             "secs": 0,
-            "nanos": 1261500
+            "nanos": 1621900
           }
         },
-        "throughput_per_second": 829434.9888855711,
+        "throughput_per_second": 754865.1056056282,
         "notes": [
           "Inclusive prefix cut at 2166 across 4,332 datoms"
         ]
@@ -107,51 +107,53 @@
       {
         "workload": "Compiler SCC planning",
         "scale": "recursive width 16",
-        "units": 16,
+        "units": 2048,
         "unit_label": "predicates/s",
         "latency": {
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 79780
+            "nanos": 9123680
           },
           "min": {
             "secs": 0,
-            "nanos": 63900
+            "nanos": 8628300
           },
           "max": {
             "secs": 0,
-            "nanos": 123900
+            "nanos": 9695800
           }
         },
-        "throughput_per_second": 200551.51667084484,
+        "throughput_per_second": 224470.8275608088,
         "notes": [
-          "17 predicates and 17 rules with one large recursive SCC"
+          "17 predicates and 17 rules with one large recursive SCC",
+          "128 compiler passes per sample to reduce timer jitter on this microbenchmark"
         ]
       },
       {
         "workload": "Compiler SCC planning",
         "scale": "recursive width 64",
-        "units": 64,
+        "units": 8192,
         "unit_label": "predicates/s",
         "latency": {
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 243320
+            "nanos": 34067360
           },
           "min": {
             "secs": 0,
-            "nanos": 225000
+            "nanos": 31701800
           },
           "max": {
             "secs": 0,
-            "nanos": 254300
+            "nanos": 36405400
           }
         },
-        "throughput_per_second": 263028.111129377,
+        "throughput_per_second": 240464.77331968196,
         "notes": [
-          "65 predicates and 65 rules with one large recursive SCC"
+          "65 predicates and 65 rules with one large recursive SCC",
+          "128 compiler passes per sample to reduce timer jitter on this microbenchmark"
         ]
       },
       {
@@ -163,18 +165,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 38583680
+            "nanos": 37825940
           },
           "min": {
             "secs": 0,
-            "nanos": 37268200
+            "nanos": 37036400
           },
           "max": {
             "secs": 0,
-            "nanos": 39779100
+            "nanos": 38860400
           }
         },
-        "throughput_per_second": 52250.07049612686,
+        "throughput_per_second": 53296.75878510884,
         "notes": [
           "2,016 derived tuples expected from a linear dependency chain"
         ]
@@ -188,18 +190,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 286119800
+            "nanos": 309367560
           },
           "min": {
             "secs": 0,
-            "nanos": 282295300
+            "nanos": 276055800
           },
           "max": {
             "secs": 0,
-            "nanos": 289490400
+            "nanos": 357679700
           }
         },
-        "throughput_per_second": 28407.680978387376,
+        "throughput_per_second": 26272.955057084848,
         "notes": [
           "8,128 derived tuples expected from a linear dependency chain"
         ]
@@ -213,18 +215,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 3686560
+            "nanos": 3412500
           },
           "min": {
             "secs": 0,
-            "nanos": 3458400
+            "nanos": 2814600
           },
           "max": {
             "secs": 0,
-            "nanos": 4027000
+            "nanos": 4680400
           }
         },
-        "throughput_per_second": 34449.45965886897,
+        "throughput_per_second": 37216.117216117214,
         "notes": [
           "127 tuples in the longest proof trace",
           "root tuple carries 127 source datom IDs"
@@ -239,18 +241,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 3161800
+            "nanos": 3926620
           },
           "min": {
             "secs": 0,
-            "nanos": 2993000
+            "nanos": 3681800
           },
           "max": {
             "secs": 0,
-            "nanos": 3404200
+            "nanos": 4233100
           }
         },
-        "throughput_per_second": 51869.18843696628,
+        "throughput_per_second": 41766.20095654787,
         "notes": [
           "164 expected worker-task claimability rows",
           "includes parse, compile, resolve, evaluate, and query through the kernel service"

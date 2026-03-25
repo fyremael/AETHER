@@ -44,6 +44,7 @@ Implemented:
 - bearer-token authentication with endpoint scope enforcement on the pilot HTTP path
 - auditable request logging with in-memory inspection, semantic request context, and JSONL persistence on the pilot HTTP path
 - a dedicated durable HTTP service example at `crates/aether_api/examples/pilot_http_kernel_service.rs`
+- a packaged pilot-service deployment path with config-backed startup and secret-file/env token resolution
 - operator-grade coordination report generation in markdown and JSON
 - durable pilot seed fixtures shared between service tests and report generation
 - performance baseline capture for the pilot path
@@ -82,13 +83,14 @@ The default database path is:
 artifacts/pilot/coordination.sqlite
 ```
 
-The default pilot bearer token is:
+The hardened pilot service no longer depends on a baked-in default bearer token.
 
-```text
-pilot-operator-token
-```
+Use either:
 
-Override it with the `AETHER_PILOT_TOKEN` environment variable before starting the service.
+- a deployment config with `token_file`
+- a deployment config with `token_env`
+
+For the packaged deployment path, the bundle builder writes a cryptographically strong operator token to `config/pilot-operator.token`.
 
 Generate an operator-facing pilot report:
 
@@ -129,15 +131,15 @@ The pilot is only ready for external design-partner use when all of these are tr
 The current implementation closes those original gates for the present single-node pilot.
 
 The current launch validation path is documented in `docs/PILOT_LAUNCH.md`.
+The hardened single-node deployment path is documented in `docs/PILOT_DEPLOYMENT.md`.
 
 ## Next Required Work
 
 The next pilot-critical steps after launch are:
 
-- optional CI or scheduled automation adoption of the launch validation pack
 - longer-duration soak drills beyond the current launch window
 - richer operator-intent and semantic-diff context on top of the current audit fields
-- service-hardening work beyond the current bearer-token and single-node posture
+- service-hardening work beyond the current secret-backed bearer-token and single-node posture
 
 Those are the next things to do. They are the post-launch hardening road for the pilot, not blockers for the current single-node design-partner launch.
 

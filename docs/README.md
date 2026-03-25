@@ -103,11 +103,12 @@ Read:
 
 1. `docs/PILOT_COORDINATION.md`
 2. `docs/PILOT_LAUNCH.md`
-3. `docs/STATUS.md`
-4. `docs/KNOWN_LIMITATIONS.md`
-5. `docs/PERFORMANCE.md`
+3. `docs/PILOT_DEPLOYMENT.md`
+4. `docs/STATUS.md`
+5. `docs/KNOWN_LIMITATIONS.md`
+6. `docs/PERFORMANCE.md`
 
-Those documents explain the durable pilot contract, report artifacts, drift workflow, and the remaining hardening gaps.
+Those documents explain the durable pilot contract, report artifacts, deployment path, drift workflow, and the remaining hardening gaps.
 They are also the place to look for the current audit semantics on the authenticated pilot service.
 They now also describe the scheduled/manual CI launch-validation path and the current durable sidecar posture on the pilot service.
 
@@ -165,6 +166,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 | `docs/OPERATIONS.md` | Operator-facing guidance for demos, reports, and presentations |
 | `docs/PILOT_COORDINATION.md` | Scope, exit gates, and run path for the current coordination pilot |
 | `docs/PILOT_LAUNCH.md` | Launch-readiness contract and validation pack for the current design-partner pilot |
+| `docs/PILOT_DEPLOYMENT.md` | Packaged single-node deployment path, config model, and secret handling for the pilot service |
 | `docs/PERFORMANCE.md` | Performance workloads, runner commands, benchmark harness, and interpretation guidance |
 | `docs/COMMERCIALIZATION/README.md` | Hub for commercialization, product framing, buyer narrative, and messaging |
 | `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md` | Distributed truth and consensus strategy for partitioned AETHER scale |

@@ -80,3 +80,62 @@ jobs:
 
       - name: Run Python SDK tests
         run: python -m unittest discover python/tests -v
+
+  pilot-launch-gate:
+    name: Pilot launch gate
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Run pilot launch validation
+        shell: pwsh
+        run: ./scripts/run-pilot-launch-validation.ps1
+
+      - name: Upload pilot gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pilot-launch-gate-artifacts
+          path: |
+            artifacts/pilot/reports
+            artifacts/performance
+            artifacts/pilot/launch
+          if-no-files-found: warn
+
+  pilot-package:
+    name: Pilot package
+    runs-on: windows-latest
+    needs:
+      - rust
+      - go-shell
+      - python-sdk
+      - pilot-launch-gate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Build packaged pilot bundle
+        shell: pwsh
+        run: ./scripts/build-pilot-package.ps1
+
+      - name: Upload pilot package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-pilot-service-windows-x86_64
+          path: |
+            artifacts/pilot/packages/aether-pilot-service-windows-x86_64
+            artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip
+          if-no-files-found: error
