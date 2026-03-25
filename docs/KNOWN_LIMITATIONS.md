@@ -1,6 +1,6 @@
 # KNOWN_LIMITATIONS
 
-- The runtime now executes semi-naive recursion, stratified negation, and bounded aggregation for the current slice, but aggregation is still limited to non-recursive head-term `count`, `sum`, `min`, and `max` rules. That is good enough for the present v1 pilot, but AETHER is not treating aggregation as full-spec-closed yet.
+- The runtime now executes semi-naive recursion, stratified negation, and bounded aggregation for the current v1 slice, but aggregation is still intentionally limited to non-recursive grouped head-term `count`, `sum`, `min`, and `max` rules rather than richer post-v1 aggregate syntax.
 - Extensional predicate binding is inferred by name against schema attributes and is therefore deliberately conservative.
 - Explain traces currently reconstruct one merged proof graph per tuple; they do not yet distinguish alternative proof families for the same derived tuple.
 - The DSL now covers the current canonical v1 surface, but it still lacks post-v1 ergonomic features such as richer type aliases, broader document modularity, and more generalized explain/query composition.
@@ -8,7 +8,7 @@
 - Artifact and vector sidecar federation is now journal-subordinated and temporally exact on the SQLite-backed pilot path, but it is still a single-node backend and does not yet replicate or fail over independently of the kernel process.
 - Vector search can now project provenance-bearing semantic facts back into the rule layer, but the current projection is deliberately narrow: a three-field `(query_entity, matched_entity, score)` extensional fact shape.
 - Coordination semantics now cover heartbeats and execution outcomes in the pilot slice, but expiry still relies on explicit semantic state rather than clock-driven timeout windows or distributed failure detection.
-- HTTP authorization is currently coarse endpoint scope enforcement. Policy envelopes now affect state/document/sidecar visibility through explicit request policy contexts, but auth tokens are not yet bound to semantic row-level policy decisions.
+- HTTP authorization still uses coarse endpoint scopes, but tokens now also bind maximum semantic policy visibility for state/document/sidecar access. The remaining gap is finer-grained policy governance, not the absence of token-bound semantic policy.
 - Audit entries now capture semantic cut, query goal, tuple ID, datom counts, and basic result counts, but they still do not capture full operator intent, row-level policy context, or semantic diffs between cuts.
 - Operator reports are now saved as markdown and JSON artifacts, but they are still fixed-format incident summaries rather than interactive investigation tools.
 - The performance suite now supports local baseline capture, drift comparison, and stress fixtures, but it does not yet maintain historical benchmark trends or CI-enforced drift budgets.

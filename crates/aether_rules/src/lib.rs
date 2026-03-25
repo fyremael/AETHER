@@ -197,9 +197,9 @@ fn validate_rule_types_and_aggregates(
     let signature = schema
         .predicate(&rule.head.predicate.id)
         .expect("validated rule head predicate is present in schema");
-    let aggregate = head_aggregate(rule)?;
+    let aggregates = head_aggregates(rule);
 
-    if let Some((_, aggregate_term)) = aggregate {
+    for (_, aggregate_term) in &aggregates {
         if rule.head.terms.iter().any(
             |term| matches!(term, Term::Variable(variable) if variable == &aggregate_term.variable),
         ) {
@@ -336,17 +336,16 @@ fn validate_atom_term_types(
     Ok(())
 }
 
-fn head_aggregate(rule: &RuleAst) -> Result<Option<(usize, &AggregateTerm)>, CompileError> {
-    let mut aggregate = None;
-    for (index, term) in rule.head.terms.iter().enumerate() {
-        if let Term::Aggregate(aggregate_term) = term {
-            if aggregate.is_some() {
-                return Err(CompileError::MultipleHeadAggregates { rule_id: rule.id });
-            }
-            aggregate = Some((index, aggregate_term));
-        }
-    }
-    Ok(aggregate)
+fn head_aggregates(rule: &RuleAst) -> Vec<(usize, &AggregateTerm)> {
+    rule.head
+        .terms
+        .iter()
+        .enumerate()
+        .filter_map(|(index, term)| match term {
+            Term::Aggregate(aggregate_term) => Some((index, aggregate_term)),
+            _ => None,
+        })
+        .collect()
 }
 
 fn aggregate_output_type(
@@ -389,7 +388,7 @@ fn validate_recursive_aggregation(
     scc_lookup: &IndexMap<PredicateId, usize>,
 ) -> Result<(), CompileError> {
     for rule in &program.rules {
-        if head_aggregate(rule)?.is_none() {
+        if head_aggregates(rule).is_empty() {
             continue;
         }
 
@@ -810,8 +809,6 @@ pub enum CompileError {
     Schema(#[from] SchemaError),
     #[error("rule {rule_id} uses aggregate terms outside a rule head")]
     AggregateOutsideHead { rule_id: RuleId },
-    #[error("rule {rule_id} has more than one aggregate term in its head")]
-    MultipleHeadAggregates { rule_id: RuleId },
     #[error("rule {rule_id} cannot group by aggregate variable {variable}")]
     AggregateVariableInGroupKey { rule_id: RuleId, variable: String },
     #[error(
@@ -1139,6 +1136,65 @@ mod tests {
             CompileError::RecursiveAggregation { rule_id, predicate }
                 if rule_id == RuleId::new(2) && predicate == "bad_count"
         ));
+    }
+
+    #[test]
+    fn bounded_aggregation_allows_multiple_head_aggregates() {
+        let project_task = predicate(1, "project_task", 2);
+        let task_hours = predicate(2, "task_hours", 2);
+        let project_stats = predicate(3, "project_stats", 3);
+        let mut schema = Schema::new("v1");
+        for signature in [
+            PredicateSignature {
+                id: project_task.id,
+                name: project_task.name.clone(),
+                fields: vec![ValueType::Entity, ValueType::Entity],
+            },
+            PredicateSignature {
+                id: task_hours.id,
+                name: task_hours.name.clone(),
+                fields: vec![ValueType::Entity, ValueType::U64],
+            },
+            PredicateSignature {
+                id: project_stats.id,
+                name: project_stats.name.clone(),
+                fields: vec![ValueType::Entity, ValueType::U64, ValueType::U64],
+            },
+        ] {
+            schema
+                .register_predicate(signature)
+                .expect("register predicate");
+        }
+
+        DefaultRuleCompiler
+            .compile(
+                &schema,
+                &RuleProgram {
+                    predicates: vec![
+                        project_task.clone(),
+                        task_hours.clone(),
+                        project_stats.clone(),
+                    ],
+                    rules: vec![RuleAst {
+                        id: RuleId::new(10),
+                        head: Atom {
+                            predicate: project_stats,
+                            terms: vec![
+                                Term::Variable(Variable::new("project")),
+                                aggregate(AggregateFunction::Count, "task"),
+                                aggregate(AggregateFunction::Sum, "hours"),
+                            ],
+                        },
+                        body: vec![
+                            Literal::Positive(atom(project_task, &["project", "task"])),
+                            Literal::Positive(atom(task_hours, &["task", "hours"])),
+                        ],
+                    }],
+                    materialized: vec![PredicateId::new(3)],
+                    facts: Vec::new(),
+                },
+            )
+            .expect("compile multiple head aggregates");
     }
 
     #[test]

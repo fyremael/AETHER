@@ -13,7 +13,7 @@ Implemented today:
 
 - `cmd/aetherctl`, a real CLI over the stable HTTP boundary
 - `internal/client`, a typed Go HTTP client for health, history, document runs, and tuple explanation
-- request-level policy-context support for document execution
+- request-level policy-context support for document execution, with authenticated tokens able to impose the maximum semantic visibility that requests may narrow but not exceed
 - Go unit coverage via `go test ./...`
 
 Current commands:

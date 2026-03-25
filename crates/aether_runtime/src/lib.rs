@@ -65,7 +65,7 @@ struct AggregatedMatch {
 #[derive(Clone, Debug)]
 struct AggregateGroup {
     values: Vec<Option<Value>>,
-    accumulator: AggregateAccumulator,
+    accumulators: Vec<AggregateAccumulator>,
     seen_bindings: IndexSet<String>,
     parent_tuple_ids: Vec<TupleId>,
     source_datom_ids: Vec<ElementId>,
@@ -125,11 +125,11 @@ impl RuleRuntime for SemiNaiveRuntime {
                 let mut batch_tuples = Vec::new();
 
                 for rule in rules {
-                    let aggregate = head_aggregate(rule);
-                    let anchor_indices = if aggregate.is_some() {
-                        Vec::new()
-                    } else {
+                    let aggregates = head_aggregates(rule);
+                    let anchor_indices = if aggregates.is_empty() {
                         current_scc_positive_indices(rule, &current_scc_predicates)
+                    } else {
+                        Vec::new()
                     };
                     let anchor_plan = if delta_rows.is_empty() {
                         if anchor_indices.is_empty() {
@@ -156,7 +156,7 @@ impl RuleRuntime for SemiNaiveRuntime {
                             &current_scc_predicates,
                         )?;
 
-                        if aggregate.is_some() {
+                        if !aggregates.is_empty() {
                             aggregate_matches.extend(matches);
                             continue;
                         }
@@ -202,12 +202,11 @@ impl RuleRuntime for SemiNaiveRuntime {
                         }
                     }
 
-                    if let Some((aggregate_index, aggregate_term)) = aggregate {
+                    if !aggregates.is_empty() {
                         let matches = materialize_aggregate_head(
                             rule.id,
                             &rule.head.terms,
-                            aggregate_index,
-                            aggregate_term,
+                            &aggregates,
                             &aggregate_matches,
                         )?;
                         for matched in matches {
@@ -705,36 +704,39 @@ fn materialize_non_aggregate_head(
 fn materialize_aggregate_head(
     rule_id: RuleId,
     terms: &[Term],
-    aggregate_index: usize,
-    aggregate_term: &AggregateTerm,
+    aggregates: &[(usize, &AggregateTerm)],
     matches: &[MatchState],
 ) -> Result<Vec<AggregatedMatch>, RuntimeError> {
     let mut groups: IndexMap<String, AggregateGroup> = IndexMap::new();
 
     for matched in matches {
         let binding_key = bindings_key(&matched.bindings);
-        let group_values =
-            materialize_group_values(rule_id, terms, aggregate_index, &matched.bindings)?;
+        let group_values = materialize_group_values(rule_id, terms, aggregates, &matched.bindings)?;
         let group_key = values_key(&group_values);
-        let aggregate_value = matched
-            .bindings
-            .get(&aggregate_term.variable)
-            .ok_or_else(|| RuntimeError::UnboundVariable {
-                rule_id,
-                variable: aggregate_term.variable.0.clone(),
-            })?;
 
         if !groups.contains_key(&group_key) {
-            let accumulator = AggregateAccumulator::from_value(
-                rule_id,
-                aggregate_term.function,
-                aggregate_value,
-            )?;
+            let accumulators = aggregates
+                .iter()
+                .map(|(_, aggregate_term)| {
+                    let aggregate_value = matched
+                        .bindings
+                        .get(&aggregate_term.variable)
+                        .ok_or_else(|| RuntimeError::UnboundVariable {
+                            rule_id,
+                            variable: aggregate_term.variable.0.clone(),
+                        })?;
+                    AggregateAccumulator::from_value(
+                        rule_id,
+                        aggregate_term.function,
+                        aggregate_value,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             groups.insert(
                 group_key.clone(),
                 AggregateGroup {
                     values: group_values.into_iter().map(Some).collect(),
-                    accumulator,
+                    accumulators,
                     seen_bindings: IndexSet::new(),
                     parent_tuple_ids: Vec::new(),
                     source_datom_ids: Vec::new(),
@@ -750,9 +752,19 @@ fn materialize_aggregate_head(
         }
 
         if group.seen_bindings.len() > 1 {
-            group
-                .accumulator
-                .add(rule_id, aggregate_term.function, aggregate_value)?;
+            for (accumulator, (_, aggregate_term)) in
+                group.accumulators.iter_mut().zip(aggregates.iter())
+            {
+                let aggregate_value =
+                    matched
+                        .bindings
+                        .get(&aggregate_term.variable)
+                        .ok_or_else(|| RuntimeError::UnboundVariable {
+                            rule_id,
+                            variable: aggregate_term.variable.0.clone(),
+                        })?;
+                accumulator.add(rule_id, aggregate_term.function, aggregate_value)?;
+            }
         }
         extend_unique(&mut group.parent_tuple_ids, &matched.parent_tuple_ids);
         extend_unique(&mut group.source_datom_ids, &matched.source_datom_ids);
@@ -760,13 +772,17 @@ fn materialize_aggregate_head(
 
     let mut aggregated = groups
         .into_values()
-        .map(|group| {
+        .map(|mut group| {
             let mut values = group
                 .values
                 .into_iter()
                 .map(|value| value.expect("group values are initialized"))
                 .collect::<Vec<_>>();
-            values[aggregate_index] = group.accumulator.finalize();
+            for ((aggregate_index, _), accumulator) in
+                aggregates.iter().zip(group.accumulators.drain(..))
+            {
+                values[*aggregate_index] = accumulator.finalize();
+            }
             AggregatedMatch {
                 values,
                 parent_tuple_ids: group.parent_tuple_ids,
@@ -782,14 +798,17 @@ fn materialize_aggregate_head(
 fn materialize_group_values(
     rule_id: RuleId,
     terms: &[Term],
-    aggregate_index: usize,
+    aggregates: &[(usize, &AggregateTerm)],
     bindings: &IndexMap<Variable, Value>,
 ) -> Result<Vec<Value>, RuntimeError> {
     terms
         .iter()
         .enumerate()
         .map(|(index, term)| {
-            if index == aggregate_index {
+            if aggregates
+                .iter()
+                .any(|(aggregate_index, _)| index == *aggregate_index)
+            {
                 return Ok(Value::Null);
             }
             match term {
@@ -809,15 +828,16 @@ fn materialize_group_values(
         .collect()
 }
 
-fn head_aggregate(rule: &RuleAst) -> Option<(usize, &AggregateTerm)> {
+fn head_aggregates(rule: &RuleAst) -> Vec<(usize, &AggregateTerm)> {
     rule.head
         .terms
         .iter()
         .enumerate()
-        .find_map(|(index, term)| match term {
+        .filter_map(|(index, term)| match term {
             Term::Aggregate(aggregate) => Some((index, aggregate)),
             _ => None,
         })
+        .collect()
 }
 
 fn bindings_key(bindings: &IndexMap<Variable, Value>) -> String {
@@ -1275,6 +1295,11 @@ mod tests {
                 fields: vec![ValueType::Entity, ValueType::U64],
             },
             PredicateSignature {
+                id: PredicateId::new(9),
+                name: "project_stats".into(),
+                fields: vec![ValueType::Entity, ValueType::U64, ValueType::U64],
+            },
+            PredicateSignature {
                 id: PredicateId::new(7),
                 name: "execution_attempt".into(),
                 fields: vec![ValueType::Entity, ValueType::String, ValueType::U64],
@@ -1298,6 +1323,7 @@ mod tests {
                 predicate(4, "project_task", 2),
                 predicate(5, "task_hours", 2),
                 predicate(6, "project_hours", 2),
+                predicate(9, "project_stats", 3),
                 predicate(7, "execution_attempt", 3),
                 predicate(8, "latest_epoch", 2),
             ],
@@ -1352,6 +1378,24 @@ mod tests {
                 RuleAst {
                     id: RuleId::new(5),
                     head: Atom {
+                        predicate: predicate(9, "project_stats", 3),
+                        terms: vec![
+                            Term::Variable(Variable::new("project")),
+                            aggregate(AggregateFunction::Count, "task"),
+                            aggregate(AggregateFunction::Sum, "hours"),
+                        ],
+                    },
+                    body: vec![
+                        Literal::Positive(atom(
+                            predicate(4, "project_task", 2),
+                            &["project", "task"],
+                        )),
+                        Literal::Positive(atom(predicate(5, "task_hours", 2), &["task", "hours"])),
+                    ],
+                },
+                RuleAst {
+                    id: RuleId::new(6),
+                    head: Atom {
                         predicate: predicate(8, "latest_epoch", 2),
                         terms: vec![
                             Term::Variable(Variable::new("task")),
@@ -1368,6 +1412,7 @@ mod tests {
                 PredicateId::new(2),
                 PredicateId::new(3),
                 PredicateId::new(6),
+                PredicateId::new(9),
                 PredicateId::new(8),
             ],
             facts: vec![
@@ -1502,6 +1547,32 @@ mod tests {
         assert_eq!(
             project_hours.rows[0].values,
             vec![Value::Entity(EntityId::new(10)), Value::U64(8)]
+        );
+
+        let project_stats = execute_query(
+            &Default::default(),
+            &compiled,
+            &derived,
+            &QueryAst {
+                goals: vec![atom(
+                    predicate(9, "project_stats", 3),
+                    &["project", "task_count", "hours"],
+                )],
+                keep: vec![
+                    Variable::new("project"),
+                    Variable::new("task_count"),
+                    Variable::new("hours"),
+                ],
+            },
+        )
+        .expect("query project stats");
+        assert_eq!(
+            project_stats.rows[0].values,
+            vec![
+                Value::Entity(EntityId::new(10)),
+                Value::U64(2),
+                Value::U64(8),
+            ]
         );
 
         let latest_epoch = execute_query(

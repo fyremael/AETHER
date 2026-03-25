@@ -129,7 +129,7 @@ Implemented today:
 - unstratified-negation rejection
 - predicate-stratum computation for executable stratified negation
 - semi-naive delta execution across recursive SCCs
-- bounded aggregation via non-recursive head-term `count`, `sum`, `min`, and `max` rules, which is good enough for the current v1 pilot but not yet treated as full spec closure
+- bounded aggregation via non-recursive grouped head-term `count`, `sum`, `min`, and `max` rules, including multiple aggregate terms per head; this now closes the v1 bounded-aggregation requirement while leaving richer aggregate ergonomics as post-v1 work
 - a first real recursive runtime slice for positive recursion and cross-stratum negation
 - source datom provenance threaded from resolved facts into derived tuples
 - derived tuple metadata with rule, SCC, stratum, iteration, parent tuple references, and source datom IDs
@@ -138,8 +138,8 @@ Implemented today:
 - an in-memory kernel service over `aether_api` with end-to-end integration tests
 - a minimal HTTP JSON kernel service boundary over `aether_api`
 - a durable coordination-pilot HTTP service example over a SQLite journal
-- bearer-token authentication and endpoint-scope enforcement on the pilot HTTP path
-- explicit policy-context filtering for datoms, DSL-authored extensional facts, and sidecar reads/searches
+- bearer-token authentication, endpoint-scope enforcement, and token-bound semantic policy ceilings on the pilot HTTP path
+- explicit policy-context filtering for datoms, DSL-authored extensional facts, and sidecar reads/searches, with request policy now allowed to narrow token-granted visibility but not widen it
 - auditable pilot request logging with semantic cut, query, tuple, and count context plus persisted JSONL output
 - operator-grade coordination pilot report generation in markdown and JSON
 - a release-mode performance report, Criterion benchmark suite, and ignored stress workloads for early regression tracking
@@ -154,7 +154,7 @@ Implemented today:
 Deliberately still narrow:
 
 - the DSL now covers the canonical v1 surface, but broader post-v1 ergonomics and modular authoring are still open
-- bounded aggregation is currently limited to non-recursive aggregate rules, so AETHER treats it as pilot-good rather than full-spec-closed
+- bounded aggregation is intentionally limited to non-recursive grouped aggregate rules, so richer aggregate syntax remains future work even though the v1 bounded-aggregation requirement is now covered
 - the Go shell and Python SDK are now real, but they are still early boundary clients rather than mature multi-platform ecosystems
 - sidecar federation is now journal-subordinated and temporally exact on the SQLite-backed pilot path, but it is not yet replicated, distributed, or policy-enforced end to end
 

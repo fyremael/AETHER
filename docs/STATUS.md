@@ -16,9 +16,10 @@ Completed:
 - whole-document DSL parser implemented for the current canonical v1 surface: schema, attribute classes, facts, repeated queries, explain directives, temporal views, and policy annotations
 - `Current` and `AsOf` query execution implemented
 - policy annotations turned into executable behavior through explicit policy-context filtering on state resolution, document execution, and sidecar reads/searches
+- authenticated HTTP tokens now bind maximum semantic policy visibility, with request policy contexts only allowed to narrow that bound
 - semi-naive delta execution implemented for recursive SCC evaluation
 - executable stratified negation implemented for stratified programs
-- bounded aggregation implemented for non-recursive head-term `count`, `sum`, `min`, and `max` rules; this is currently treated as good enough for the v1 pilot but not yet as full spec closure
+- bounded aggregation implemented for non-recursive grouped head-term `count`, `sum`, `min`, and `max` rules, including multiple aggregate terms per head; this now covers the v1 bounded-aggregation requirement
 - first coordination acceptance slice implemented for readiness, claims, leases, lease heartbeats, execution outcomes, and stale-result rejection
 - in-memory kernel service implemented in `aether_api`
 - minimal HTTP JSON kernel service implemented over `aether_api`
@@ -61,4 +62,4 @@ The most immediate work now sits just beyond the launch-ready pilot slice and la
 - decide how far to widen audit context from the current semantic cut/query/tuple fields into fuller operator intent and semantic diffs
 - decide when the current drift comparison should graduate into CI enforcement
 - decide which post-v1 ergonomic DSL extensions matter beyond the now-implemented canonical surface
-- decide whether to widen aggregation beyond the current pilot-good non-recursive head-term slice before claiming full spec closure, then continue runtime optimization
+- continue runtime optimization now that the current bounded-aggregation requirement is covered

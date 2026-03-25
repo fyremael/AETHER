@@ -1,6 +1,7 @@
 use aether_api::{
     http_router_with_options, AuthScope, HttpAuthConfig, HttpKernelOptions, SqliteKernelService,
 };
+use aether_ast::PolicyContext;
 use std::path::PathBuf;
 
 #[tokio::main]
@@ -15,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("AETHER_PILOT_TOKEN").unwrap_or_else(|_| "pilot-operator-token".into());
     let service = SqliteKernelService::open(&database_path)?;
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
-    let auth = HttpAuthConfig::new().with_token(
+    let auth = HttpAuthConfig::new().with_token_context(
         operator_token.clone(),
         "pilot-operator",
         [
@@ -24,6 +25,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             AuthScope::Explain,
             AuthScope::Ops,
         ],
+        PolicyContext {
+            capabilities: vec!["executor".into()],
+            visibilities: Vec::new(),
+        },
     );
 
     println!("AETHER coordination pilot HTTP service");

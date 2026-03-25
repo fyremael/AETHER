@@ -138,6 +138,10 @@ pub struct PolicyContext {
 }
 
 impl PolicyContext {
+    pub fn is_empty(&self) -> bool {
+        self.capabilities.is_empty() && self.visibilities.is_empty()
+    }
+
     pub fn allows(&self, envelope: &PolicyEnvelope) -> bool {
         let capability_allowed = match envelope.capability.as_ref() {
             Some(capability) => self.capabilities.iter().any(|value| value == capability),
@@ -148,6 +152,16 @@ impl PolicyContext {
             None => true,
         };
         capability_allowed && visibility_allowed
+    }
+
+    pub fn subset_of(&self, other: &Self) -> bool {
+        self.capabilities
+            .iter()
+            .all(|value| other.capabilities.iter().any(|allowed| allowed == value))
+            && self
+                .visibilities
+                .iter()
+                .all(|value| other.visibilities.iter().any(|allowed| allowed == value))
     }
 }
 
@@ -495,5 +509,26 @@ mod tests {
         assert!(!policy_allows(Some(&missing_visibility), Some(&envelope)));
         assert!(!policy_allows(None, Some(&envelope)));
         assert!(policy_allows(None, None));
+    }
+
+    #[test]
+    fn policy_context_subset_checks_requested_capabilities_and_visibilities() {
+        let granted = PolicyContext {
+            capabilities: vec!["executor".into(), "operator".into()],
+            visibilities: vec!["ops".into(), "finance".into()],
+        };
+        let requested = PolicyContext {
+            capabilities: vec!["executor".into()],
+            visibilities: vec!["ops".into()],
+        };
+        let escalated = PolicyContext {
+            capabilities: vec!["admin".into()],
+            visibilities: vec!["ops".into()],
+        };
+
+        assert!(requested.subset_of(&granted));
+        assert!(!escalated.subset_of(&granted));
+        assert!(PolicyContext::default().is_empty());
+        assert!(!granted.is_empty());
     }
 }

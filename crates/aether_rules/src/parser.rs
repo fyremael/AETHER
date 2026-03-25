@@ -1309,6 +1309,48 @@ mod tests {
     }
 
     #[test]
+    fn parses_multiple_head_aggregates_in_one_rule() {
+        let document = DefaultDslParser
+            .parse_document(
+                r#"
+                schema {
+                  attr project.task: RefSet<Entity>
+                  attr task.hours: ScalarLWW<U64>
+                }
+
+                predicates {
+                  project_task(Entity, Entity)
+                  task_hours(Entity, U64)
+                  project_stats(Entity, U64, U64)
+                }
+
+                rules {
+                  project_stats(project, count(task), sum(hours)) <- project_task(project, task), task_hours(task, hours)
+                }
+
+                materialize {
+                  project_stats
+                }
+                "#,
+            )
+            .expect("parse multi aggregate rule");
+
+        let aggregate_rule = &document.program.rules[0];
+        assert!(matches!(
+            &aggregate_rule.head.terms[1],
+            Term::Aggregate(aggregate)
+                if aggregate.function == AggregateFunction::Count
+                    && aggregate.variable == aether_ast::Variable::new("task")
+        ));
+        assert!(matches!(
+            &aggregate_rule.head.terms[2],
+            Term::Aggregate(aggregate)
+                if aggregate.function == AggregateFunction::Sum
+                    && aggregate.variable == aether_ast::Variable::new("hours")
+        ));
+    }
+
+    #[test]
     fn parses_named_queries_and_explain_directives() {
         let document = DefaultDslParser
             .parse_document(

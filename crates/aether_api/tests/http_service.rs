@@ -609,6 +609,111 @@ async fn authenticated_http_service_audits_query_goal_for_find_alias() {
 }
 
 #[tokio::test]
+async fn authenticated_http_service_binds_policy_context_to_tokens() {
+    let options = HttpKernelOptions::new().with_auth(pilot_auth());
+    let (base_url, server) = spawn_server_with_options(InMemoryKernelService::new(), options).await;
+    let client = Client::new();
+
+    let append = client
+        .post(format!("{base_url}/v1/append"))
+        .bearer_auth("pilot-operator-token")
+        .json(&AppendRequest {
+            datoms: vec![
+                policy_status_datom(1, "ready", 1, None),
+                policy_status_datom(
+                    3,
+                    "ready",
+                    2,
+                    Some(PolicyEnvelope {
+                        capability: Some("executor".into()),
+                        visibility: None,
+                    }),
+                ),
+            ],
+        })
+        .send()
+        .await
+        .expect("append policy datoms");
+    assert!(append.status().is_success());
+
+    let operator_default = client
+        .post(format!("{base_url}/v1/documents/run"))
+        .bearer_auth("pilot-operator-token")
+        .json(&RunDocumentRequest {
+            dsl: policy_document_dsl(),
+            policy_context: None,
+        })
+        .send()
+        .await
+        .expect("operator run request");
+    assert!(operator_default.status().is_success());
+    let operator_rows = operator_default
+        .json::<RunDocumentResponse>()
+        .await
+        .expect("operator run response")
+        .query
+        .expect("operator query result")
+        .rows;
+    assert_eq!(
+        operator_rows
+            .iter()
+            .map(|row| row.values.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            vec![Value::Entity(EntityId::new(1))],
+            vec![Value::Entity(EntityId::new(2))],
+            vec![Value::Entity(EntityId::new(3))],
+        ]
+    );
+
+    let public_only = client
+        .post(format!("{base_url}/v1/documents/run"))
+        .bearer_auth("pilot-query-token")
+        .json(&RunDocumentRequest {
+            dsl: policy_document_dsl(),
+            policy_context: None,
+        })
+        .send()
+        .await
+        .expect("public-only run request");
+    assert!(public_only.status().is_success());
+    let public_rows = public_only
+        .json::<RunDocumentResponse>()
+        .await
+        .expect("public-only response")
+        .query
+        .expect("public-only query result")
+        .rows;
+    assert_eq!(
+        public_rows
+            .iter()
+            .map(|row| row.values.clone())
+            .collect::<Vec<_>>(),
+        vec![vec![Value::Entity(EntityId::new(1))]]
+    );
+
+    let forbidden_escalation = client
+        .post(format!("{base_url}/v1/documents/run"))
+        .bearer_auth("pilot-query-token")
+        .json(&RunDocumentRequest {
+            dsl: policy_document_dsl(),
+            policy_context: Some(PolicyContext {
+                capabilities: vec!["executor".into()],
+                visibilities: Vec::new(),
+            }),
+        })
+        .send()
+        .await
+        .expect("forbidden escalation request");
+    assert_eq!(
+        forbidden_escalation.status(),
+        reqwest::StatusCode::FORBIDDEN
+    );
+
+    stop_server(server).await;
+}
+
+#[tokio::test]
 async fn authenticated_http_service_persists_semantic_audit_context_across_restarts() {
     let temp = TestDbPath::new("http-audit-restart");
     let audit = TestAuditPath::new("audit-restart");
@@ -1053,7 +1158,7 @@ impl Drop for TestAuditPath {
 
 fn pilot_auth() -> HttpAuthConfig {
     HttpAuthConfig::new()
-        .with_token(
+        .with_token_context(
             "pilot-operator-token",
             "pilot-operator",
             [
@@ -1062,6 +1167,10 @@ fn pilot_auth() -> HttpAuthConfig {
                 AuthScope::Explain,
                 AuthScope::Ops,
             ],
+            PolicyContext {
+                capabilities: vec!["executor".into()],
+                visibilities: Vec::new(),
+            },
         )
         .with_token("pilot-query-token", "query-client", [AuthScope::Query])
 }

@@ -5,7 +5,7 @@ use aether_api::{
     RunDocumentRequest, RunDocumentResponse, SqliteKernelService,
     COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
-use aether_ast::{ElementId, EntityId, TupleId, Value};
+use aether_ast::{ElementId, EntityId, PolicyContext, TupleId, Value};
 use reqwest::Client;
 use std::{
     path::{Path, PathBuf},
@@ -398,7 +398,7 @@ async fn stop_server(server: tokio::task::JoinHandle<()>) {
 
 fn pilot_auth() -> HttpAuthConfig {
     HttpAuthConfig::new()
-        .with_token(
+        .with_token_context(
             "pilot-operator-token",
             "pilot-operator",
             [
@@ -407,6 +407,10 @@ fn pilot_auth() -> HttpAuthConfig {
                 AuthScope::Explain,
                 AuthScope::Ops,
             ],
+            PolicyContext {
+                capabilities: vec!["executor".into()],
+                visibilities: Vec::new(),
+            },
         )
         .with_token("pilot-query-token", "query-client", [AuthScope::Query])
 }
