@@ -141,10 +141,10 @@ Implemented today:
 - bearer-token authentication, endpoint-scope enforcement, and token-bound semantic policy ceilings on the pilot HTTP path
 - explicit policy-context filtering for datoms, DSL-authored extensional facts, and sidecar reads/searches, with request policy now allowed to narrow token-granted visibility but not widen it
 - policy-matched explanation, visible-history filtering, and policy-aware coordination reports on the service/operator path
-- a config-backed pilot service binary with secret-file/env token resolution and packaged single-node deployment bundles
+- a config-backed pilot service binary with secret-file/env/command token resolution, package-local rotation tooling, and packaged single-node deployment bundles
 - auditable pilot request logging with semantic cut, query, tuple, and count context plus persisted JSONL output
 - operator-grade coordination pilot report generation in markdown and JSON
-- a release-mode performance report, Criterion benchmark suite, and ignored stress workloads for early regression tracking
+- a release-mode performance report, Criterion benchmark suite, durable restart/replay benchmarks, and ignored stress workloads for early regression tracking
 - a live console performance dashboard for real-time and collected instrument views
 - machine-readable performance baseline capture and point-in-time drift reporting for the pilot path
 - a one-command pilot launch validation pack with soak, stress, and artifact capture
@@ -357,6 +357,7 @@ That clarity is part of the implementation.
 - `docs/DEVELOPER_WORKFLOW.md` explains the engineering loop and definition of done.
 - `docs/OPERATIONS.md` explains the operator path, demo catalog, and report workflow.
 - `docs/PILOT_DEPLOYMENT.md` explains the hardened packaged deployment path for the pilot service.
+- `docs/PILOT_OPERATIONS_PLAYBOOK.md` explains deployment, rotation, upgrade, rollback, and restart/replay operations for the pilot service.
 - `docs/PERFORMANCE.md` explains the benchmark harness, stress tests, and performance-report path.
 - `docs/PILOT_LAUNCH.md` defines the current launch-readiness contract and validation pack for the design-partner pilot.
 - `docs/GLOSSARY.md` defines canonical project vocabulary.

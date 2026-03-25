@@ -44,6 +44,7 @@ fn developer_config() -> Result<PilotServiceConfig, Box<dyn std::error::Error>> 
                 token: None,
                 token_env: Some(token_env),
                 token_file: None,
+                token_command: None,
             }],
         },
     })

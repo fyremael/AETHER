@@ -23,10 +23,12 @@ The current report and bench suite covers these kernel surfaces:
 
 - journal append throughput
 - resolver throughput for both `Current` and `AsOf`
+- durable restart plus current-state replay from the SQLite-backed kernel
 - compiler SCC planning time
 - recursive closure runtime over linear dependency chains
 - tuple explanation runtime over the deepest recursive tuple in the chain
 - end-to-end kernel service runs for a coordination-style claimability query
+- durable restart plus end-to-end coordination replay through the SQLite-backed kernel
 
 The footprint estimates currently track:
 
@@ -161,6 +163,7 @@ Use the baseline and drift tools together when you need to answer whether the ke
 
 - The numbers are single-node local measurements.
 - The service benchmark includes parsing, compilation, resolution, runtime evaluation, and query execution.
+- The durable restart/replay benchmarks include reopening the SQLite journal and replaying committed history before serving the request.
 - Throughput values are derived from mean latency over several samples.
 - The stress tests are for correctness under load plus rough elapsed-time observation, not SLO certification.
 - The drift report compares like-for-like workload keys only. Missing baseline entries are called out explicitly rather than guessed.
@@ -176,7 +179,7 @@ The wrong question is:
 
 - “What exact production capacity does this prove?”
 
-The repository does not yet have durable storage, network fanout, multi-node execution, or production workload capture, so the current suite should not be presented as production capacity certification.
+The repository does not yet have network fanout, multi-node execution, or production workload capture, so the current suite should not be presented as production capacity certification.
 
 ## Recommended Operating Rhythm
 

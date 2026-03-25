@@ -1,6 +1,6 @@
 {
   "label": "pilot-accepted-baseline.windows-x86_64",
-  "generated_at": "1774433566",
+  "generated_at": "1774440601",
   "report": {
     "samples_per_workload": 5,
     "measurements": [
@@ -13,18 +13,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 2551280
+            "nanos": 2122240
           },
           "min": {
             "secs": 0,
-            "nanos": 2280600
+            "nanos": 1805900
           },
           "max": {
             "secs": 0,
-            "nanos": 2950900
+            "nanos": 2626900
           }
         },
-        "throughput_per_second": 3919601.1413878524,
+        "throughput_per_second": 4712002.412545235,
         "notes": [
           "10,000 unique element IDs appended into an empty journal each sample"
         ]
@@ -38,18 +38,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 12234920
+            "nanos": 12561780
           },
           "min": {
             "secs": 0,
-            "nanos": 11374100
+            "nanos": 11298800
           },
           "max": {
             "secs": 0,
-            "nanos": 12558300
+            "nanos": 15388800
           }
         },
-        "throughput_per_second": 4086663.4191314694,
+        "throughput_per_second": 3980327.628727776,
         "notes": [
           "50,000 unique element IDs appended into an empty journal each sample"
         ]
@@ -63,18 +63,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 2717980
+            "nanos": 2844420
           },
           "min": {
             "secs": 0,
-            "nanos": 2494600
+            "nanos": 2586500
           },
           "max": {
             "secs": 0,
-            "nanos": 3240800
+            "nanos": 3242300
           }
         },
-        "throughput_per_second": 367920.2937475625,
+        "throughput_per_second": 351565.5212661984,
         "notes": [
           "4,332 datoms across scalar, set, and ref attributes"
         ]
@@ -88,20 +88,47 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 1324740
+            "nanos": 1215700
           },
           "min": {
             "secs": 0,
-            "nanos": 1223300
+            "nanos": 1202700
           },
           "max": {
             "secs": 0,
-            "nanos": 1621900
+            "nanos": 1223900
           }
         },
-        "throughput_per_second": 754865.1056056282,
+        "throughput_per_second": 822571.3580653123,
         "notes": [
           "Inclusive prefix cut at 2166 across 4,332 datoms"
+        ]
+      },
+      {
+        "workload": "Durable restart current replay",
+        "scale": "1,000 entities",
+        "units": 4000,
+        "unit_label": "entities/s",
+        "latency": {
+          "samples": 5,
+          "mean": {
+            "secs": 0,
+            "nanos": 52858420
+          },
+          "min": {
+            "secs": 0,
+            "nanos": 49449500
+          },
+          "max": {
+            "secs": 0,
+            "nanos": 56937700
+          }
+        },
+        "throughput_per_second": 75673.84723190742,
+        "notes": [
+          "4,332 durable datoms persisted into a SQLite journal",
+          "each sample reopens the durable kernel and resolves current state from committed history",
+          "4 restart-and-replay passes per sample to reduce timer jitter"
         ]
       },
       {
@@ -113,18 +140,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 9123680
+            "nanos": 8830240
           },
           "min": {
             "secs": 0,
-            "nanos": 8628300
+            "nanos": 8590100
           },
           "max": {
             "secs": 0,
-            "nanos": 9695800
+            "nanos": 9237400
           }
         },
-        "throughput_per_second": 224470.8275608088,
+        "throughput_per_second": 231930.2759607893,
         "notes": [
           "17 predicates and 17 rules with one large recursive SCC",
           "128 compiler passes per sample to reduce timer jitter on this microbenchmark"
@@ -139,18 +166,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 34067360
+            "nanos": 33146800
           },
           "min": {
             "secs": 0,
-            "nanos": 31701800
+            "nanos": 32303500
           },
           "max": {
             "secs": 0,
-            "nanos": 36405400
+            "nanos": 34165800
           }
         },
-        "throughput_per_second": 240464.77331968196,
+        "throughput_per_second": 247143.012296813,
         "notes": [
           "65 predicates and 65 rules with one large recursive SCC",
           "128 compiler passes per sample to reduce timer jitter on this microbenchmark"
@@ -165,18 +192,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 37825940
+            "nanos": 37204720
           },
           "min": {
             "secs": 0,
-            "nanos": 37036400
+            "nanos": 36348200
           },
           "max": {
             "secs": 0,
-            "nanos": 38860400
+            "nanos": 39021900
           }
         },
-        "throughput_per_second": 53296.75878510884,
+        "throughput_per_second": 54186.67308879089,
         "notes": [
           "2,016 derived tuples expected from a linear dependency chain"
         ]
@@ -190,18 +217,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 309367560
+            "nanos": 282646460
           },
           "min": {
             "secs": 0,
-            "nanos": 276055800
+            "nanos": 276552500
           },
           "max": {
             "secs": 0,
-            "nanos": 357679700
+            "nanos": 291159900
           }
         },
-        "throughput_per_second": 26272.955057084848,
+        "throughput_per_second": 28756.77268344348,
         "notes": [
           "8,128 derived tuples expected from a linear dependency chain"
         ]
@@ -215,18 +242,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 3412500
+            "nanos": 2782220
           },
           "min": {
             "secs": 0,
-            "nanos": 2814600
+            "nanos": 2296900
           },
           "max": {
             "secs": 0,
-            "nanos": 4680400
+            "nanos": 3476900
           }
         },
-        "throughput_per_second": 37216.117216117214,
+        "throughput_per_second": 45647.00131549626,
         "notes": [
           "127 tuples in the longest proof trace",
           "root tuple carries 127 source datom IDs"
@@ -241,21 +268,48 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 3926620
+            "nanos": 4236980
           },
           "min": {
             "secs": 0,
-            "nanos": 3681800
+            "nanos": 3869400
           },
           "max": {
             "secs": 0,
-            "nanos": 4233100
+            "nanos": 4960700
           }
         },
-        "throughput_per_second": 41766.20095654787,
+        "throughput_per_second": 38706.814759569315,
         "notes": [
           "164 expected worker-task claimability rows",
           "includes parse, compile, resolve, evaluate, and query through the kernel service"
+        ]
+      },
+      {
+        "workload": "Durable restart coordination replay",
+        "scale": "128 tasks",
+        "units": 656,
+        "unit_label": "rows/s",
+        "latency": {
+          "samples": 5,
+          "mean": {
+            "secs": 0,
+            "nanos": 27626680
+          },
+          "min": {
+            "secs": 0,
+            "nanos": 25136400
+          },
+          "max": {
+            "secs": 0,
+            "nanos": 31029600
+          }
+        },
+        "throughput_per_second": 23745.162285153336,
+        "notes": [
+          "164 expected worker-task claimability rows",
+          "each sample reopens the durable kernel, replays the SQLite journal, and runs the coordination document",
+          "4 restart-and-replay passes per sample to reduce timer jitter"
         ]
       }
     ],

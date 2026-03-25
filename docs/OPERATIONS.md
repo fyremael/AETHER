@@ -54,6 +54,10 @@ If you need a packaged pilot service bundle for deployment review or handoff, ru
 double-click scripts/build-pilot-package.cmd
 ```
 
+If you need the deployment and upgrade runbook for that bundle, read:
+
+- `docs/PILOT_OPERATIONS_PLAYBOOK.md`
+
 If you need the current durable pilot service rather than a demo, run:
 
 ```bash
@@ -61,6 +65,8 @@ cargo run -p aether_api --bin aether_pilot_service --release -- --config <path-t
 ```
 
 That hardened pilot service now starts only from an explicit deployment config and uses a secret-backed auth token source instead of a baked-in default token. The packaged deployment path keeps the bearer token in a config-relative secret file by default and writes audit events beside the SQLite database as JSONL.
+
+The same config model can also fetch tokens from an external secret-manager CLI or broker script with `token_command`, so operators can keep package-local files out of the trust path when needed.
 
 Those audit entries now carry semantic context, not just endpoint metadata. For the current pilot path that includes the temporal cut, the query goal, tuple IDs for explain requests, and result-count summaries where they exist.
 
@@ -214,6 +220,7 @@ Use the dashboard when people want to watch the measurements arrive in real time
 
 Use the pilot report when someone asks, “Why is this worker authorized, or why was this reported result fenced right now?” Use the drift report when someone asks, “Did this change materially slow the pilot path down?”
 Use the launch validation pack when someone asks, “Is this exact pilot candidate ready to go?”
+Use the operations playbook when someone asks, “How do we deploy, rotate, upgrade, or roll back this pilot safely?”
 
 ## How To Present The Output
 

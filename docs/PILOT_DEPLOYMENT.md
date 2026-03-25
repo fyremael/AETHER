@@ -49,6 +49,7 @@ Each token must come from exactly one source:
 - `token`
 - `token_env`
 - `token_file`
+- `token_command`
 
 For the pilot deployment path, `token_file` is the recommended default.
 
@@ -81,6 +82,8 @@ powershell -ExecutionPolicy Bypass -File scripts/new-pilot-token.ps1 -OutputPath
 
 Then restart the service with the updated secret file.
 
+For deeper integration, the service can also fetch a token at startup with `token_command`. That is the preferred bridge to external secret-manager CLIs or local broker scripts when operators do not want bearer tokens stored directly in the package.
+
 ## Building A Package
 
 Windows operator path:
@@ -108,8 +111,11 @@ The package contains:
 - `data/`
 - `logs/`
 - `docs/PILOT_DEPLOYMENT.md`
+- `docs/PILOT_OPERATIONS_PLAYBOOK.md`
 - `run-pilot-service.ps1`
 - `run-pilot-service.cmd`
+- `rotate-pilot-token.ps1`
+- `rotate-pilot-token.cmd`
 
 ## Running The Packaged Service
 
@@ -135,6 +141,17 @@ The service will:
 ## CI Posture
 
 The package path is now part of CI. Mainline GitHub Actions builds the pilot package and uploads it as an artifact. The same CI run also executes the full launch-validation pack so drift, soak, and stress regressions become hard gates rather than advisory side workflows.
+
+## Playbooks
+
+Use [PILOT_OPERATIONS_PLAYBOOK.md](./PILOT_OPERATIONS_PLAYBOOK.md) for the step-by-step operator path:
+
+- first deployment
+- token rotation
+- external secret-manager startup
+- in-place upgrade
+- rollback
+- restart/replay validation
 
 ## What This Still Is Not
 

@@ -38,7 +38,7 @@ Completed:
 - artifact and vector sidecar federation implemented in `aether_api`, including journal-tail-anchored registration, journal-exact `AsOf` visibility, external artifact references, vector search, semantic fact projection with provenance, and SQLite-backed durability for the durable kernel service
 - scheduled/manual GitHub Actions automation added for the pilot launch-validation and drift artifact pack
 - launch validation and drift promotion completed into a required mainline CI gate
-- packaged durable pilot-service bundles implemented with config-backed startup and secret-file/env token resolution
+- packaged durable pilot-service bundles implemented with config-backed startup, package-local rotation tooling, restart/replay benchmark coverage, and secret-file/env/command token resolution
 - first real Go operator shell implemented against the HTTP API with typed client coverage
 - broader typed Python SDK surface implemented against the HTTP API with fixture builders and live integration coverage
 - documentation portal, architecture guide, developer workflow guide, operator guide, glossary, and documentation standards now exist
@@ -62,6 +62,6 @@ The most immediate work now sits just beyond the launch-ready pilot slice and la
 
 - add longer-duration soak coverage beyond the current launch validation window
 - decide how far to widen audit context from the current semantic cut/query/tuple fields into fuller operator intent and semantic diffs
-- harden packaged deployment beyond the current single-node Windows bundle into broader service-operability posture
+- continue service-operability hardening beyond the current single-node Windows bundle, with deeper lifecycle management after the new startup-time secret-manager bridge
 - decide which post-v1 ergonomic DSL extensions matter beyond the now-implemented canonical surface
 - continue runtime optimization now that the current bounded-aggregation requirement is covered

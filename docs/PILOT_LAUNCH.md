@@ -27,7 +27,7 @@ The pilot is launch-ready when all of these are true:
 2. authenticated HTTP answers are exact before and after restart
 3. operator reports explain why a worker is authorized, why a result is accepted, or why it is fenced
 4. semantic audit logs preserve the cut, goal, tuple, and count context operators need
-5. benchmark baselines exist and drift is checked against them
+5. benchmark baselines exist and drift is checked against them, including durable restart/replay timings
 6. longer-run soak and misuse drills pass on the launch candidate
 
 The repository now contains all of those gates for the current pilot.
@@ -90,6 +90,13 @@ cargo run -p aether_api --example capture_performance_baseline --release
 
 The tracked fixture baseline makes the launch path reproducible on a fresh QA machine or CI worker. The transcript records both the resolved baseline path and whether it came from an explicit override, a local artifact, or the tracked fixture.
 
+The accepted baseline now also covers:
+
+- `Durable restart current replay`
+- `Durable restart coordination replay`
+
+Those workloads are part of launch readiness, not optional side measurements.
+
 ## Expected Output Pack
 
 When launch validation succeeds, the operator artifact set should include:
@@ -125,7 +132,7 @@ After launch, the next hardening priorities are:
 
 - deeper operator-intent and semantic-diff audit context
 - longer-duration soak windows
-- packaged deployment promotion beyond the current single-node Windows pilot bundle
-- service hardening beyond the current single-node bearer-token boundary
+- broader deployment promotion beyond the current single-node Windows pilot bundle
+- deeper key lifecycle and secret-manager hardening beyond the current startup-time command integration
 
 That is the post-launch road, not a prerequisite for the current pilot launch.

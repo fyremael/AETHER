@@ -17,7 +17,8 @@ $packageRoot = if ($OutputDir) {
 $zipPath = "$packageRoot.zip"
 $binarySource = Join-Path $repoRoot "target\release\aether_pilot_service.exe"
 $templatePath = Join-Path $repoRoot "fixtures\deployment\pilot-service.template.json"
-$readmeSource = Join-Path $repoRoot "docs\PILOT_DEPLOYMENT.md"
+$deploymentDocSource = Join-Path $repoRoot "docs\PILOT_DEPLOYMENT.md"
+$playbookDocSource = Join-Path $repoRoot "docs\PILOT_OPERATIONS_PLAYBOOK.md"
 $binDir = Join-Path $packageRoot "bin"
 $configDir = Join-Path $packageRoot "config"
 $docsDir = Join-Path $packageRoot "docs"
@@ -27,6 +28,8 @@ $tokenPath = Join-Path $configDir "pilot-operator.token"
 $configPath = Join-Path $configDir "pilot-service.json"
 $runPs1Path = Join-Path $packageRoot "run-pilot-service.ps1"
 $runCmdPath = Join-Path $packageRoot "run-pilot-service.cmd"
+$rotatePs1Path = Join-Path $packageRoot "rotate-pilot-token.ps1"
+$rotateCmdPath = Join-Path $packageRoot "rotate-pilot-token.cmd"
 
 function New-SecureToken {
     $bytes = New-Object byte[] 48
@@ -54,7 +57,8 @@ if (Test-Path $packageRoot) {
 New-Item -ItemType Directory -Force -Path $binDir, $configDir, $docsDir, $dataDir, $logsDir | Out-Null
 
 Copy-Item -Path $binarySource -Destination (Join-Path $binDir "aether_pilot_service.exe")
-Copy-Item -Path $readmeSource -Destination (Join-Path $docsDir "PILOT_DEPLOYMENT.md")
+Copy-Item -Path $deploymentDocSource -Destination (Join-Path $docsDir "PILOT_DEPLOYMENT.md")
+Copy-Item -Path $playbookDocSource -Destination (Join-Path $docsDir "PILOT_OPERATIONS_PLAYBOOK.md")
 
 $template = Get-Content -Path $templatePath -Raw | ConvertFrom-Json
 $template.bind_addr = $BindAddr
@@ -86,6 +90,43 @@ if (-not (Test-Path $binary)) {
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0run-pilot-service.ps1" %*
 '@ | Set-Content -Path $runCmdPath
 
+@'
+param(
+    [string]$TokenPath = (Join-Path $PSScriptRoot "config\pilot-operator.token"),
+    [switch]$BackupExisting = $true
+)
+
+$ErrorActionPreference = "Stop"
+
+function New-SecureToken {
+    $bytes = New-Object byte[] 48
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+
+$resolvedTokenPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($TokenPath)
+$parent = Split-Path -Parent $resolvedTokenPath
+if ($parent) {
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+}
+
+if ($BackupExisting -and (Test-Path $resolvedTokenPath)) {
+    $backupPath = "$resolvedTokenPath." + (Get-Date -Format "yyyyMMdd-HHmmss") + ".bak"
+    Copy-Item -Path $resolvedTokenPath -Destination $backupPath
+    Write-Host "Backed up previous token to $backupPath"
+}
+
+$token = New-SecureToken
+Set-Content -Path $resolvedTokenPath -Value $token -NoNewline
+Write-Host "Rotated pilot token at $resolvedTokenPath"
+Write-Host "Restart the pilot service to load the new token."
+'@ | Set-Content -Path $rotatePs1Path
+
+@'
+@echo off
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0rotate-pilot-token.ps1" %*
+'@ | Set-Content -Path $rotateCmdPath
+
 if (Test-Path $zipPath) {
     Remove-Item -Force $zipPath
 }
@@ -98,3 +139,4 @@ Write-Host "Package zip:  $zipPath"
 Write-Host "Config:       $configPath"
 Write-Host "Token file:   $tokenPath"
 Write-Host "Launch with:  $runCmdPath"
+Write-Host "Rotate with:  $rotateCmdPath"

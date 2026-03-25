@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     env, fs,
     path::{Component, Path, PathBuf},
+    process::{Command, Stdio},
 };
 use thiserror::Error;
 
@@ -112,6 +113,8 @@ pub struct PilotTokenConfig {
     pub token_env: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_file: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_command: Option<Vec<String>>,
 }
 
 impl PilotTokenConfig {
@@ -138,9 +141,12 @@ impl PilotTokenConfig {
         if self.token_file.is_some() {
             sources += 1;
         }
+        if self.token_command.is_some() {
+            sources += 1;
+        }
         if sources != 1 {
             return Err(DeploymentError::Validation(format!(
-                "pilot auth principal {} must declare exactly one token source (token, token_env, or token_file)",
+                "pilot auth principal {} must declare exactly one token source (token, token_env, token_file, or token_command)",
                 self.principal
             )));
         }
@@ -165,13 +171,8 @@ impl PilotTokenConfig {
                 )));
             }
             (token, format!("env:{token_env}"))
-        } else {
-            let token_file = resolve_path(
-                config_dir,
-                self.token_file
-                    .as_ref()
-                    .expect("token_file source already validated"),
-            );
+        } else if let Some(token_file_path) = &self.token_file {
+            let token_file = resolve_path(config_dir, token_file_path);
             let token = fs::read_to_string(&token_file).map_err(|source| {
                 DeploymentError::ReadTokenFile {
                     path: token_file.clone(),
@@ -187,6 +188,14 @@ impl PilotTokenConfig {
                 )));
             }
             (token, format!("file:{}", token_file.display()))
+        } else {
+            let token_command = self
+                .token_command
+                .as_ref()
+                .expect("token_command source already validated");
+            let (token, source) =
+                resolve_token_command(config_dir, token_command, &self.principal)?;
+            (token, source)
         };
 
         Ok(ResolvedPilotToken {
@@ -253,6 +262,19 @@ pub enum DeploymentError {
         #[source]
         source: std::io::Error,
     },
+    #[error("failed to launch token command {command}: {source}")]
+    RunTokenCommand {
+        command: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("token command {command} for principal {principal} exited with code {exit_code:?}: {stderr}")]
+    TokenCommandFailed {
+        principal: String,
+        command: String,
+        exit_code: Option<i32>,
+        stderr: String,
+    },
     #[error("invalid pilot deployment configuration: {0}")]
     Validation(String),
     #[error(transparent)]
@@ -284,6 +306,69 @@ fn resolve_path(base_dir: &Path, path: &Path) -> PathBuf {
         base_dir.join(path)
     };
     normalize_path(&joined)
+}
+
+fn resolve_token_command(
+    config_dir: &Path,
+    token_command: &[String],
+    principal: &str,
+) -> Result<(String, String), DeploymentError> {
+    let (program, args) = token_command.split_first().ok_or_else(|| {
+        DeploymentError::Validation(format!(
+            "pilot auth principal {principal} has an empty token_command"
+        ))
+    })?;
+    let command_path = resolve_command_path(config_dir, program);
+    let output = Command::new(command_path)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|source| DeploymentError::RunTokenCommand {
+            command: display_command(program, args),
+            source,
+        })?;
+    if !output.status.success() {
+        return Err(DeploymentError::TokenCommandFailed {
+            principal: principal.to_string(),
+            command: display_command(program, args),
+            exit_code: output.status.code(),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        });
+    }
+
+    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if token.is_empty() {
+        return Err(DeploymentError::Validation(format!(
+            "token command {} for principal {} returned an empty token",
+            display_command(program, args),
+            principal
+        )));
+    }
+
+    Ok((token, format!("command:{program}")))
+}
+
+fn resolve_command_path(config_dir: &Path, program: &str) -> PathBuf {
+    let program_path = Path::new(program);
+    if program_path.is_absolute()
+        || program_path.parent().is_some()
+        || program.starts_with('.')
+        || program.contains('/')
+        || program.contains('\\')
+    {
+        resolve_path(config_dir, program_path)
+    } else {
+        program_path.to_path_buf()
+    }
+}
+
+fn display_command(program: &str, args: &[String]) -> String {
+    std::iter::once(program.to_string())
+        .chain(args.iter().cloned())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
@@ -344,6 +429,7 @@ mod tests {
                     token: None,
                     token_env: None,
                     token_file: Some(PathBuf::from("pilot.token")),
+                    token_command: None,
                 }],
             },
         };
@@ -382,6 +468,7 @@ mod tests {
                     token: Some("inline".into()),
                     token_env: Some("AETHER_TOKEN".into()),
                     token_file: None,
+                    token_command: None,
                 }],
             },
         };
@@ -394,6 +481,92 @@ mod tests {
             DeploymentError::Validation(message)
                 if message.contains("exactly one token source")
         ));
+    }
+
+    #[test]
+    fn resolves_token_from_command() {
+        let command = token_command_fixture("command-token");
+        let config = PilotServiceConfig {
+            bind_addr: "127.0.0.1:3000".into(),
+            database_path: PathBuf::from("coordination.sqlite"),
+            audit_log_path: None,
+            auth: PilotAuthConfig {
+                tokens: vec![PilotTokenConfig {
+                    principal: "pilot-operator".into(),
+                    scopes: vec![AuthScope::Query],
+                    policy_context: None,
+                    token: None,
+                    token_env: None,
+                    token_file: None,
+                    token_command: Some(command),
+                }],
+            },
+        };
+
+        let resolved = config
+            .resolve(PathBuf::from("pilot-service.json"))
+            .expect("resolve command token");
+        assert_eq!(resolved.auth.tokens[0].token, "command-token");
+        assert!(resolved.token_summaries[0].source.starts_with("command:"));
+    }
+
+    #[test]
+    fn rejects_empty_token_command_output() {
+        let config = PilotServiceConfig {
+            bind_addr: "127.0.0.1:3000".into(),
+            database_path: PathBuf::from("coordination.sqlite"),
+            audit_log_path: None,
+            auth: PilotAuthConfig {
+                tokens: vec![PilotTokenConfig {
+                    principal: "pilot-operator".into(),
+                    scopes: vec![AuthScope::Query],
+                    policy_context: None,
+                    token: None,
+                    token_env: None,
+                    token_file: None,
+                    token_command: Some(empty_output_command_fixture()),
+                }],
+            },
+        };
+
+        let error = config
+            .resolve(PathBuf::from("pilot-service.json"))
+            .expect_err("empty command output should fail");
+        assert!(matches!(
+            error,
+            DeploymentError::Validation(message)
+                if message.contains("returned an empty token")
+        ));
+    }
+
+    fn token_command_fixture(token: &str) -> Vec<String> {
+        if cfg!(windows) {
+            vec![
+                "powershell".into(),
+                "-NoProfile".into(),
+                "-Command".into(),
+                format!("Write-Output '{token}'"),
+            ]
+        } else {
+            vec![
+                "sh".into(),
+                "-c".into(),
+                format!("printf '%s\\n' '{token}'"),
+            ]
+        }
+    }
+
+    fn empty_output_command_fixture() -> Vec<String> {
+        if cfg!(windows) {
+            vec![
+                "powershell".into(),
+                "-NoProfile".into(),
+                "-Command".into(),
+                "Write-Output ''".into(),
+            ]
+        } else {
+            vec!["sh".into(), "-c".into(), "printf ''".into()]
+        }
     }
 
     fn unique_temp_dir(prefix: &str) -> PathBuf {

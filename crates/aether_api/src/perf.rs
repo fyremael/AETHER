@@ -1,4 +1,7 @@
-use crate::{ApiError, AppendRequest, InMemoryKernelService, KernelService, RunDocumentRequest};
+use crate::{
+    ApiError, AppendRequest, CurrentStateRequest, InMemoryKernelService, KernelService,
+    RunDocumentRequest, SqliteKernelService,
+};
 use aether_ast::{
     Atom, AttributeId, Datom, DatomProvenance, DerivationTrace, ElementId, EntityId, Literal,
     OperationKind, PredicateId, PredicateRef, ReplicaId, RuleAst, RuleId, RuleProgram, Term,
@@ -12,10 +15,10 @@ use aether_runtime::{DerivedSet, RuleRuntime, RuntimeIteration, SemiNaiveRuntime
 use aether_schema::{AttributeClass, AttributeSchema, PredicateSignature, Schema, ValueType};
 use aether_storage::{InMemoryJournal, Journal};
 use serde::{Deserialize, Serialize};
-use std::fmt::Write as _;
 use std::hint::black_box;
 use std::mem::size_of;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::{fmt::Write as _, fs, path::PathBuf};
 
 pub const DEFAULT_REPORT_SAMPLES: usize = 5;
 
@@ -208,6 +211,24 @@ pub struct ServiceFixture {
     pub task_count: usize,
 }
 
+#[derive(Debug)]
+pub struct DurableResolveFixture {
+    _root: TempDirGuard,
+    pub database_path: PathBuf,
+    pub schema: Schema,
+    pub entity_count: usize,
+    pub datom_count: usize,
+}
+
+#[derive(Debug)]
+pub struct DurableServiceReplayFixture {
+    _root: TempDirGuard,
+    pub database_path: PathBuf,
+    pub request: RunDocumentRequest,
+    pub expected_row_count: usize,
+    pub task_count: usize,
+}
+
 struct MeasurementPlan {
     workload: &'static str,
     scale: String,
@@ -216,6 +237,17 @@ struct MeasurementPlan {
     notes: Vec<String>,
     samples: usize,
     iterations_per_sample: usize,
+}
+
+#[derive(Debug)]
+struct TempDirGuard {
+    path: PathBuf,
+}
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
 }
 
 pub fn build_append_fixture(count: usize) -> AppendFixture {
@@ -462,6 +494,63 @@ pub fn build_coordination_service_fixture(task_count: usize) -> Result<ServiceFi
             policy_context: None,
         },
         expected_row_count: ready_tasks * 2,
+        task_count,
+    })
+}
+
+pub fn build_durable_resolve_fixture(
+    entity_count: usize,
+) -> Result<DurableResolveFixture, ApiError> {
+    let fixture = build_resolve_fixture(entity_count);
+    let root = unique_temp_dir("resolve-restart");
+    let data_dir = root.join("data");
+    fs::create_dir_all(&data_dir).map_err(|source| {
+        ApiError::Validation(format!(
+            "failed to create durable resolve fixture directory {}: {source}",
+            data_dir.display()
+        ))
+    })?;
+    let database_path = data_dir.join("coordination.sqlite");
+    let mut service = SqliteKernelService::open(&database_path)?;
+    service.append(AppendRequest {
+        datoms: fixture.datoms.clone(),
+    })?;
+
+    Ok(DurableResolveFixture {
+        _root: TempDirGuard { path: root },
+        database_path,
+        schema: fixture.schema,
+        entity_count: entity_count.max(1),
+        datom_count: fixture.datoms.len(),
+    })
+}
+
+pub fn build_durable_coordination_replay_fixture(
+    task_count: usize,
+) -> Result<DurableServiceReplayFixture, ApiError> {
+    let task_count = task_count.max(1);
+    let root = unique_temp_dir("service-restart");
+    let data_dir = root.join("data");
+    fs::create_dir_all(&data_dir).map_err(|source| {
+        ApiError::Validation(format!(
+            "failed to create durable service fixture directory {}: {source}",
+            data_dir.display()
+        ))
+    })?;
+    let database_path = data_dir.join("coordination.sqlite");
+    let mut service = SqliteKernelService::open(&database_path)?;
+    service.append(AppendRequest {
+        datoms: coordination_datoms(task_count),
+    })?;
+
+    Ok(DurableServiceReplayFixture {
+        _root: TempDirGuard { path: root },
+        database_path,
+        request: RunDocumentRequest {
+            dsl: coordination_claimability_dsl(task_count),
+            policy_context: None,
+        },
+        expected_row_count: coordination_claimability_rows(task_count),
         task_count,
     })
 }
@@ -748,6 +837,94 @@ fn benchmark_service_coordination_impl(
     )
 }
 
+pub fn benchmark_durable_restart_current(
+    entity_count: usize,
+    samples: usize,
+) -> Result<PerfMeasurement, ApiError> {
+    let mut observer = None;
+    benchmark_durable_restart_current_impl(entity_count, samples, &mut observer)
+}
+
+fn benchmark_durable_restart_current_impl(
+    entity_count: usize,
+    samples: usize,
+    observer: &mut Option<&mut dyn FnMut(PerfEvent)>,
+) -> Result<PerfMeasurement, ApiError> {
+    let fixture = build_durable_resolve_fixture(entity_count)?;
+    let notes = vec![
+        format!(
+            "{} durable datoms persisted into a SQLite journal",
+            format_count(fixture.datom_count)
+        ),
+        "each sample reopens the durable kernel and resolves current state from committed history"
+            .into(),
+        "4 restart-and-replay passes per sample to reduce timer jitter".into(),
+    ];
+
+    benchmark_measurement(
+        MeasurementPlan {
+            workload: "Durable restart current replay",
+            scale: format!("{} entities", format_count(entity_count)),
+            units: fixture.entity_count,
+            unit_label: "entities/s",
+            notes,
+            samples,
+            iterations_per_sample: 4,
+        },
+        observer,
+        move || {
+            let service = SqliteKernelService::open(&fixture.database_path)?;
+            service.current_state(CurrentStateRequest {
+                schema: fixture.schema.clone(),
+                datoms: Vec::new(),
+                policy_context: None,
+            })
+        },
+    )
+}
+
+pub fn benchmark_durable_restart_coordination(
+    task_count: usize,
+    samples: usize,
+) -> Result<PerfMeasurement, ApiError> {
+    let mut observer = None;
+    benchmark_durable_restart_coordination_impl(task_count, samples, &mut observer)
+}
+
+fn benchmark_durable_restart_coordination_impl(
+    task_count: usize,
+    samples: usize,
+    observer: &mut Option<&mut dyn FnMut(PerfEvent)>,
+) -> Result<PerfMeasurement, ApiError> {
+    let fixture = build_durable_coordination_replay_fixture(task_count)?;
+    let notes = vec![
+        format!(
+            "{} expected worker-task claimability rows",
+            format_count(fixture.expected_row_count)
+        ),
+        "each sample reopens the durable kernel, replays the SQLite journal, and runs the coordination document"
+            .into(),
+        "4 restart-and-replay passes per sample to reduce timer jitter".into(),
+    ];
+
+    benchmark_measurement(
+        MeasurementPlan {
+            workload: "Durable restart coordination replay",
+            scale: format!("{} tasks", format_count(task_count)),
+            units: fixture.expected_row_count.max(1),
+            unit_label: "rows/s",
+            notes,
+            samples,
+            iterations_per_sample: 4,
+        },
+        observer,
+        move || {
+            let mut service = SqliteKernelService::open(&fixture.database_path)?;
+            service.run_document(fixture.request.clone())
+        },
+    )
+}
+
 pub fn estimate_runtime_footprint(chain_len: usize) -> Result<FootprintEstimate, ApiError> {
     let fixture = build_runtime_fixture(chain_len)?;
     let derived = SemiNaiveRuntime.evaluate(&fixture.state, &fixture.program)?;
@@ -804,7 +981,7 @@ fn default_performance_report_impl(
     emit_event(
         &mut observer,
         PerfEvent::SuiteStart {
-            total_workloads: 10,
+            total_workloads: 12,
             samples_per_workload: samples,
         },
     );
@@ -813,12 +990,14 @@ fn default_performance_report_impl(
         benchmark_append_impl(50_000, samples, &mut observer)?,
         benchmark_resolve_current_impl(1_000, samples, &mut observer)?,
         benchmark_resolve_as_of_impl(1_000, samples, &mut observer)?,
+        benchmark_durable_restart_current_impl(1_000, samples, &mut observer)?,
         benchmark_compile_scc_impl(16, samples, &mut observer)?,
         benchmark_compile_scc_impl(64, samples, &mut observer)?,
         benchmark_runtime_closure_impl(64, samples, &mut observer)?,
         benchmark_runtime_closure_impl(128, samples, &mut observer)?,
         benchmark_explain_trace_impl(128, samples, &mut observer)?,
         benchmark_service_coordination_impl(128, samples, &mut observer)?,
+        benchmark_durable_restart_coordination_impl(128, samples, &mut observer)?,
     ];
     let footprints = vec![
         estimate_runtime_footprint(128)?,
@@ -899,6 +1078,10 @@ pub fn render_markdown_report(report: &PerfReport) -> String {
     let _ = writeln!(
         output,
         "- The end-to-end service number includes parsing, compilation, resolution, runtime evaluation, and query execution."
+    );
+    let _ = writeln!(
+        output,
+        "- Durable restart/replay timings include reopening the SQLite-backed kernel and replaying committed history before answering."
     );
     let _ = writeln!(
         output,
@@ -1340,6 +1523,13 @@ fn task_has_active_claim(task: usize) -> bool {
     task % 7 == 0
 }
 
+fn coordination_claimability_rows(task_count: usize) -> usize {
+    let ready_tasks = (1..=task_count)
+        .filter(|task| !task_is_done(*task) && !task_has_active_claim(*task))
+        .count();
+    ready_tasks * 2
+}
+
 fn coordination_claimability_dsl(task_count: usize) -> String {
     let mut facts = String::new();
     for task in 1..=task_count {
@@ -1529,6 +1719,14 @@ fn emit_event(observer: &mut Option<&mut dyn FnMut(PerfEvent)>, event: PerfEvent
     if let Some(observer) = observer.as_deref_mut() {
         observer(event);
     }
+}
+
+fn unique_temp_dir(prefix: &str) -> PathBuf {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    std::env::temp_dir().join(format!("aether-{prefix}-{unique}"))
 }
 
 #[cfg(test)]
