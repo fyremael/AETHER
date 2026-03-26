@@ -164,6 +164,7 @@ The first executable slice of that model now exists in the codebase:
 - explicit federated-history reads over a cutset rather than a fake global cut
 - imported facts that are lifted from partition-local query results with source partition/cut provenance
 - federated document execution, tuple explain traces, and markdown reports that remain explicit about which local truths contributed to an answer
+- a SQLite-backed partition-aware service that preserves those same semantics across service restarts
 
 The longer-form strategy for this lives in
 `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md`.
@@ -204,13 +205,14 @@ This is not an omission of ambition. It is sequencing. The kernel is being made 
 - a broader typed Python SDK surface over the stable boundary
 - explicit partition and federated-cut types plus a single-process partition-aware in-memory service
 - imported-fact reasoning plus federated explain/report surfaces over that partition-aware service
+- a durable SQLite-backed partition-aware backend for single-node replay across multiple partitions
 - operator-facing demonstrations
 - a tracked semantic compliance matrix for the current v1 single-node closure claim
 
 ### Deferred
 
 - broader post-v1 DSL ergonomics
-- durable or replicated partition-aware backends
+- replicated or failover-capable partition-aware backends
 - distributed or replicated sidecar federation backends
 - production-hardened multi-tenant service boundaries
 - mature Go/Python client ecosystems beyond the current first real boundary clients

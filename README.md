@@ -167,6 +167,7 @@ Implemented today:
 - a single-process partition-aware in-memory service for exact per-partition append/history/state reads and honest federated-history reads
 - imported-fact federation over explicit partition cuts, with source partition/cut provenance carried into derived tuples
 - federated document execution, explain traces, and markdown reports over partition-local truth without inventing a fake global clock
+- a SQLite-backed partition-aware service for durable per-partition replay plus restart-safe imported-fact and federated explain/report execution
 
 Deliberately still narrow:
 
@@ -174,7 +175,7 @@ Deliberately still narrow:
 - bounded aggregation is intentionally limited to non-recursive grouped aggregate rules, so richer aggregate syntax remains future work even though the v1 bounded-aggregation requirement is now covered
 - the Go shell and Python SDK are now real, but they are still early boundary clients rather than mature multi-platform ecosystems
 - sidecar federation is now journal-subordinated and temporally exact on the SQLite-backed pilot path, but it is not yet replicated, distributed, or policy-enforced end to end
-- the first partition-aware service slice now includes imported-fact reasoning plus federated explain/report surfaces, but durable partition backends and replicated authority partitions remain future work
+- the first partition-aware service slice now includes imported-fact reasoning, federated explain/report surfaces, and a SQLite-backed durable backend, but replicated authority partitions and failover remain future work
 
 Within that deliberately narrow bar, the current repository can honestly claim
 **full v1 single-node semantic closure**. The remaining gaps are broader

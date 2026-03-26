@@ -38,7 +38,7 @@ pub use partitioned::{
     FederatedTraceSummary, FederatedTraceTupleSummary, ImportedFactQueryRequest,
     ImportedFactQueryResponse, PartitionAppendRequest, PartitionAppendResponse,
     PartitionHistoryRequest, PartitionHistoryResponse, PartitionStateRequest,
-    PartitionStateResponse, PartitionedInMemoryKernelService,
+    PartitionStateResponse, PartitionedInMemoryKernelService, SqlitePartitionedKernelService,
 };
 pub use pilot::{
     coordination_pilot_dsl, coordination_pilot_seed_history,

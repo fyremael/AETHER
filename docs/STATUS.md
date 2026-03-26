@@ -49,6 +49,7 @@ Completed:
 - single-process partition-aware in-memory service implemented for exact per-partition append/history/state reads plus explicit federated-history reads
 - imported-fact federation implemented over explicit partition cuts, including provenance-bearing extensional facts that carry source partition/cut context into derived tuples
 - federated document execution, explain traces, and markdown report generation implemented on top of the partition-aware in-memory service
+- SQLite-backed partition-aware service implemented for durable per-partition replay and restart-safe federated imported-fact / explain / report execution
 - documentation portal, architecture guide, developer workflow guide, operator guide, glossary, and documentation standards now exist
 - GitHub Pages publishing pipeline added for the documentation portal and generated Rust API reference
 - unit tests added across the Rust core crates
@@ -74,4 +75,4 @@ the now-closed v1 single-node semantic core:
 - continue service-operability hardening beyond the current single-node Windows bundle, with deeper lifecycle management after the new startup-time secret-manager bridge
 - decide which post-v1 ergonomic DSL extensions matter beyond the now-implemented canonical surface
 - continue runtime optimization now that the current bounded-aggregation requirement is covered
-- continue the distributed-truth plan beyond the now-landed imported-fact and federated explain/report slice toward partition-aware durable backends and replicated authority partitions
+- continue the distributed-truth plan beyond the now-landed durable partition slice toward replicated authority partitions, federated service boundaries, and failover semantics

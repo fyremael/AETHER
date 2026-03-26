@@ -128,6 +128,11 @@ The first executable Track 3 slice now exists:
 The remaining work in this track is durability and broader service posture, not
 the basic semantic model.
 
+Track 3 now also runs over the first durable partition-aware backend:
+
+- a SQLite-backed partition service can replay local truth after restart
+- imported-fact, federated explain, and federated report semantics survive that restart intact
+
 ### Expected crate touch points
 
 - `crates/aether_ast`
@@ -158,8 +163,8 @@ distributed cleverness instead of governed truth.
 
 The initial Track 4 slice is now in place through federated tuple explain
 artifacts and markdown report generation over imported-fact runs. Richer
-operator surfaces, durable partition backends, and broader UI/report ergonomics
-remain future work.
+operator surfaces, replicated partition backends, and broader UI/report
+ergonomics remain future work.
 
 ### Expected touch points
 

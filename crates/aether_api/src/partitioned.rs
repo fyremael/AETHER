@@ -15,11 +15,22 @@ use aether_runtime::{execute_query, DerivedSet};
 use aether_schema::{PredicateSignature, Schema, ValueType};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    cell::RefCell,
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 #[derive(Debug, Default)]
 pub struct PartitionedInMemoryKernelService {
     partitions: IndexMap<PartitionId, InMemoryKernelService>,
+}
+
+#[derive(Debug)]
+pub struct SqlitePartitionedKernelService {
+    root: PathBuf,
+    partitions: RefCell<IndexMap<PartitionId, crate::SqliteKernelService>>,
 }
 
 impl PartitionedInMemoryKernelService {
@@ -47,74 +58,14 @@ impl PartitionedInMemoryKernelService {
         &self,
         request: PartitionHistoryRequest,
     ) -> Result<PartitionHistoryResponse, ApiError> {
-        let service = self.partition_service(&request.cut.partition)?;
-        let datoms = match request.cut.as_of {
-            Some(element) => {
-                let full_history = service
-                    .history(HistoryRequest {
-                        policy_context: None,
-                    })?
-                    .datoms;
-                let end = full_history
-                    .iter()
-                    .position(|datom| datom.element == element)
-                    .ok_or_else(|| {
-                        ApiError::Validation(format!(
-                            "unknown element {} for partition {}",
-                            element, request.cut.partition
-                        ))
-                    })?;
-                filter_partition_datoms(
-                    full_history[..=end].to_vec(),
-                    request.policy_context.as_ref(),
-                )
-            }
-            None => {
-                service
-                    .history(HistoryRequest {
-                        policy_context: request.policy_context.clone(),
-                    })?
-                    .datoms
-            }
-        };
-
-        Ok(PartitionHistoryResponse {
-            cut: request.cut,
-            datoms,
-        })
+        partition_history_for(self.partition_service(&request.cut.partition)?, request)
     }
 
     pub fn partition_state(
         &self,
         request: PartitionStateRequest,
     ) -> Result<PartitionStateResponse, ApiError> {
-        let service = self.partition_service(&request.cut.partition)?;
-        let state = match request.cut.as_of {
-            Some(element) => {
-                service
-                    .as_of(crate::AsOfRequest {
-                        schema: request.schema,
-                        datoms: Vec::new(),
-                        at: element,
-                        policy_context: request.policy_context,
-                    })?
-                    .state
-            }
-            None => {
-                service
-                    .current_state(CurrentStateRequest {
-                        schema: request.schema,
-                        datoms: Vec::new(),
-                        policy_context: request.policy_context,
-                    })?
-                    .state
-            }
-        };
-
-        Ok(PartitionStateResponse {
-            cut: request.cut,
-            state,
-        })
+        partition_state_for(self.partition_service(&request.cut.partition)?, request)
     }
 
     pub fn federated_history(
@@ -137,35 +88,11 @@ impl PartitionedInMemoryKernelService {
         request: ImportedFactQueryRequest,
         policy_context: Option<PolicyContext>,
     ) -> Result<ImportedFactQueryResponse, ApiError> {
-        let source = self.partition_service_mut(&request.cut.partition)?;
-        let response = source.run_document(RunDocumentRequest {
-            dsl: request.dsl.clone(),
+        import_partition_facts_from_service(
+            self.partition_service_mut(&request.cut.partition)?,
+            request,
             policy_context,
-        })?;
-        let result = select_query_result(&response, request.query_name.as_deref())?;
-        let tuple_index = response
-            .derived
-            .tuples
-            .iter()
-            .map(|tuple| (tuple.tuple.id, tuple))
-            .collect::<IndexMap<_, _>>();
-
-        let facts = result
-            .rows
-            .iter()
-            .enumerate()
-            .map(|(index, row)| {
-                build_imported_fact(&request, index, row, &tuple_index, &response.derived)
-            })
-            .collect::<Result<Vec<_>, ApiError>>()?;
-
-        Ok(ImportedFactQueryResponse {
-            cut: request.cut,
-            predicate: request.predicate,
-            query_name: request.query_name,
-            row_count: result.rows.len(),
-            facts,
-        })
+        )
     }
 
     pub fn federated_run_document(
@@ -178,120 +105,7 @@ impl PartitionedInMemoryKernelService {
             .cloned()
             .map(|import| self.import_partition_facts(import, request.policy_context.clone()))
             .collect::<Result<Vec<_>, ApiError>>()?;
-        let cut = federated_cut_from_imports(&imports)?;
-
-        let mut local = InMemoryKernelService::new();
-        let parsed = local.parse_document(ParseDocumentRequest {
-            dsl: request.dsl.clone(),
-        })?;
-        ensure_federated_document_uses_current_views(&parsed)?;
-
-        let mut schema = parsed.schema.clone();
-        let mut program = parsed.program.clone();
-        let predicate_lookup = parsed
-            .program
-            .predicates
-            .iter()
-            .map(|predicate| (predicate.name.clone(), predicate.clone()))
-            .collect::<IndexMap<_, _>>();
-        for import in &imports {
-            for fact in &import.facts {
-                let mut fact = fact.clone();
-                let predicate = predicate_lookup
-                    .get(&fact.predicate.name)
-                    .ok_or_else(|| {
-                        ApiError::Validation(format!(
-                            "federated document does not declare imported predicate {}",
-                            fact.predicate.name
-                        ))
-                    })?
-                    .clone();
-                if predicate.arity != fact.values.len() {
-                    return Err(ApiError::Validation(format!(
-                        "federated document predicate {} expects arity {}, but imported fact supplied {} value(s)",
-                        predicate.name,
-                        predicate.arity,
-                        fact.values.len()
-                    )));
-                }
-                fact.predicate = predicate;
-                program.facts.push(fact);
-            }
-        }
-        ensure_schema_covers_fact_predicates(&mut schema, &program.facts)?;
-
-        let compiled = local.compile_program(crate::CompileProgramRequest {
-            schema: schema.clone(),
-            program,
-        })?;
-        let derived = local
-            .evaluate_program(crate::EvaluateProgramRequest {
-                state: ResolvedState::default(),
-                program: compiled.program.clone(),
-                policy_context: request.policy_context.clone(),
-            })?
-            .derived;
-        let visible_program =
-            filter_compiled_program_facts(&compiled.program, request.policy_context.as_ref());
-        let visible_derived = filter_derived_set(&derived, request.policy_context.as_ref());
-
-        let query = match &parsed.query {
-            Some(query) => Some(execute_query(
-                &ResolvedState::default(),
-                &visible_program,
-                &visible_derived,
-                &query.query,
-                request.policy_context.as_ref(),
-            )?),
-            None => None,
-        };
-        let queries = parsed
-            .queries
-            .iter()
-            .map(|named_query| {
-                Ok(NamedQueryResult {
-                    name: named_query.name.clone(),
-                    spec: named_query.spec.clone(),
-                    result: execute_query(
-                        &ResolvedState::default(),
-                        &visible_program,
-                        &visible_derived,
-                        &named_query.spec.query,
-                        request.policy_context.as_ref(),
-                    )?,
-                })
-            })
-            .collect::<Result<Vec<_>, ApiError>>()?;
-        let explains = parsed
-            .explains
-            .iter()
-            .map(|named_explain| {
-                Ok(NamedExplainResult {
-                    name: named_explain.name.clone(),
-                    spec: named_explain.spec.clone(),
-                    result: execute_federated_explain_spec(
-                        &visible_program,
-                        &derived,
-                        &visible_derived,
-                        &named_explain.spec,
-                        request.policy_context.as_ref(),
-                    )?,
-                })
-            })
-            .collect::<Result<Vec<_>, ApiError>>()?;
-
-        Ok(FederatedRunDocumentResponse {
-            cut,
-            imports,
-            run: RunDocumentResponse {
-                state: ResolvedState::default(),
-                program: visible_program,
-                derived: visible_derived,
-                query,
-                queries,
-                explains,
-            },
-        })
+        execute_federated_document_request(request, imports)
     }
 
     pub fn build_federated_explain_report(
@@ -300,51 +114,10 @@ impl PartitionedInMemoryKernelService {
     ) -> Result<FederatedExplainReport, ApiError> {
         let policy_context = request.policy_context.clone();
         let response = self.federated_run_document(request)?;
-        let primary_query = response
-            .run
-            .query
-            .as_ref()
-            .map(report_rows)
-            .unwrap_or_default();
-        let named_queries = response
-            .run
-            .queries
-            .iter()
-            .map(|query| FederatedNamedQuerySummary {
-                name: query.name.clone(),
-                rows: report_rows(&query.result),
-            })
-            .collect::<Vec<_>>();
-        let traces = response
-            .run
-            .explains
-            .iter()
-            .filter_map(|explain| match &explain.result {
-                ExplainArtifact::Tuple(trace) => {
-                    Some(build_trace_summary(explain.name.clone(), trace))
-                }
-                ExplainArtifact::Plan(_) => None,
-            })
-            .collect::<Vec<_>>();
-
-        Ok(FederatedExplainReport {
-            generated_at_ms: now_millis(),
-            cut: response.cut,
+        Ok(build_federated_explain_report_from_response(
+            response,
             policy_context,
-            imports: response
-                .imports
-                .iter()
-                .map(|import| FederatedImportedSourceSummary {
-                    cut: import.cut.clone(),
-                    predicate: import.predicate.clone(),
-                    query_name: import.query_name.clone(),
-                    fact_count: import.facts.len(),
-                })
-                .collect(),
-            primary_query,
-            named_queries,
-            traces,
-        })
+        ))
     }
 
     fn partition_service(
@@ -363,6 +136,152 @@ impl PartitionedInMemoryKernelService {
         self.partitions
             .get_mut(partition)
             .ok_or_else(|| ApiError::Validation(format!("unknown partition {}", partition)))
+    }
+}
+
+impl SqlitePartitionedKernelService {
+    pub fn open(root: impl AsRef<Path>) -> Result<Self, ApiError> {
+        let root = root.as_ref().to_path_buf();
+        fs::create_dir_all(&root).map_err(|error| {
+            ApiError::Validation(format!(
+                "failed to create partition root {}: {}",
+                root.display(),
+                error
+            ))
+        })?;
+        Ok(Self {
+            root,
+            partitions: RefCell::new(IndexMap::new()),
+        })
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn append_partition(
+        &mut self,
+        request: PartitionAppendRequest,
+    ) -> Result<PartitionAppendResponse, ApiError> {
+        let PartitionAppendRequest { partition, datoms } = request;
+        self.ensure_partition_open(&partition, true)?;
+        let mut partitions = self.partitions.borrow_mut();
+        let response = partitions
+            .get_mut(&partition)
+            .expect("partition should be open")
+            .append(AppendRequest { datoms })?;
+        Ok(PartitionAppendResponse {
+            partition,
+            appended: response.appended,
+        })
+    }
+
+    pub fn partition_history(
+        &self,
+        request: PartitionHistoryRequest,
+    ) -> Result<PartitionHistoryResponse, ApiError> {
+        self.ensure_partition_open(&request.cut.partition, false)?;
+        let mut partitions = self.partitions.borrow_mut();
+        let service = partitions
+            .get_mut(&request.cut.partition)
+            .expect("partition should be open");
+        partition_history_for(service, request)
+    }
+
+    pub fn partition_state(
+        &self,
+        request: PartitionStateRequest,
+    ) -> Result<PartitionStateResponse, ApiError> {
+        self.ensure_partition_open(&request.cut.partition, false)?;
+        let mut partitions = self.partitions.borrow_mut();
+        let service = partitions
+            .get_mut(&request.cut.partition)
+            .expect("partition should be open");
+        partition_state_for(service, request)
+    }
+
+    pub fn federated_history(
+        &self,
+        request: FederatedHistoryRequest,
+    ) -> Result<FederatedHistoryResponse, ApiError> {
+        let cut = validate_federated_cut(request.cut)?;
+        let mut partitions = Vec::with_capacity(cut.cuts.len());
+        for partition_cut in cut.cuts {
+            partitions.push(self.partition_history(PartitionHistoryRequest {
+                cut: partition_cut,
+                policy_context: request.policy_context.clone(),
+            })?);
+        }
+        Ok(FederatedHistoryResponse { partitions })
+    }
+
+    pub fn import_partition_facts(
+        &mut self,
+        request: ImportedFactQueryRequest,
+        policy_context: Option<PolicyContext>,
+    ) -> Result<ImportedFactQueryResponse, ApiError> {
+        self.ensure_partition_open(&request.cut.partition, false)?;
+        let mut partitions = self.partitions.borrow_mut();
+        let service = partitions
+            .get_mut(&request.cut.partition)
+            .expect("partition should be open");
+        import_partition_facts_from_service(service, request, policy_context)
+    }
+
+    pub fn federated_run_document(
+        &mut self,
+        request: FederatedRunDocumentRequest,
+    ) -> Result<FederatedRunDocumentResponse, ApiError> {
+        let imports = request
+            .imports
+            .iter()
+            .cloned()
+            .map(|import| self.import_partition_facts(import, request.policy_context.clone()))
+            .collect::<Result<Vec<_>, ApiError>>()?;
+        execute_federated_document_request(request, imports)
+    }
+
+    pub fn build_federated_explain_report(
+        &mut self,
+        request: FederatedRunDocumentRequest,
+    ) -> Result<FederatedExplainReport, ApiError> {
+        let policy_context = request.policy_context.clone();
+        let response = self.federated_run_document(request)?;
+        Ok(build_federated_explain_report_from_response(
+            response,
+            policy_context,
+        ))
+    }
+
+    fn ensure_partition_open(
+        &self,
+        partition: &PartitionId,
+        create_if_missing: bool,
+    ) -> Result<(), ApiError> {
+        if self.partitions.borrow().contains_key(partition) {
+            return Ok(());
+        }
+
+        let path = self.partition_path(partition);
+        if !create_if_missing && !path.exists() {
+            return Err(ApiError::Validation(format!(
+                "unknown partition {}",
+                partition
+            )));
+        }
+
+        let service = crate::SqliteKernelService::open(&path)?;
+        self.partitions
+            .borrow_mut()
+            .insert(partition.clone(), service);
+        Ok(())
+    }
+
+    fn partition_path(&self, partition: &PartitionId) -> PathBuf {
+        self.root.join(format!(
+            "partition-{}.sqlite",
+            encode_partition_id(partition)
+        ))
     }
 }
 
@@ -387,6 +306,291 @@ fn filter_partition_datoms(
         .into_iter()
         .filter(|datom| aether_ast::policy_allows(policy_context, datom.policy.as_ref()))
         .collect()
+}
+
+fn partition_history_for(
+    service: &dyn KernelService,
+    request: PartitionHistoryRequest,
+) -> Result<PartitionHistoryResponse, ApiError> {
+    let datoms = match request.cut.as_of {
+        Some(element) => {
+            let full_history = service
+                .history(HistoryRequest {
+                    policy_context: None,
+                })?
+                .datoms;
+            let end = full_history
+                .iter()
+                .position(|datom| datom.element == element)
+                .ok_or_else(|| {
+                    ApiError::Validation(format!(
+                        "unknown element {} for partition {}",
+                        element, request.cut.partition
+                    ))
+                })?;
+            filter_partition_datoms(
+                full_history[..=end].to_vec(),
+                request.policy_context.as_ref(),
+            )
+        }
+        None => {
+            service
+                .history(HistoryRequest {
+                    policy_context: request.policy_context.clone(),
+                })?
+                .datoms
+        }
+    };
+
+    Ok(PartitionHistoryResponse {
+        cut: request.cut,
+        datoms,
+    })
+}
+
+fn partition_state_for(
+    service: &dyn KernelService,
+    request: PartitionStateRequest,
+) -> Result<PartitionStateResponse, ApiError> {
+    let state = match request.cut.as_of {
+        Some(element) => {
+            service
+                .as_of(crate::AsOfRequest {
+                    schema: request.schema,
+                    datoms: Vec::new(),
+                    at: element,
+                    policy_context: request.policy_context,
+                })?
+                .state
+        }
+        None => {
+            service
+                .current_state(CurrentStateRequest {
+                    schema: request.schema,
+                    datoms: Vec::new(),
+                    policy_context: request.policy_context,
+                })?
+                .state
+        }
+    };
+
+    Ok(PartitionStateResponse {
+        cut: request.cut,
+        state,
+    })
+}
+
+fn import_partition_facts_from_service(
+    service: &mut dyn KernelService,
+    request: ImportedFactQueryRequest,
+    policy_context: Option<PolicyContext>,
+) -> Result<ImportedFactQueryResponse, ApiError> {
+    let response = service.run_document(RunDocumentRequest {
+        dsl: request.dsl.clone(),
+        policy_context,
+    })?;
+    let result = select_query_result(&response, request.query_name.as_deref())?;
+    let tuple_index = response
+        .derived
+        .tuples
+        .iter()
+        .map(|tuple| (tuple.tuple.id, tuple))
+        .collect::<IndexMap<_, _>>();
+
+    let facts = result
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            build_imported_fact(&request, index, row, &tuple_index, &response.derived)
+        })
+        .collect::<Result<Vec<_>, ApiError>>()?;
+
+    Ok(ImportedFactQueryResponse {
+        cut: request.cut,
+        predicate: request.predicate,
+        query_name: request.query_name,
+        row_count: result.rows.len(),
+        facts,
+    })
+}
+
+fn execute_federated_document_request(
+    request: FederatedRunDocumentRequest,
+    imports: Vec<ImportedFactQueryResponse>,
+) -> Result<FederatedRunDocumentResponse, ApiError> {
+    let cut = federated_cut_from_imports(&imports)?;
+
+    let mut local = InMemoryKernelService::new();
+    let parsed = local.parse_document(ParseDocumentRequest {
+        dsl: request.dsl.clone(),
+    })?;
+    ensure_federated_document_uses_current_views(&parsed)?;
+
+    let mut schema = parsed.schema.clone();
+    let mut program = parsed.program.clone();
+    let predicate_lookup = parsed
+        .program
+        .predicates
+        .iter()
+        .map(|predicate| (predicate.name.clone(), predicate.clone()))
+        .collect::<IndexMap<_, _>>();
+    for import in &imports {
+        for fact in &import.facts {
+            let mut fact = fact.clone();
+            let predicate = predicate_lookup
+                .get(&fact.predicate.name)
+                .ok_or_else(|| {
+                    ApiError::Validation(format!(
+                        "federated document does not declare imported predicate {}",
+                        fact.predicate.name
+                    ))
+                })?
+                .clone();
+            if predicate.arity != fact.values.len() {
+                return Err(ApiError::Validation(format!(
+                    "federated document predicate {} expects arity {}, but imported fact supplied {} value(s)",
+                    predicate.name,
+                    predicate.arity,
+                    fact.values.len()
+                )));
+            }
+            fact.predicate = predicate;
+            program.facts.push(fact);
+        }
+    }
+    ensure_schema_covers_fact_predicates(&mut schema, &program.facts)?;
+
+    let compiled = local.compile_program(crate::CompileProgramRequest {
+        schema: schema.clone(),
+        program,
+    })?;
+    let derived = local
+        .evaluate_program(crate::EvaluateProgramRequest {
+            state: ResolvedState::default(),
+            program: compiled.program.clone(),
+            policy_context: request.policy_context.clone(),
+        })?
+        .derived;
+    let visible_program =
+        filter_compiled_program_facts(&compiled.program, request.policy_context.as_ref());
+    let visible_derived = filter_derived_set(&derived, request.policy_context.as_ref());
+
+    let query = match &parsed.query {
+        Some(query) => Some(execute_query(
+            &ResolvedState::default(),
+            &visible_program,
+            &visible_derived,
+            &query.query,
+            request.policy_context.as_ref(),
+        )?),
+        None => None,
+    };
+    let queries = parsed
+        .queries
+        .iter()
+        .map(|named_query| {
+            Ok(NamedQueryResult {
+                name: named_query.name.clone(),
+                spec: named_query.spec.clone(),
+                result: execute_query(
+                    &ResolvedState::default(),
+                    &visible_program,
+                    &visible_derived,
+                    &named_query.spec.query,
+                    request.policy_context.as_ref(),
+                )?,
+            })
+        })
+        .collect::<Result<Vec<_>, ApiError>>()?;
+    let explains = parsed
+        .explains
+        .iter()
+        .map(|named_explain| {
+            Ok(NamedExplainResult {
+                name: named_explain.name.clone(),
+                spec: named_explain.spec.clone(),
+                result: execute_federated_explain_spec(
+                    &visible_program,
+                    &derived,
+                    &visible_derived,
+                    &named_explain.spec,
+                    request.policy_context.as_ref(),
+                )?,
+            })
+        })
+        .collect::<Result<Vec<_>, ApiError>>()?;
+
+    Ok(FederatedRunDocumentResponse {
+        cut,
+        imports,
+        run: RunDocumentResponse {
+            state: ResolvedState::default(),
+            program: visible_program,
+            derived: visible_derived,
+            query,
+            queries,
+            explains,
+        },
+    })
+}
+
+fn build_federated_explain_report_from_response(
+    response: FederatedRunDocumentResponse,
+    policy_context: Option<PolicyContext>,
+) -> FederatedExplainReport {
+    let primary_query = response
+        .run
+        .query
+        .as_ref()
+        .map(report_rows)
+        .unwrap_or_default();
+    let named_queries = response
+        .run
+        .queries
+        .iter()
+        .map(|query| FederatedNamedQuerySummary {
+            name: query.name.clone(),
+            rows: report_rows(&query.result),
+        })
+        .collect::<Vec<_>>();
+    let traces = response
+        .run
+        .explains
+        .iter()
+        .filter_map(|explain| match &explain.result {
+            ExplainArtifact::Tuple(trace) => Some(build_trace_summary(explain.name.clone(), trace)),
+            ExplainArtifact::Plan(_) => None,
+        })
+        .collect::<Vec<_>>();
+
+    FederatedExplainReport {
+        generated_at_ms: now_millis(),
+        cut: response.cut,
+        policy_context,
+        imports: response
+            .imports
+            .iter()
+            .map(|import| FederatedImportedSourceSummary {
+                cut: import.cut.clone(),
+                predicate: import.predicate.clone(),
+                query_name: import.query_name.clone(),
+                fact_count: import.facts.len(),
+            })
+            .collect(),
+        primary_query,
+        named_queries,
+        traces,
+    }
+}
+
+fn encode_partition_id(partition: &PartitionId) -> String {
+    partition
+        .as_str()
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{:02x}", byte))
+        .collect::<String>()
 }
 
 fn select_query_result<'a>(
@@ -1081,6 +1285,7 @@ mod tests {
         render_federated_explain_report_markdown, FederatedHistoryRequest,
         FederatedRunDocumentRequest, ImportedFactQueryRequest, PartitionAppendRequest,
         PartitionHistoryRequest, PartitionStateRequest, PartitionedInMemoryKernelService,
+        SqlitePartitionedKernelService,
     };
     use aether_ast::{
         AttributeId, Datom, DatomProvenance, ElementId, EntityId, FederatedCut, OperationKind,
@@ -1088,6 +1293,13 @@ mod tests {
     };
     use aether_resolver::ResolvedValue;
     use aether_schema::{AttributeClass, AttributeSchema, Schema, ValueType};
+    use std::{
+        path::{Path, PathBuf},
+        sync::atomic::{AtomicU64, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(1);
 
     #[test]
     fn partitioned_service_keeps_local_truth_exact_per_partition() {
@@ -1382,6 +1594,96 @@ mod tests {
         assert!(markdown.contains("imported_ready_task"));
     }
 
+    #[test]
+    fn sqlite_partitioned_service_replays_federated_imports_after_restart() {
+        let temp = TestPartitionDir::new("partitioned-sqlite");
+        {
+            let mut service =
+                SqlitePartitionedKernelService::open(temp.path()).expect("open sqlite partitions");
+            service
+                .append_partition(PartitionAppendRequest {
+                    partition: PartitionId::new("readiness"),
+                    datoms: vec![sample_datom(1, 1, "ready", 1, None)],
+                })
+                .expect("append readiness datoms");
+            service
+                .append_partition(PartitionAppendRequest {
+                    partition: PartitionId::new("authority"),
+                    datoms: vec![sample_datom(1, 1, "worker-a", 3, None)],
+                })
+                .expect("append authority datoms");
+        }
+
+        let mut service =
+            SqlitePartitionedKernelService::open(temp.path()).expect("reopen sqlite partitions");
+        let response = service
+            .federated_run_document(FederatedRunDocumentRequest {
+                dsl: federated_assignment_document(),
+                imports: vec![
+                    ImportedFactQueryRequest {
+                        cut: PartitionCut::as_of("readiness", ElementId::new(1)),
+                        dsl: readiness_document(),
+                        predicate: PredicateRef {
+                            id: PredicateId::new(11),
+                            name: "imported_ready_task".into(),
+                            arity: 1,
+                        },
+                        query_name: Some("ready_now".into()),
+                    },
+                    ImportedFactQueryRequest {
+                        cut: PartitionCut::as_of("authority", ElementId::new(3)),
+                        dsl: authority_document(),
+                        predicate: PredicateRef {
+                            id: PredicateId::new(12),
+                            name: "imported_authorized_worker".into(),
+                            arity: 2,
+                        },
+                        query_name: Some("authorized_now".into()),
+                    },
+                ],
+                policy_context: None,
+            })
+            .expect("run federated document after restart");
+
+        assert_eq!(
+            response.run.query.as_ref().expect("query result").rows[0].values,
+            vec![
+                Value::Entity(EntityId::new(1)),
+                Value::String("worker-a".into())
+            ]
+        );
+        let report = service
+            .build_federated_explain_report(FederatedRunDocumentRequest {
+                dsl: federated_assignment_document(),
+                imports: vec![
+                    ImportedFactQueryRequest {
+                        cut: PartitionCut::as_of("readiness", ElementId::new(1)),
+                        dsl: readiness_document(),
+                        predicate: PredicateRef {
+                            id: PredicateId::new(11),
+                            name: "imported_ready_task".into(),
+                            arity: 1,
+                        },
+                        query_name: Some("ready_now".into()),
+                    },
+                    ImportedFactQueryRequest {
+                        cut: PartitionCut::as_of("authority", ElementId::new(3)),
+                        dsl: authority_document(),
+                        predicate: PredicateRef {
+                            id: PredicateId::new(12),
+                            name: "imported_authorized_worker".into(),
+                            arity: 2,
+                        },
+                        query_name: Some("authorized_now".into()),
+                    },
+                ],
+                policy_context: None,
+            })
+            .expect("build report after restart");
+        assert!(render_federated_explain_report_markdown(&report)
+            .contains("authority@e3, readiness@e1"));
+    }
+
     fn schema() -> Schema {
         let mut schema = Schema::new("partitioned-v1");
         schema
@@ -1500,6 +1802,33 @@ explain actionable_trace {
             causal_context: Default::default(),
             provenance: DatomProvenance::default(),
             policy,
+        }
+    }
+
+    struct TestPartitionDir {
+        path: PathBuf,
+    }
+
+    impl TestPartitionDir {
+        fn new(name: &str) -> Self {
+            let unique = NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed);
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos();
+            let mut path = std::env::temp_dir();
+            path.push(format!("aether-partitions-{name}-{nanos}-{unique}"));
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TestPartitionDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
         }
     }
 }
