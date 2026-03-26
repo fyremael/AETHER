@@ -228,46 +228,47 @@ try {
     Add-TranscriptLine("Release-readiness suite failed: $failureMessage")
 }
 
-$summary = @"
-# AETHER Release Readiness
-
-- Generated: `$timestamp`
-- Commit: `$commit`
-- Baseline: `$($baseline.Path)`
-- Baseline source: `$($baseline.Source)`
-
-## Executed gates
-
-1. Rust format check
-2. Rust clippy
-3. Full Rust workspace tests
-4. Python SDK tests
-5. Go boundary tests
-6. Rust API docs build
-7. GitHub Pages preview bundle build
-8. Criterion benchmark compile
-9. Pilot launch validation pack
-10. Packaged pilot bundle build
-
-## Primary artifacts
-
-- `artifacts/qa/release-readiness/latest.txt`
-- `artifacts/pages-preview-release/`
-- `artifacts/pilot/reports/latest.md`
-- `artifacts/performance/latest.md`
-- `artifacts/performance/latest-drift.md`
-- `artifacts/pilot/launch/latest.txt`
-- `artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip`
-
-## Result
-
-"@
+$summaryLines = [System.Collections.Generic.List[string]]::new()
+$summaryLines.Add("# AETHER Release Readiness")
+$summaryLines.Add("")
+$summaryLines.Add('- Generated: `' + $timestamp + '`')
+$summaryLines.Add('- Commit: `' + $commit + '`')
+$summaryLines.Add('- Baseline: `' + $baseline.Path + '`')
+$summaryLines.Add('- Baseline source: `' + $baseline.Source + '`')
+$summaryLines.Add("")
+$summaryLines.Add("## Executed gates")
+$summaryLines.Add("")
+$summaryLines.Add("1. Rust format check")
+$summaryLines.Add("2. Rust clippy")
+$summaryLines.Add("3. Full Rust workspace tests")
+$summaryLines.Add("4. Python SDK tests")
+$summaryLines.Add("5. Go boundary tests")
+$summaryLines.Add("6. Rust API docs build")
+$summaryLines.Add("7. GitHub Pages preview bundle build")
+$summaryLines.Add("8. Criterion benchmark compile")
+$summaryLines.Add("9. Pilot launch validation pack")
+$summaryLines.Add("10. Packaged pilot bundle build")
+$summaryLines.Add("")
+$summaryLines.Add("## Primary artifacts")
+$summaryLines.Add("")
+$summaryLines.Add('- `artifacts/qa/release-readiness/latest.txt`')
+$summaryLines.Add('- `artifacts/pages-preview-release/`')
+$summaryLines.Add('- `artifacts/pilot/reports/latest.md`')
+$summaryLines.Add('- `artifacts/performance/latest.md`')
+$summaryLines.Add('- `artifacts/performance/latest-drift.md`')
+$summaryLines.Add('- `artifacts/pilot/launch/latest.txt`')
+$summaryLines.Add('- `artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip`')
+$summaryLines.Add("")
+$summaryLines.Add("## Result")
+$summaryLines.Add("")
 
 if ($failed) {
-    $summary += "`nRelease readiness failed: `$failureMessage`n"
+    $summaryLines.Add("Release readiness failed: `"${failureMessage}`".")
 } else {
-    $summary += "`nRelease readiness completed successfully.`n"
+    $summaryLines.Add("Release readiness completed successfully.")
 }
+
+$summary = $summaryLines -join "`r`n"
 
 Set-Content -Path $transcriptPath -Value $transcript
 Set-Content -Path $latestTranscriptPath -Value $transcript
