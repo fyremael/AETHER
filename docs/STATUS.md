@@ -2,7 +2,9 @@
 
 ## Current state
 
-The repository has advanced from a pure specification bundle to a functioning late-M4 single-node pilot semantic kernel workspace.
+The repository has advanced from a pure specification bundle to a functioning
+full-v1 single-node semantic kernel and late-M4 design-partner pilot
+workspace.
 
 Completed:
 
@@ -15,9 +17,10 @@ Completed:
 - first recursive tuple explainer implemented
 - whole-document DSL parser implemented for the current canonical v1 surface: schema, attribute classes, facts, repeated queries, explain directives, temporal views, and policy annotations
 - `Current` and `AsOf` query execution implemented
-- policy annotations turned into executable behavior through explicit policy-context filtering on state resolution, document execution, and sidecar reads/searches
+- policy annotations turned into executable behavior through explicit policy-context filtering on state resolution, document execution, derived tuples, explanation traces, reports, and sidecar reads/searches
 - authenticated HTTP tokens now bind maximum semantic policy visibility, with request policy contexts only allowed to narrow that bound
 - explain, visible history, audit entries, and operator reports now all follow the same effective-policy cut instead of widening past the caller's semantic visibility
+- strict v1 operation/class validation implemented across scalar, set, and sequence attributes, with anchored `InsertAfter` semantics and deterministic replay for `SequenceRGA`
 - semi-naive delta execution implemented for recursive SCC evaluation
 - executable stratified negation implemented for stratified programs
 - bounded aggregation implemented for non-recursive grouped head-term `count`, `sum`, `min`, and `max` rules, including multiple aggregate terms per head; this now covers the v1 bounded-aggregation requirement
@@ -41,6 +44,7 @@ Completed:
 - packaged durable pilot-service bundles implemented with config-backed startup, package-local rotation tooling, restart/replay benchmark coverage, and secret-file/env/command token resolution
 - first real Go operator shell implemented against the HTTP API with typed client coverage
 - broader typed Python SDK surface implemented against the HTTP API with fixture builders and live integration coverage
+- semantic compliance matrix added to map `SPEC.md` sections `1-11` to implementation and acceptance evidence for the current v1 single-node closure claim
 - documentation portal, architecture guide, developer workflow guide, operator guide, glossary, and documentation standards now exist
 - GitHub Pages publishing pipeline added for the documentation portal and generated Rust API reference
 - unit tests added across the Rust core crates
@@ -58,7 +62,8 @@ Not yet completed:
 
 ## Immediate focus
 
-The most immediate work now sits just beyond the launch-ready pilot slice and late `M4`:
+The most immediate work now sits just beyond the launch-ready pilot slice and
+the now-closed v1 single-node semantic core:
 
 - add longer-duration soak coverage beyond the current launch validation window
 - decide how far to widen audit context from the current semantic cut/query/tuple fields into fuller operator intent and semantic diffs

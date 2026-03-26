@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{de::Deserializer, Deserialize, Serialize};
 use std::fmt;
 
 macro_rules! id_type {
@@ -125,10 +125,73 @@ impl Default for DatomProvenance {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct PolicyEnvelope {
-    pub capability: Option<String>,
-    pub visibility: Option<String>,
+    pub capabilities: Vec<String>,
+    pub visibilities: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct RawPolicyEnvelope {
+    #[serde(default)]
+    capabilities: Vec<String>,
+    #[serde(default)]
+    visibilities: Vec<String>,
+    #[serde(default)]
+    capability: Option<String>,
+    #[serde(default)]
+    visibility: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for PolicyEnvelope {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = RawPolicyEnvelope::deserialize(deserializer)?;
+        let mut capabilities = raw.capabilities;
+        if let Some(capability) = raw.capability {
+            capabilities.push(capability);
+        }
+        let mut visibilities = raw.visibilities;
+        if let Some(visibility) = raw.visibility {
+            visibilities.push(visibility);
+        }
+        Ok(Self {
+            capabilities: normalize_policy_values(capabilities),
+            visibilities: normalize_policy_values(visibilities),
+        })
+    }
+}
+
+impl PolicyEnvelope {
+    pub fn is_public(&self) -> bool {
+        self.capabilities.is_empty() && self.visibilities.is_empty()
+    }
+
+    pub fn normalized(mut self) -> Self {
+        self.capabilities = normalize_policy_values(self.capabilities);
+        self.visibilities = normalize_policy_values(self.visibilities);
+        self
+    }
+
+    pub fn union_with(&mut self, other: &Self) {
+        self.capabilities.extend(other.capabilities.iter().cloned());
+        self.visibilities.extend(other.visibilities.iter().cloned());
+        self.capabilities = normalize_policy_values(std::mem::take(&mut self.capabilities));
+        self.visibilities = normalize_policy_values(std::mem::take(&mut self.visibilities));
+    }
+}
+
+pub fn merge_policy_envelopes<'a, I>(envelopes: I) -> Option<PolicyEnvelope>
+where
+    I: IntoIterator<Item = Option<&'a PolicyEnvelope>>,
+{
+    let mut merged = PolicyEnvelope::default();
+    for envelope in envelopes.into_iter().flatten() {
+        merged.union_with(envelope);
+    }
+    (!merged.is_public()).then_some(merged)
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -143,14 +206,14 @@ impl PolicyContext {
     }
 
     pub fn allows(&self, envelope: &PolicyEnvelope) -> bool {
-        let capability_allowed = match envelope.capability.as_ref() {
-            Some(capability) => self.capabilities.iter().any(|value| value == capability),
-            None => true,
-        };
-        let visibility_allowed = match envelope.visibility.as_ref() {
-            Some(visibility) => self.visibilities.iter().any(|value| value == visibility),
-            None => true,
-        };
+        let capability_allowed = envelope
+            .capabilities
+            .iter()
+            .all(|capability| self.capabilities.iter().any(|value| value == capability));
+        let visibility_allowed = envelope
+            .visibilities
+            .iter()
+            .all(|visibility| self.visibilities.iter().any(|value| value == visibility));
         capability_allowed && visibility_allowed
     }
 
@@ -170,9 +233,15 @@ pub fn policy_allows(context: Option<&PolicyContext>, envelope: Option<&PolicyEn
         None => true,
         Some(envelope) => match context {
             Some(context) => context.allows(envelope),
-            None => envelope.capability.is_none() && envelope.visibility.is_none(),
+            None => envelope.is_public(),
         },
     }
+}
+
+fn normalize_policy_values(mut values: Vec<String>) -> Vec<String> {
+    values.sort_unstable();
+    values.dedup();
+    values
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -345,6 +414,7 @@ pub struct DerivedTupleMetadata {
 pub struct DerivedTuple {
     pub tuple: Tuple,
     pub metadata: DerivedTupleMetadata,
+    pub policy: Option<PolicyEnvelope>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -399,9 +469,9 @@ pub struct PlanExplanation {
 #[cfg(test)]
 mod tests {
     use super::{
-        policy_allows, AttributeId, Datom, DatomProvenance, ElementId, EntityId, FactProvenance,
-        OperationKind, PolicyContext, PolicyEnvelope, ReplicaId, SidecarKind, SidecarOrigin,
-        SourceRef, Value,
+        merge_policy_envelopes, policy_allows, AttributeId, Datom, DatomProvenance, ElementId,
+        EntityId, FactProvenance, OperationKind, PolicyContext, PolicyEnvelope, ReplicaId,
+        SidecarKind, SidecarOrigin, SourceRef, Value,
     };
 
     #[test]
@@ -493,8 +563,8 @@ mod tests {
     #[test]
     fn policy_context_requires_capability_and_visibility_when_present() {
         let envelope = PolicyEnvelope {
-            capability: Some("executor".into()),
-            visibility: Some("ops".into()),
+            capabilities: vec!["executor".into()],
+            visibilities: vec!["ops".into()],
         };
         let allowed = PolicyContext {
             capabilities: vec!["executor".into()],
@@ -509,6 +579,44 @@ mod tests {
         assert!(!policy_allows(Some(&missing_visibility), Some(&envelope)));
         assert!(!policy_allows(None, Some(&envelope)));
         assert!(policy_allows(None, None));
+    }
+
+    #[test]
+    fn policy_envelope_deserializes_legacy_single_value_fields() {
+        let decoded: PolicyEnvelope =
+            serde_json::from_str(r#"{"capability":"executor","visibility":"ops"}"#)
+                .expect("deserialize legacy policy envelope");
+
+        assert_eq!(
+            decoded,
+            PolicyEnvelope {
+                capabilities: vec!["executor".into()],
+                visibilities: vec!["ops".into()],
+            }
+        );
+    }
+
+    #[test]
+    fn policy_envelope_merge_is_conjunctive_union() {
+        let merged = merge_policy_envelopes([
+            Some(&PolicyEnvelope {
+                capabilities: vec!["executor".into()],
+                visibilities: vec!["ops".into()],
+            }),
+            Some(&PolicyEnvelope {
+                capabilities: vec!["memory_reader".into()],
+                visibilities: vec!["finance".into()],
+            }),
+        ])
+        .expect("merged policy envelope");
+
+        assert_eq!(
+            merged,
+            PolicyEnvelope {
+                capabilities: vec!["executor".into(), "memory_reader".into()],
+                visibilities: vec!["finance".into(), "ops".into()],
+            }
+        );
     }
 
     #[test]

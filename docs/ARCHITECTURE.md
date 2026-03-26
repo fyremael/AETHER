@@ -68,6 +68,7 @@ It currently provides:
 - stratified negation across strata
 - bounded aggregation for non-recursive grouped aggregate rules, including multiple aggregate terms per head
 - materialized derived tuples
+- conjunctive policy propagation from source facts into derived tuples and aggregate outputs
 - iteration metadata
 - parent tuple references
 - source datom provenance
@@ -100,7 +101,7 @@ It is deliberately modest. Today it provides:
 - parse, compile, evaluate, and explain flows
 - end-to-end execution of DSL-authored documents
 - authenticated tokens that bind endpoint scopes and maximum semantic policy visibility
-- policy-aware explanation, visible-history replay, semantic audit context, and operator report generation that all stay inside the caller's effective policy cut
+- policy-aware explanation, derived-tuple filtering, visible-history replay, semantic audit context, and operator report generation that all stay inside the caller's effective policy cut
 - artifact and vector sidecar federation for external artifact references, vector-match projection, and durable sidecar replay on the SQLite-backed path, with visibility anchored to real journal cuts
 - a config-backed pilot service binary and packaged single-node deployment bundle with secret-file or env-backed token resolution
 
@@ -179,8 +180,10 @@ This is not an omission of ambition. It is sequencing. The kernel is being made 
 
 - append-only journal behavior
 - deterministic resolution
+- strict v1 operation/class validation plus anchored sequence replay semantics
 - whole-document DSL parsing for the current canonical v1 surface
 - recursive and stratified runtime evaluation
+- policy-aware derivation that propagates conjunctive visibility/capability requirements through derived tuples, aggregates, explains, and reports
 - service-backed query and explanation
 - bounded aggregation for the current non-recursive grouped slice
 - policy-context-aware visibility filtering across datoms, DSL-authored facts, and sidecar reads/searches
@@ -190,6 +193,7 @@ This is not an omission of ambition. It is sequencing. The kernel is being made 
 - a first real Go operator shell plus typed Go client over the stable boundary
 - a broader typed Python SDK surface over the stable boundary
 - operator-facing demonstrations
+- a tracked semantic compliance matrix for the current v1 single-node closure claim
 
 ### Deferred
 

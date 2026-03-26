@@ -456,8 +456,8 @@ mod tests {
         for datom in &mut datoms {
             if datom.element.0 >= 6 {
                 datom.policy = Some(PolicyEnvelope {
-                    capability: Some("executor".into()),
-                    visibility: None,
+                    capabilities: vec!["executor".into()],
+                    visibilities: Vec::new(),
                 });
             }
         }

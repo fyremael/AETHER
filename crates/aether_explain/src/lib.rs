@@ -117,6 +117,7 @@ mod tests {
                     .map(aether_ast::ElementId::new)
                     .collect(),
             },
+            policy: None,
         }
     }
 

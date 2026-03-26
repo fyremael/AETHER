@@ -268,8 +268,8 @@ async fn http_service_applies_policy_context_to_document_runs() {
                     "ready",
                     2,
                     Some(PolicyEnvelope {
-                        capability: Some("executor".into()),
-                        visibility: None,
+                        capabilities: vec!["executor".into()],
+                        visibilities: Vec::new(),
                     }),
                 ),
             ],
@@ -632,8 +632,8 @@ async fn authenticated_http_service_binds_policy_context_to_tokens() {
                     "ready",
                     2,
                     Some(PolicyEnvelope {
-                        capability: Some("executor".into()),
-                        visibility: None,
+                        capabilities: vec!["executor".into()],
+                        visibilities: Vec::new(),
                     }),
                 ),
             ],

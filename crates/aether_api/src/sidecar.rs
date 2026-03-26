@@ -1,6 +1,7 @@
 use aether_ast::{
-    policy_allows, Datom, DatomProvenance, ElementId, EntityId, ExtensionalFact, FactProvenance,
-    PolicyContext, PolicyEnvelope, PredicateRef, SidecarKind, SidecarOrigin, SourceRef, Value,
+    merge_policy_envelopes, policy_allows, Datom, DatomProvenance, ElementId, EntityId,
+    ExtensionalFact, FactProvenance, PolicyContext, PolicyEnvelope, PredicateRef, SidecarKind,
+    SidecarOrigin, SourceRef, Value,
 };
 use indexmap::IndexMap;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -188,6 +189,7 @@ pub struct VectorSearchMatch {
     pub score: f64,
     pub provenance: FactProvenance,
     pub metadata: BTreeMap<String, Value>,
+    pub policy: Option<PolicyEnvelope>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -742,6 +744,12 @@ fn build_search_response(
                 ),
                 provenance,
                 metadata: record.metadata.metadata.clone(),
+                policy: merge_policy_envelopes([
+                    record.metadata.policy.as_ref(),
+                    artifact
+                        .as_ref()
+                        .and_then(|artifact| artifact.policy.as_ref()),
+                ]),
             }
         })
         .collect::<Vec<_>>();
@@ -765,7 +773,7 @@ fn build_search_response(
                     Value::Entity(item.entity),
                     Value::F64(item.score),
                 ],
-                policy: None,
+                policy: item.policy.clone(),
                 provenance: Some(item.provenance.clone()),
             })
             .collect(),
@@ -1186,8 +1194,8 @@ mod tests {
                         metadata: BTreeMap::new(),
                         provenance: DatomProvenance::default(),
                         policy: Some(PolicyEnvelope {
-                            capability: Some("memory_reader".into()),
-                            visibility: None,
+                            capabilities: vec!["memory_reader".into()],
+                            visibilities: Vec::new(),
                         }),
                         registered_at: ElementId::new(1),
                     },
@@ -1210,8 +1218,8 @@ mod tests {
                         metadata: BTreeMap::new(),
                         provenance: DatomProvenance::default(),
                         policy: Some(PolicyEnvelope {
-                            capability: Some("memory_reader".into()),
-                            visibility: None,
+                            capabilities: vec!["memory_reader".into()],
+                            visibilities: Vec::new(),
                         }),
                         registered_at: ElementId::new(2),
                     },

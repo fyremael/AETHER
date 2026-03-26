@@ -17,7 +17,8 @@ Read these in order:
 3. `examples/demo-03-coordination-situation-room.md`
 4. `docs/ARCHITECTURE.md`
 5. `docs/STATUS.md`
-6. `docs/KNOWN_LIMITATIONS.md`
+6. `docs/SEMANTIC_COMPLIANCE_MATRIX.md`
+7. `docs/KNOWN_LIMITATIONS.md`
 
 That path gets you from thesis to running system to current boundary.
 
@@ -78,9 +79,10 @@ Read:
 3. `docs/ADR/0001-authority-partitions-and-federated-cuts.md`
 4. `docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md`
 5. `docs/ARCHITECTURE.md`
-6. `docs/PERFORMANCE.md`
-7. `docs/KNOWN_LIMITATIONS.md`
-8. `docs/PILOT_LAUNCH.md`
+6. `docs/SEMANTIC_COMPLIANCE_MATRIX.md`
+7. `docs/PERFORMANCE.md`
+8. `docs/KNOWN_LIMITATIONS.md`
+9. `docs/PILOT_LAUNCH.md`
 
 That path shows how the current kernel is shaped, how it is being measured, and
 how we intend to scale it without dissolving the semantic center.
@@ -138,8 +140,9 @@ That path covers the current Python HTTP client, the available service endpoints
 Read:
 
 1. `docs/STATUS.md`
-2. `docs/ROADMAP.md`
-3. `docs/KNOWN_LIMITATIONS.md`
+2. `docs/SEMANTIC_COMPLIANCE_MATRIX.md`
+3. `docs/ROADMAP.md`
+4. `docs/KNOWN_LIMITATIONS.md`
 
 That set answers “what exists now, what does not yet exist, and what comes next.”
 
@@ -162,6 +165,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 | Document | Purpose |
 | --- | --- |
 | `docs/ARCHITECTURE.md` | How the current kernel is shaped and how data moves through it |
+| `docs/SEMANTIC_COMPLIANCE_MATRIX.md` | Defensible mapping from `SPEC.md` sections `1-11` to implemented v1 single-node semantics |
 | `docs/EDUCATION/README.md` | Plain-language education hub for new users, evaluators, and non-specialists |
 | `docs/DEVELOPER_WORKFLOW.md` | Day-to-day engineering loop, verification contract, and definition of done |
 | `docs/OPERATIONS.md` | Operator-facing guidance for demos, reports, and presentations |

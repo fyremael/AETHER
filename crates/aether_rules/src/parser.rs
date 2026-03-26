@@ -1033,10 +1033,13 @@ fn parse_policy_annotations(line: usize, rest: &str) -> Result<Option<PolicyEnve
         remaining = suffix.trim();
     }
 
-    Ok(Some(PolicyEnvelope {
-        capability,
-        visibility,
-    }))
+    Ok(Some(
+        PolicyEnvelope {
+            capabilities: capability.into_iter().collect(),
+            visibilities: visibility.into_iter().collect(),
+        }
+        .normalized(),
+    ))
 }
 
 #[derive(Debug, Error)]
@@ -1243,8 +1246,8 @@ mod tests {
         assert_eq!(
             document.program.facts[0].policy,
             Some(aether_ast::PolicyEnvelope {
-                capability: Some("executor".into()),
-                visibility: Some("ops".into()),
+                capabilities: vec!["executor".into()],
+                visibilities: vec!["ops".into()],
             })
         );
         assert_eq!(

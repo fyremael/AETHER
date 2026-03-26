@@ -5,7 +5,8 @@
 [![Rust 1.78+](https://img.shields.io/badge/rust-1.78%2B-93450a?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-4b5563)](./LICENSE-MIT)
 
-AETHER is a late-M4 single-node pilot semantic kernel for agentic coordination.
+AETHER is a full-v1 single-node semantic kernel and late-M4 design-partner
+pilot for agentic coordination.
 
 Its long-range claim is simple, but not modest: the right center of gravity for agent coordination is not a queue, not a graph-walking convenience layer, not a pile of ad hoc service contracts, and not a host-language DSL masquerading as semantics. The right center of gravity is an authoritative semantic kernel: an append-only causal journal, a deterministic resolver, and a recursive rule engine that can state, derive, replay, and explain what a system believes.
 
@@ -20,6 +21,11 @@ customer, and partner conversations, plus exportable social cards, slide
 covers, and proof snapshots generated from the same presentation system.
 
 If you are joining the project fresh, read [`docs/README.md`](./docs/README.md) and [`CONTRIBUTING.md`](./CONTRIBUTING.md) after this file and then walk through [`examples/demo-03-coordination-situation-room.md`](./examples/demo-03-coordination-situation-room.md). That is the fastest path from architectural stance to executable behavior.
+
+If you need the exact claim we can defend against the governing thesis, read
+[`docs/SEMANTIC_COMPLIANCE_MATRIX.md`](./docs/SEMANTIC_COMPLIANCE_MATRIX.md).
+That document maps `SPEC.md` sections `1-11` to implementation and test
+evidence for the current single-node semantic closure pass.
 
 If you want the gentler, plain-language on-ramp first, start with
 [`docs/EDUCATION/README.md`](./docs/EDUCATION/README.md). That set explains the
@@ -65,7 +71,7 @@ The combination matters. A coordination system that stores facts without recursi
 
 AETHER is:
 
-- a semantic substrate for distributed coordination facts
+- a semantic substrate for exact local coordination facts and explicit federated imports
 - a single-node pilot kernel for exact local truth and replay
 - a Datalog-native recursive derivation core
 - a temporal replay engine for deterministic `AsOf` views
@@ -122,6 +128,8 @@ Implemented today:
 - schema registration and predicate arity validation
 - append-only journal semantics across both in-memory and SQLite-backed durable storage
 - deterministic `Current` and `AsOf` resolution across scalar, set, and sequence classes
+- strict v1 operation/class validation across scalar, set, and sequence semantics
+- anchored `InsertAfter` replay for `SequenceRGA`, with deterministic tie-breaking by committed element order
 - a whole-document DSL parser for the current canonical v1 surface, including facts, repeated query sections, explain directives, temporal views, entity constants, and policy annotations
 - rule safety checks
 - dependency-graph construction
@@ -132,6 +140,7 @@ Implemented today:
 - bounded aggregation via non-recursive grouped head-term `count`, `sum`, `min`, and `max` rules, including multiple aggregate terms per head; this now closes the v1 bounded-aggregation requirement while leaving richer aggregate ergonomics as post-v1 work
 - a first real recursive runtime slice for positive recursion and cross-stratum negation
 - source datom provenance threaded from resolved facts into derived tuples
+- conjunctive policy propagation from datoms and sidecar-projected facts into derived tuples, aggregates, explanations, and reports
 - derived tuple metadata with rule, SCC, stratum, iteration, parent tuple references, and source datom IDs
 - an in-memory explainer that reconstructs recursive tuple traces
 - a coordination acceptance slice for task readiness, claims, lease heartbeats, execution outcomes, lease handoff, and stale-result rejection
@@ -153,6 +162,7 @@ Implemented today:
 - a scheduled/manual GitHub Actions pilot-validation workflow that runs the launch pack and uploads report/drift artifacts
 - a first real Go operator shell plus typed Go client over the HTTP API
 - a broader typed Python SDK surface with fixture builders, policy-aware helpers, and live integration coverage against a Rust server
+- a tracked semantic compliance matrix that maps `SPEC.md` sections `1-11` to the implemented v1 single-node semantic surface
 
 Deliberately still narrow:
 
@@ -160,6 +170,11 @@ Deliberately still narrow:
 - bounded aggregation is intentionally limited to non-recursive grouped aggregate rules, so richer aggregate syntax remains future work even though the v1 bounded-aggregation requirement is now covered
 - the Go shell and Python SDK are now real, but they are still early boundary clients rather than mature multi-platform ecosystems
 - sidecar federation is now journal-subordinated and temporally exact on the SQLite-backed pilot path, but it is not yet replicated, distributed, or policy-enforced end to end
+
+Within that deliberately narrow bar, the current repository can honestly claim
+**full v1 single-node semantic closure**. The remaining gaps are broader
+platform, operability, and post-v1 ergonomics work, not missing core local
+semantics.
 
 ## First Working Vertical Slice
 

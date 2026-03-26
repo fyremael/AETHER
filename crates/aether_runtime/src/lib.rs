@@ -1,7 +1,7 @@
 use aether_ast::{
-    AggregateFunction, AggregateTerm, DerivedTuple, DerivedTupleMetadata, ElementId, Literal,
-    PredicateId, QueryAst, QueryResult, QueryRow, RuleAst, RuleId, Term, Tuple, TupleId, Value,
-    Variable,
+    merge_policy_envelopes, policy_allows, AggregateFunction, AggregateTerm, DerivedTuple,
+    DerivedTupleMetadata, ElementId, Literal, PolicyContext, PolicyEnvelope, PredicateId, QueryAst,
+    QueryResult, QueryRow, RuleAst, RuleId, Term, Tuple, TupleId, Value, Variable,
 };
 use aether_plan::CompiledProgram;
 use aether_resolver::ResolvedState;
@@ -45,6 +45,7 @@ struct RelationRow {
     values: Vec<Value>,
     tuple_id: Option<TupleId>,
     source_datom_ids: Vec<ElementId>,
+    policy: Option<PolicyEnvelope>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -53,6 +54,7 @@ struct MatchState {
     parent_tuple_ids: Vec<TupleId>,
     source_datom_ids: Vec<ElementId>,
     query_tuple_id: Option<TupleId>,
+    policy: Option<PolicyEnvelope>,
 }
 
 #[derive(Clone, Debug)]
@@ -60,6 +62,7 @@ struct AggregatedMatch {
     values: Vec<Value>,
     parent_tuple_ids: Vec<TupleId>,
     source_datom_ids: Vec<ElementId>,
+    policy: Option<PolicyEnvelope>,
 }
 
 #[derive(Clone, Debug)]
@@ -69,6 +72,7 @@ struct AggregateGroup {
     seen_bindings: IndexSet<String>,
     parent_tuple_ids: Vec<TupleId>,
     source_datom_ids: Vec<ElementId>,
+    policy: Option<PolicyEnvelope>,
 }
 
 #[derive(Clone, Debug)]
@@ -181,6 +185,7 @@ impl RuleRuntime for SemiNaiveRuntime {
                                     values: values.clone(),
                                     tuple_id: Some(tuple_id),
                                     source_datom_ids: matched.source_datom_ids.clone(),
+                                    policy: matched.policy.clone(),
                                 },
                             );
                             batch_tuples.push(DerivedTuple {
@@ -198,6 +203,7 @@ impl RuleRuntime for SemiNaiveRuntime {
                                     parent_tuple_ids: matched.parent_tuple_ids,
                                     source_datom_ids: matched.source_datom_ids,
                                 },
+                                policy: matched.policy,
                             });
                         }
                     }
@@ -224,6 +230,7 @@ impl RuleRuntime for SemiNaiveRuntime {
                                     values: matched.values.clone(),
                                     tuple_id: Some(tuple_id),
                                     source_datom_ids: matched.source_datom_ids.clone(),
+                                    policy: matched.policy.clone(),
                                 },
                             );
                             batch_tuples.push(DerivedTuple {
@@ -241,6 +248,7 @@ impl RuleRuntime for SemiNaiveRuntime {
                                     parent_tuple_ids: matched.parent_tuple_ids,
                                     source_datom_ids: matched.source_datom_ids,
                                 },
+                                policy: matched.policy,
                             });
                         }
                     }
@@ -298,6 +306,7 @@ pub fn execute_query(
     program: &CompiledProgram,
     derived: &DerivedSet,
     query: &QueryAst,
+    policy_context: Option<&PolicyContext>,
 ) -> Result<QueryResult, RuntimeError> {
     let extensional_rows = build_extensional_rows(state, program);
     let intensional_predicates: IndexSet<PredicateId> = program
@@ -322,12 +331,19 @@ pub fn execute_query(
 
         for state in &states {
             for row in &rows {
+                if !policy_allows(policy_context, row.policy.as_ref()) {
+                    continue;
+                }
                 if let Some(bindings) = unify_terms(&state.bindings, &goal.terms, &row.values) {
                     next_states.push(MatchState {
                         bindings,
                         parent_tuple_ids: state.parent_tuple_ids.clone(),
                         source_datom_ids: state.source_datom_ids.clone(),
                         query_tuple_id: row.tuple_id.or(state.query_tuple_id),
+                        policy: merge_policy_envelopes([
+                            state.policy.as_ref(),
+                            row.policy.as_ref(),
+                        ]),
                     });
                 }
             }
@@ -341,6 +357,7 @@ pub fn execute_query(
 
     let mut rows = states
         .into_iter()
+        .filter(|state| policy_allows(policy_context, state.policy.as_ref()))
         .map(|state| QueryRow {
             values: if query.keep.is_empty() {
                 state.bindings.values().cloned().collect()
@@ -380,6 +397,7 @@ fn build_extensional_rows(
                     values: vec![Value::Entity(*entity_id), fact.value],
                     tuple_id: None,
                     source_datom_ids: fact.source_datom_ids,
+                    policy: fact.policy,
                 }
             }));
         }
@@ -397,6 +415,7 @@ fn build_extensional_rows(
                     .as_ref()
                     .map(|provenance| provenance.source_datom_ids.clone())
                     .unwrap_or_default(),
+                policy: fact.policy.clone(),
             });
     }
 
@@ -412,6 +431,7 @@ fn build_derived_rows(derived: &DerivedSet) -> IndexMap<PredicateId, Vec<Relatio
                 values: tuple.tuple.values.clone(),
                 tuple_id: Some(tuple.tuple.id),
                 source_datom_ids: tuple.metadata.source_datom_ids.clone(),
+                policy: tuple.policy.clone(),
             });
     }
     rows
@@ -566,6 +586,10 @@ fn evaluate_rule_body_variant(
                                 parent_tuple_ids,
                                 source_datom_ids,
                                 query_tuple_id: row.tuple_id.or(state.query_tuple_id),
+                                policy: merge_policy_envelopes([
+                                    state.policy.as_ref(),
+                                    row.policy.as_ref(),
+                                ]),
                             });
                         }
                     }
@@ -740,6 +764,7 @@ fn materialize_aggregate_head(
                     seen_bindings: IndexSet::new(),
                     parent_tuple_ids: Vec::new(),
                     source_datom_ids: Vec::new(),
+                    policy: None,
                 },
             );
         }
@@ -768,6 +793,7 @@ fn materialize_aggregate_head(
         }
         extend_unique(&mut group.parent_tuple_ids, &matched.parent_tuple_ids);
         extend_unique(&mut group.source_datom_ids, &matched.source_datom_ids);
+        group.policy = merge_policy_envelopes([group.policy.as_ref(), matched.policy.as_ref()]);
     }
 
     let mut aggregated = groups
@@ -787,6 +813,7 @@ fn materialize_aggregate_head(
                 values,
                 parent_tuple_ids: group.parent_tuple_ids,
                 source_datom_ids: group.source_datom_ids,
+                policy: group.policy,
             }
         })
         .collect::<Vec<_>>();
@@ -1511,6 +1538,7 @@ mod tests {
                 goals: vec![atom(predicate(3, "reachable_count", 2), &["x", "count"])],
                 keep: vec![Variable::new("x"), Variable::new("count")],
             },
+            None,
         )
         .expect("query reachable count");
         assert_eq!(
@@ -1542,6 +1570,7 @@ mod tests {
                 )],
                 keep: vec![Variable::new("project"), Variable::new("hours")],
             },
+            None,
         )
         .expect("query project hours");
         assert_eq!(
@@ -1564,6 +1593,7 @@ mod tests {
                     Variable::new("hours"),
                 ],
             },
+            None,
         )
         .expect("query project stats");
         assert_eq!(
@@ -1583,6 +1613,7 @@ mod tests {
                 goals: vec![atom(predicate(8, "latest_epoch", 2), &["task", "epoch"])],
                 keep: vec![Variable::new("task"), Variable::new("epoch")],
             },
+            None,
         )
         .expect("query latest epoch");
         assert_eq!(
@@ -1863,6 +1894,7 @@ mod tests {
                 ],
                 keep: vec![Variable::new("t")],
             },
+            None,
         )
         .expect("query as_of ready");
         assert!(as_of_ready.rows.is_empty());
@@ -1884,6 +1916,7 @@ mod tests {
                 ],
                 keep: vec![Variable::new("t")],
             },
+            None,
         )
         .expect("query current ready");
         assert_eq!(current_ready.rows.len(), 1);
@@ -1907,6 +1940,7 @@ mod tests {
                     Variable::new("epoch"),
                 ],
             },
+            None,
         )
         .expect("query stale attempts");
         assert_eq!(
