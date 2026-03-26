@@ -120,6 +120,20 @@ impl FederatedCut {
     }
 }
 
+pub fn merge_partition_cuts<'a, I>(cuts: I) -> Vec<PartitionCut>
+where
+    I: IntoIterator<Item = &'a PartitionCut>,
+{
+    let mut merged = cuts.into_iter().cloned().collect::<Vec<_>>();
+    merged.sort_by(|left, right| {
+        left.partition
+            .cmp(&right.partition)
+            .then_with(|| left.as_of.cmp(&right.as_of))
+    });
+    merged.dedup();
+    merged
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Value {
     #[default]
@@ -340,6 +354,8 @@ pub struct Datom {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct FactProvenance {
     pub source_datom_ids: Vec<ElementId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imported_cuts: Vec<PartitionCut>,
     pub sidecar_origin: Option<SidecarOrigin>,
     pub source_ref: Option<SourceRef>,
 }
@@ -488,6 +504,8 @@ pub struct DerivedTupleMetadata {
     pub iteration: usize,
     pub parent_tuple_ids: Vec<TupleId>,
     pub source_datom_ids: Vec<ElementId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imported_cuts: Vec<PartitionCut>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -646,6 +664,7 @@ mod tests {
     fn fact_provenance_round_trips_with_sidecar_origin() {
         let provenance = FactProvenance {
             source_datom_ids: vec![ElementId::new(7)],
+            imported_cuts: Vec::new(),
             sidecar_origin: Some(SidecarOrigin {
                 kind: SidecarKind::Vector,
                 sidecar_id: "vector-sidecar".into(),

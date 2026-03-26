@@ -32,9 +32,13 @@ pub use http::{
     HealthResponse, HttpAccessToken, HttpAuthConfig, HttpKernelOptions, HttpKernelState,
 };
 pub use partitioned::{
-    FederatedHistoryRequest, FederatedHistoryResponse, PartitionAppendRequest,
-    PartitionAppendResponse, PartitionHistoryRequest, PartitionHistoryResponse,
-    PartitionStateRequest, PartitionStateResponse, PartitionedInMemoryKernelService,
+    render_federated_explain_report_markdown, FederatedExplainReport, FederatedHistoryRequest,
+    FederatedHistoryResponse, FederatedImportedSourceSummary, FederatedNamedQuerySummary,
+    FederatedReportRow, FederatedRunDocumentRequest, FederatedRunDocumentResponse,
+    FederatedTraceSummary, FederatedTraceTupleSummary, ImportedFactQueryRequest,
+    ImportedFactQueryResponse, PartitionAppendRequest, PartitionAppendResponse,
+    PartitionHistoryRequest, PartitionHistoryResponse, PartitionStateRequest,
+    PartitionStateResponse, PartitionedInMemoryKernelService,
 };
 pub use pilot::{
     coordination_pilot_dsl, coordination_pilot_seed_history,

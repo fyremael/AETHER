@@ -116,6 +116,18 @@ Introduce honest cross-partition reasoning.
 Imported facts are not anonymous extensional input.
 They are attributed semantic input.
 
+### Current status
+
+The first executable Track 3 slice now exists:
+
+- partition-local query results can be lifted into imported extensional facts
+- imported facts carry source partition/cut provenance into derived tuples
+- federated document execution can join imported facts without inventing a global scalar time
+- tuple explain traces and markdown reports now surface contributing partition cuts explicitly
+
+The remaining work in this track is durability and broader service posture, not
+the basic semantic model.
+
 ### Expected crate touch points
 
 - `crates/aether_ast`
@@ -141,6 +153,13 @@ Make federated truth legible.
 This is where the architecture becomes commercially visible. If the operator
 cannot tell what cutset they are looking at, the rest of the work will read as
 distributed cleverness instead of governed truth.
+
+### Current status
+
+The initial Track 4 slice is now in place through federated tuple explain
+artifacts and markdown report generation over imported-fact runs. Richer
+operator surfaces, durable partition backends, and broader UI/report ergonomics
+remain future work.
 
 ### Expected touch points
 

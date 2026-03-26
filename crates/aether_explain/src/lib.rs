@@ -116,6 +116,7 @@ mod tests {
                     .copied()
                     .map(aether_ast::ElementId::new)
                     .collect(),
+                imported_cuts: Vec::new(),
             },
             policy: None,
         }

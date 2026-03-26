@@ -716,6 +716,7 @@ fn build_search_response(
         .map(|(record, artifact)| {
             let provenance = FactProvenance {
                 source_datom_ids: source_datom_ids_for_record(&record.metadata, artifact.as_ref()),
+                imported_cuts: Vec::new(),
                 sidecar_origin: Some(SidecarOrigin {
                     kind: SidecarKind::Vector,
                     sidecar_id: record.metadata.sidecar_id.clone(),

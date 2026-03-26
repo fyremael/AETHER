@@ -162,6 +162,8 @@ The first executable slice of that model now exists in the codebase:
 - a single-process partition-aware in-memory service in `aether_api`
 - exact local append/history/state reads per partition
 - explicit federated-history reads over a cutset rather than a fake global cut
+- imported facts that are lifted from partition-local query results with source partition/cut provenance
+- federated document execution, tuple explain traces, and markdown reports that remain explicit about which local truths contributed to an answer
 
 The longer-form strategy for this lives in
 `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md`.
@@ -201,13 +203,13 @@ This is not an omission of ambition. It is sequencing. The kernel is being made 
 - a first real Go operator shell plus typed Go client over the stable boundary
 - a broader typed Python SDK surface over the stable boundary
 - explicit partition and federated-cut types plus a single-process partition-aware in-memory service
+- imported-fact reasoning plus federated explain/report surfaces over that partition-aware service
 - operator-facing demonstrations
 - a tracked semantic compliance matrix for the current v1 single-node closure claim
 
 ### Deferred
 
 - broader post-v1 DSL ergonomics
-- imported-fact reasoning and federated explain/report surfaces
 - durable or replicated partition-aware backends
 - distributed or replicated sidecar federation backends
 - production-hardened multi-tenant service boundaries

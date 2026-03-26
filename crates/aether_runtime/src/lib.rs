@@ -1,7 +1,8 @@
 use aether_ast::{
-    merge_policy_envelopes, policy_allows, AggregateFunction, AggregateTerm, DerivedTuple,
-    DerivedTupleMetadata, ElementId, Literal, PolicyContext, PolicyEnvelope, PredicateId, QueryAst,
-    QueryResult, QueryRow, RuleAst, RuleId, Term, Tuple, TupleId, Value, Variable,
+    merge_partition_cuts, merge_policy_envelopes, policy_allows, AggregateFunction, AggregateTerm,
+    DerivedTuple, DerivedTupleMetadata, ElementId, Literal, PartitionCut, PolicyContext,
+    PolicyEnvelope, PredicateId, QueryAst, QueryResult, QueryRow, RuleAst, RuleId, Term, Tuple,
+    TupleId, Value, Variable,
 };
 use aether_plan::CompiledProgram;
 use aether_resolver::ResolvedState;
@@ -45,6 +46,7 @@ struct RelationRow {
     values: Vec<Value>,
     tuple_id: Option<TupleId>,
     source_datom_ids: Vec<ElementId>,
+    imported_cuts: Vec<PartitionCut>,
     policy: Option<PolicyEnvelope>,
 }
 
@@ -53,6 +55,7 @@ struct MatchState {
     bindings: IndexMap<Variable, Value>,
     parent_tuple_ids: Vec<TupleId>,
     source_datom_ids: Vec<ElementId>,
+    imported_cuts: Vec<PartitionCut>,
     query_tuple_id: Option<TupleId>,
     policy: Option<PolicyEnvelope>,
 }
@@ -62,6 +65,7 @@ struct AggregatedMatch {
     values: Vec<Value>,
     parent_tuple_ids: Vec<TupleId>,
     source_datom_ids: Vec<ElementId>,
+    imported_cuts: Vec<PartitionCut>,
     policy: Option<PolicyEnvelope>,
 }
 
@@ -72,6 +76,7 @@ struct AggregateGroup {
     seen_bindings: IndexSet<String>,
     parent_tuple_ids: Vec<TupleId>,
     source_datom_ids: Vec<ElementId>,
+    imported_cuts: Vec<PartitionCut>,
     policy: Option<PolicyEnvelope>,
 }
 
@@ -185,6 +190,7 @@ impl RuleRuntime for SemiNaiveRuntime {
                                     values: values.clone(),
                                     tuple_id: Some(tuple_id),
                                     source_datom_ids: matched.source_datom_ids.clone(),
+                                    imported_cuts: matched.imported_cuts.clone(),
                                     policy: matched.policy.clone(),
                                 },
                             );
@@ -202,6 +208,7 @@ impl RuleRuntime for SemiNaiveRuntime {
                                     iteration,
                                     parent_tuple_ids: matched.parent_tuple_ids,
                                     source_datom_ids: matched.source_datom_ids,
+                                    imported_cuts: matched.imported_cuts,
                                 },
                                 policy: matched.policy,
                             });
@@ -230,6 +237,7 @@ impl RuleRuntime for SemiNaiveRuntime {
                                     values: matched.values.clone(),
                                     tuple_id: Some(tuple_id),
                                     source_datom_ids: matched.source_datom_ids.clone(),
+                                    imported_cuts: matched.imported_cuts.clone(),
                                     policy: matched.policy.clone(),
                                 },
                             );
@@ -247,6 +255,7 @@ impl RuleRuntime for SemiNaiveRuntime {
                                     iteration,
                                     parent_tuple_ids: matched.parent_tuple_ids,
                                     source_datom_ids: matched.source_datom_ids,
+                                    imported_cuts: matched.imported_cuts,
                                 },
                                 policy: matched.policy,
                             });
@@ -339,6 +348,9 @@ pub fn execute_query(
                         bindings,
                         parent_tuple_ids: state.parent_tuple_ids.clone(),
                         source_datom_ids: state.source_datom_ids.clone(),
+                        imported_cuts: merge_partition_cuts(
+                            state.imported_cuts.iter().chain(row.imported_cuts.iter()),
+                        ),
                         query_tuple_id: row.tuple_id.or(state.query_tuple_id),
                         policy: merge_policy_envelopes([
                             state.policy.as_ref(),
@@ -397,6 +409,7 @@ fn build_extensional_rows(
                     values: vec![Value::Entity(*entity_id), fact.value],
                     tuple_id: None,
                     source_datom_ids: fact.source_datom_ids,
+                    imported_cuts: Vec::new(),
                     policy: fact.policy,
                 }
             }));
@@ -415,6 +428,11 @@ fn build_extensional_rows(
                     .as_ref()
                     .map(|provenance| provenance.source_datom_ids.clone())
                     .unwrap_or_default(),
+                imported_cuts: fact
+                    .provenance
+                    .as_ref()
+                    .map(|provenance| provenance.imported_cuts.clone())
+                    .unwrap_or_default(),
                 policy: fact.policy.clone(),
             });
     }
@@ -431,6 +449,7 @@ fn build_derived_rows(derived: &DerivedSet) -> IndexMap<PredicateId, Vec<Relatio
                 values: tuple.tuple.values.clone(),
                 tuple_id: Some(tuple.tuple.id),
                 source_datom_ids: tuple.metadata.source_datom_ids.clone(),
+                imported_cuts: tuple.metadata.imported_cuts.clone(),
                 policy: tuple.policy.clone(),
             });
     }
@@ -585,6 +604,9 @@ fn evaluate_rule_body_variant(
                                 bindings,
                                 parent_tuple_ids,
                                 source_datom_ids,
+                                imported_cuts: merge_partition_cuts(
+                                    state.imported_cuts.iter().chain(row.imported_cuts.iter()),
+                                ),
                                 query_tuple_id: row.tuple_id.or(state.query_tuple_id),
                                 policy: merge_policy_envelopes([
                                     state.policy.as_ref(),
@@ -764,6 +786,7 @@ fn materialize_aggregate_head(
                     seen_bindings: IndexSet::new(),
                     parent_tuple_ids: Vec::new(),
                     source_datom_ids: Vec::new(),
+                    imported_cuts: Vec::new(),
                     policy: None,
                 },
             );
@@ -793,6 +816,12 @@ fn materialize_aggregate_head(
         }
         extend_unique(&mut group.parent_tuple_ids, &matched.parent_tuple_ids);
         extend_unique(&mut group.source_datom_ids, &matched.source_datom_ids);
+        group.imported_cuts = merge_partition_cuts(
+            group
+                .imported_cuts
+                .iter()
+                .chain(matched.imported_cuts.iter()),
+        );
         group.policy = merge_policy_envelopes([group.policy.as_ref(), matched.policy.as_ref()]);
     }
 
@@ -813,6 +842,7 @@ fn materialize_aggregate_head(
                 values,
                 parent_tuple_ids: group.parent_tuple_ids,
                 source_datom_ids: group.source_datom_ids,
+                imported_cuts: group.imported_cuts,
                 policy: group.policy,
             }
         })
