@@ -1,52 +1,98 @@
 # ROADMAP
 
-## Planned milestones
+This document is the forward-looking companion to `docs/STATUS.md`.
 
-### M0 - Rust substrate core
-- strengthen IDs and value model
-- complete schema registry behavior
-- implement append-only in-memory journal
-- add deterministic temporal replay coverage
+`STATUS` answers “what exists now.” `ROADMAP` answers “what should we build
+next without disturbing the semantic center.”
 
-### M1 - Rust resolver core
-- current-state materialization
-- `AsOf` materialization
-- merge semantics by attribute class
+## Milestone Spine
 
-### M2 - Rust rule compiler
-- canonical v1 DSL parsing
-- safety checks
-- type validation
-- dependency graph construction
-- SCC decomposition
-- stratification
+The original v1 milestone spine is now substantially closed.
 
-### M3 - Rust recursive runtime
-- semi-naive evaluation
-- recursive SCC iteration
-- materialized intensional relations
-- derivation metadata
+| Milestone | Status | Meaning now |
+| --- | --- | --- |
+| `M0` | Complete | Rust substrate core exists |
+| `M1` | Complete | Deterministic resolver core exists |
+| `M2` | Complete | Rule compiler and planning exist |
+| `M3` | Complete for v1 | Recursive runtime, stratified negation, provenance, and bounded aggregation are implemented for the v1 slice |
+| `M4` | Complete for pilot scope | Stable boundary, authenticated service, reports, and pilot launch workflow exist |
+| `M5` | Complete for first boundary layer | Go shell and Python SDK are real, but still early ecosystems |
 
-### M4 - API boundary
-- stable request/response types
-- serialized boundary contracts
-- process-boundary service shape
+That means the roadmap is no longer about proving the kernel can exist. It is
+about widening the system carefully around a settled semantic core.
 
-### M5 - Go shell and Python SDK
-- operator shell
-- SDK ergonomics
-- benchmark and fixture harnesses
+## Current Planning Rule
 
-## Next architecture track
+Every next-step decision should preserve three properties:
 
-The next concrete architecture slice after the current pilot is:
+- exact local truth stays exact
+- derived meaning stays replayable and explainable
+- outer layers do not quietly redefine inner semantics
 
-- authority partitions
-- federated cuts
-- imported facts with provenance
-- partition-aware operator and explain surfaces
+If a proposed feature weakens one of those, it is the wrong next step.
 
-The governing decision is
-`docs/ADR/0001-authority-partitions-and-federated-cuts.md`.
-The execution plan is
-`docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md`.
+## Active Tracks
+
+### 1. Post-pilot service hardening
+
+Focus:
+
+- stronger lifecycle and revocation ergonomics around auth
+- deployment and upgrade discipline beyond the current Windows pilot bundle
+- richer operator-facing incident and explain surfaces
+- longer-duration soak and recovery evidence
+
+### 2. Distributed-truth execution
+
+Focus:
+
+- replicated authority partitions
+- failover semantics
+- durable federated service boundaries
+- imported-fact widening only where provenance can remain exact
+
+Governing docs:
+
+- `docs/ADR/0001-authority-partitions-and-federated-cuts.md`
+- `docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md`
+
+### 3. Post-v1 language and runtime ergonomics
+
+Focus:
+
+- modular authoring and cleaner document composition
+- richer explain/query ergonomics
+- runtime optimization beyond the now-closed v1 bounded-aggregation slice
+
+Non-goal:
+
+- do not reopen the v1 semantic closure claim unless a real semantic defect is found
+
+### 4. Operational evidence and release discipline
+
+Focus:
+
+- historical benchmark trend storage
+- stronger release promotion evidence
+- eventually signed artifacts and provenance
+
+## What Is Deliberately Not The Immediate Roadmap
+
+Not every desirable capability should be pulled forward.
+
+Deliberately not the near-term center:
+
+- a broad multi-tenant platform story
+- replicated sidecar control planes before replicated authority partitions
+- post-v1 DSL flourish for its own sake
+- feature breadth that outruns explainability or replay discipline
+
+## Near-Term Decision Order
+
+If the team needs a practical ordering, use this one:
+
+1. harden the current pilot boundary
+2. deepen operator-facing proof and reporting
+3. execute replicated authority partitions
+4. widen distributed truth only where provenance remains exact
+5. improve ergonomics and optimization around the already-settled core

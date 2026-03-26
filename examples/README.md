@@ -6,12 +6,17 @@ For the operator path and demo-selection guidance, start with `docs/OPERATIONS.m
 
 Start here:
 
-- `demo-03-coordination-situation-room.md` is the current flagship showcase: recursive closure, temporal replay, claim windows, lease handoff, stale fencing, and proof traces in one operator-facing run.
-- `demo-01-temporal-dependency-horizon.md` is the first public showcase: temporal replay, recursive closure, and explainable proof traces over the same journal.
-- `demo-02-multi-worker-lease-handoff.md` is the first coordination showcase: multi-worker lease handoff, heartbeat-backed authority, accepted versus fenced outcomes, claimable work, and service-backed explanation.
-- `transitive-closure.md` shows the first real recursive vertical slice through the textual DSL path, from parsing through resolution, compilation, and fixed-point evaluation.
+| Example | Best use | What it teaches |
+| --- | --- | --- |
+| `demo-03-coordination-situation-room.md` | Executive, operator, or partner showcase | Recursive closure, temporal replay, claim windows, lease handoff, stale fencing, and proof traces in one run |
+| `demo-01-temporal-dependency-horizon.md` | First semantic introduction | Temporal replay, recursive closure, and explainable proof traces |
+| `demo-02-multi-worker-lease-handoff.md` | Coordination-focused walkthrough | Heartbeat-backed authority, accepted versus fenced outcomes, claimable work, and service-backed explanation |
+| `transitive-closure.md` | Technical DSL slice | Parsing through resolution, compilation, and fixed-point evaluation |
+
+Also useful:
+
 - `crates/aether_api/examples/http_kernel_service.rs` starts the current minimal HTTP JSON kernel boundary for technical demonstrations and integration work.
-- the `aether_api` integration tests now exercise a coordination-focused DSL document with facts, `AsOf` queries, policy annotations, heartbeat-backed authority, accepted outcomes, and stale-result rejection.
+- the `aether_api` integration tests exercise a coordination-focused DSL document with facts, `AsOf` queries, policy annotations, heartbeat-backed authority, accepted outcomes, and stale-result rejection.
 
 For non-technical Windows operators:
 

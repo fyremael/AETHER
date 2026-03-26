@@ -3,8 +3,11 @@
 ## Current state
 
 The repository has advanced from a pure specification bundle to a functioning
-full-v1 single-node semantic kernel and late-M4 design-partner pilot
-workspace.
+full-v1 single-node semantic kernel with a launch-ready design-partner pilot.
+
+In plain terms: AETHER can now journal facts, replay exact cuts, derive
+recursive truths, explain them, and serve them through authenticated boundaries
+without asking the user to imagine the kernel into existence.
 
 Completed:
 
@@ -58,7 +61,7 @@ Completed:
 - GitHub CI added for Ubuntu and Windows
 - repository front-door docs, contribution guidance, and worked examples now exist
 
-Not yet completed:
+Still open:
 
 - post-v1 DSL ergonomics and document modularity beyond the current canonical surface
 - broader durable storage backends beyond the current SQLite journal

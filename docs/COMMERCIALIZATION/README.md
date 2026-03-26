@@ -7,6 +7,9 @@ system may become tomorrow. These documents are meant to help product,
 partnership, design, solutions, and field teams tell a coherent story without
 drifting away from the current pilot proof.
 
+The writing standard is simple: plain claims first, larger vision second.
+Assume the reader is smart, busy, and appropriately skeptical.
+
 ## Reading Paths
 
 ### If you are an executive sponsor or design partner
@@ -98,4 +101,5 @@ That path keeps the visual system, copy system, and public front door aligned.
 - Separate present capability from scaled platform vision.
 - Do not present AETHER as a general-purpose production platform yet.
 - Lead with operator questions and business outcomes before technical terms.
+- Prefer the clearest true sentence over the most impressive-sounding one.
 - Use the commercialization pack to sharpen the story, not to exaggerate it.

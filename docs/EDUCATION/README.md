@@ -13,6 +13,12 @@ The method is simple:
 - worked examples before formal claims
 - technical terms only after the reader already understands the shape
 
+Each lesson follows the same teaching rhythm:
+
+1. ask the human question first
+2. show the concrete example
+3. name the formal concept only after the idea is already familiar
+
 ## Reading Order
 
 Read these in order:
@@ -56,7 +62,7 @@ By the end of these notes, a reader should be able to say:
 - what AETHER derives
 - why AETHER can explain itself
 - how AETHER decides who may act
-- why AETHER does not want one giant truth
+- why AETHER avoids pretending the world shares one giant truth
 
 If those five things are clear, the rest of the system becomes much easier to
 learn.

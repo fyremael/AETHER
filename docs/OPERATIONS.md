@@ -54,6 +54,13 @@ If you need a packaged pilot service bundle for deployment review or handoff, ru
 double-click scripts/build-pilot-package.cmd
 ```
 
+If you need the broader release candidate evidence pack rather than only the
+pilot launch pack, run:
+
+```text
+double-click scripts/run-release-readiness.cmd
+```
+
 If you need the deployment and upgrade runbook for that bundle, read:
 
 - `docs/PILOT_OPERATIONS_PLAYBOOK.md`
@@ -69,6 +76,21 @@ That hardened pilot service now starts only from an explicit deployment config a
 The same config model can also fetch tokens from an external secret-manager CLI or broker script with `token_command`, so operators can keep package-local files out of the trust path when needed.
 
 Those audit entries now carry semantic context, not just endpoint metadata. For the current pilot path that includes the temporal cut, the query goal, tuple IDs for explain requests, and result-count summaries where they exist.
+
+## Choose By Question
+
+Use this guide by the question you need answered:
+
+| If you need to know... | Use |
+| --- | --- |
+| “What is the clearest single showcase?” | Demo 03 |
+| “How does replay and closure work?” | Demo 01 |
+| “How do heartbeats, handoff, and fencing work?” | Demo 02 |
+| “Why was this worker authorized or fenced?” | `run-pilot-report.cmd` |
+| “Did performance drift?” | `run-performance-drift.cmd` |
+| “Is this exact pilot candidate launch-ready?” | `run-pilot-launch-validation.cmd` |
+| “Is this exact tree release-ready?” | `run-release-readiness.cmd` |
+| “Can I hand someone a packaged service bundle?” | `build-pilot-package.cmd` |
 
 ## Demo Catalog
 

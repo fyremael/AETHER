@@ -8,22 +8,35 @@ For documentation publishing:
 
 - run `python scripts/build_pages.py --out-dir artifacts/pages-preview` after `cargo doc --workspace --no-deps` to stage a local Pages preview bundle
 
-For non-technical operators on Windows:
+## Windows Operator Shortcuts
 
-- double-click `run-demo-01.cmd` to run the first AETHER demonstration
-- double-click `run-demo-02.cmd` to run the multi-worker lease handoff demonstration
-- double-click `run-demo-03.cmd` to run the flagship coordination situation-room showcase
-- double-click `run-pilot-report.cmd` to generate the current coordination pilot report artifacts
-- double-click `run-pilot-launch-validation.cmd` to run the full launch-candidate validation pack
-- double-click `run-release-readiness.cmd` to run the structured release-readiness QA suite
-- double-click `build-pilot-package.cmd` to build a packaged durable pilot-service bundle
-- double-click `new-pilot-token.cmd` to generate a fresh pilot bearer token
-- double-click `run-performance-dashboard.cmd` to watch the live console performance dashboard
-- double-click `run-performance-report.cmd` to generate the current release-mode performance report
-- double-click `run-performance-baseline.cmd` to capture the current accepted performance baseline
-- double-click `run-performance-drift.cmd` to compare the current build to that baseline
+### Demos
 
-For technical users or automation:
+- double-click `run-demo-01.cmd`
+- double-click `run-demo-02.cmd`
+- double-click `run-demo-03.cmd`
+
+### Pilot reports and validation
+
+- double-click `run-pilot-report.cmd`
+- double-click `run-pilot-launch-validation.cmd`
+- double-click `run-release-readiness.cmd`
+
+### Deployment helpers
+
+- double-click `build-pilot-package.cmd`
+- double-click `new-pilot-token.cmd`
+
+### Performance
+
+- double-click `run-performance-dashboard.cmd`
+- double-click `run-performance-report.cmd`
+- double-click `run-performance-baseline.cmd`
+- double-click `run-performance-drift.cmd`
+
+## Technical Commands
+
+### Demos and pilot reporting
 
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-demo.ps1 -Demo 01`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-demo.ps1 -Demo 02`
@@ -33,20 +46,30 @@ For technical users or automation:
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1 -BaselinePath <accepted-baseline-path>`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1 -BaselinePath <accepted-baseline-path>`
+
+### Deployment and auth helpers
+
 - run `powershell -ExecutionPolicy Bypass -File scripts/build-pilot-package.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/new-pilot-token.ps1 -OutputPath <token-file>`
+- run `cargo run -p aether_api --bin aether_pilot_service --release -- --config <path-to-config>`
+- run `cargo run -p aether_api --example pilot_http_kernel_service --release`
+
+### Performance and stress
+
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-dashboard.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-report.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-baseline.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-drift.ps1`
-- run `python scripts/build_presentation_assets.py`
 - run `cargo run -p aether_api --example pilot_coordination_report --release`
 - run `cargo run -p aether_api --example capture_performance_baseline --release`
 - run `cargo run -p aether_api --example performance_drift_report --release -- artifacts/performance/baseline.json`
-- run `cargo run -p aether_api --bin aether_pilot_service --release -- --config <path-to-config>`
-- run `cargo run -p aether_api --example pilot_http_kernel_service --release`
 - run `cargo bench -p aether_api`
 - run `cargo test -p aether_api --test performance_stress --release -- --ignored --nocapture`
+
+### Docs and presentation assets
+
+- run `python scripts/build_pages.py --out-dir artifacts/pages-preview`
+- run `python scripts/build_presentation_assets.py`
 
 Demo reports are written to `artifacts/demos/`.
 

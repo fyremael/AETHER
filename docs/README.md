@@ -6,6 +6,18 @@ The root documents still matter. `SPEC.md`, `RULES.md`, `INTERFACES.md`, and `RE
 
 The GitHub Pages site is the published front door for this material. It hosts the generated Rust API reference and a curated landing page that points readers back into the handbook documents in the repository.
 
+## How To Use This Handbook
+
+Use the docs by question, not by sheer volume.
+
+- If you need the thesis, start at the repository root.
+- If you need current truth, read `docs/STATUS.md`,
+  `docs/SEMANTIC_COMPLIANCE_MATRIX.md`, and `docs/KNOWN_LIMITATIONS.md`.
+- If you need to act, use the operator, workflow, deployment, or QA guides.
+
+The set is written in layers on purpose: plain orientation first, current-state
+truth second, operating detail third.
+
 ## Reading Paths
 
 ### If you are new to AETHER
@@ -34,7 +46,7 @@ Read:
 6. `docs/EDUCATION/FEDERATED_TRUTH.md`
 
 That path is the plain-language curriculum: figures, analogies, examples, and
-the technical names only after the intuition is already clear.
+the formal names only after the intuition is already clear.
 
 ### If you are implementing features
 
@@ -201,6 +213,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 The documentation system follows a few non-negotiable rules:
 
 - say what the system does today before describing what it may do later
+- make the simplest correct explanation easy to find
 - distinguish governing specification from current implementation guide
 - optimize for precision, not hype
 - make the operator path as explicit as the developer path

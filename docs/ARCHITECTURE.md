@@ -180,7 +180,7 @@ The current implementation line is intentionally clear:
 - Go and Python remain boundary layers, not semantic authorities
 - journal storage is in-memory or SQLite-backed
 - the kernel service is in-memory or SQLite-backed, with a minimal authenticated HTTP path plus a hardened packaged pilot-service startup path
-- the first partition-aware service slice is currently in-memory only and focused on partition-local replay plus federated-history reads
+- the partition-aware service slice now exists in both in-memory and SQLite-backed single-node forms, with imported-fact, federated-history, and federated explain/report semantics
 - sidecar federation is implemented at the API boundary and durable on the SQLite-backed path, with registration and `AsOf` semantics subordinated to the kernel journal
 
 This is not an omission of ambition. It is sequencing. The kernel is being made semantically credible before it is made infrastructurally broad.

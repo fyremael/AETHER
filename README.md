@@ -5,8 +5,8 @@
 [![Rust 1.78+](https://img.shields.io/badge/rust-1.78%2B-93450a?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-4b5563)](./LICENSE-MIT)
 
-AETHER is a full-v1 single-node semantic kernel and late-M4 design-partner
-pilot for agentic coordination.
+AETHER is a full-v1 single-node semantic kernel with a launch-ready
+design-partner pilot for agentic coordination.
 
 Its long-range claim is simple, but not modest: the right center of gravity for agent coordination is not a queue, not a graph-walking convenience layer, not a pile of ad hoc service contracts, and not a host-language DSL masquerading as semantics. The right center of gravity is an authoritative semantic kernel: an append-only causal journal, a deterministic resolver, and a recursive rule engine that can state, derive, replay, and explain what a system believes.
 
@@ -20,7 +20,11 @@ That Pages surface now also includes a live showcase entrance for executive,
 customer, and partner conversations, plus exportable social cards, slide
 covers, and proof snapshots generated from the same presentation system.
 
-If you are joining the project fresh, read [`docs/README.md`](./docs/README.md) and [`CONTRIBUTING.md`](./CONTRIBUTING.md) after this file and then walk through [`examples/demo-03-coordination-situation-room.md`](./examples/demo-03-coordination-situation-room.md). That is the fastest path from architectural stance to executable behavior.
+If you are joining the project fresh, read [`docs/README.md`](./docs/README.md)
+and [`CONTRIBUTING.md`](./CONTRIBUTING.md) after this file and then walk
+through
+[`examples/demo-03-coordination-situation-room.md`](./examples/demo-03-coordination-situation-room.md).
+That is the fastest path from architectural stance to executable behavior.
 
 If you need the exact claim we can defend against the governing thesis, read
 [`docs/SEMANTIC_COMPLIANCE_MATRIX.md`](./docs/SEMANTIC_COMPLIANCE_MATRIX.md).
@@ -86,6 +90,19 @@ AETHER is not:
 - merely an orchestration shell
 - a Janus fork with recursive features bolted on later
 - a Python-first or Go-first semantic implementation
+
+## How To Read This Repo Quickly
+
+Three documents answer most first questions:
+
+- [`docs/STATUS.md`](./docs/STATUS.md) says what exists today.
+- [`docs/SEMANTIC_COMPLIANCE_MATRIX.md`](./docs/SEMANTIC_COMPLIANCE_MATRIX.md)
+  says what part of the governing thesis is already closed.
+- [`docs/KNOWN_LIMITATIONS.md`](./docs/KNOWN_LIMITATIONS.md) says where the
+  current system still stops.
+
+That trio is the clearest way to avoid confusing implemented kernel behavior
+with later platform ambition.
 
 ## Commercial Frame
 
@@ -343,23 +360,17 @@ This is intentional. The project is building from semantic bedrock upward. The r
 
 ## Roadmap
 
-The milestone sequence remains the governing roadmap.
+The original milestone spine from `M0` through `M5` now functions mainly as a
+historical scaffold. The current frontier is no longer “can the semantic kernel
+exist?” It is:
 
-- `M0` Rust substrate core
-- `M1` deterministic resolver core
-- `M2` rule compiler and planning
-- `M3` recursive runtime and derivation traces
-- `M4` stable API boundary
-- `M5` Go shell and Python SDK
+- how far to harden the single-node pilot boundary
+- how far to deepen operator-facing proof and reporting
+- how to scale from exact local truth to replicated authority partitions
+- which post-v1 ergonomics matter without blurring the semantic center
 
-In practical terms, the most immediate work now is:
-
-- deciding which post-v1 DSL ergonomics matter beyond the now-implemented canonical v1 surface
-- deciding how far aggregation should widen beyond the current pilot-good slice before AETHER claims full spec closure
-- widening explainability from tuple traces to richer operator-facing proof and incident surfaces
-- hardening the API boundary from the current authenticated, audited, and reportable pilot service to richer operator-facing and production-credible integrations
-- introducing more boundary-level examples and operator-facing demonstrations
-- post-launch service and operational hardening beyond the current single-node pilot boundary
+The active planning document for that work is
+[`docs/ROADMAP.md`](./docs/ROADMAP.md).
 
 ## Why The README Is Long
 

@@ -35,6 +35,10 @@ python -m unittest discover python/tests -v
 
 That gate is necessary, but it is not the release gate.
 
+Use it when the question is, “Did this change break the repository?”
+Use the full release suite when the question is, “Can we defend this exact tree
+as a release candidate?”
+
 ## Structured Release Gate
 
 For release preparation, run:
