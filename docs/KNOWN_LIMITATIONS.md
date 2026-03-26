@@ -19,3 +19,4 @@ the remaining post-v1, platform-breadth, or operability gaps around that core.
 - Memory figures in the performance report are structural lower-bound estimates rather than allocator-exact telemetry.
 - Durable storage is currently limited to a local SQLite journal; there is no snapshotting, replication, compaction, or backup story yet.
 - The Go shell and Python SDK are now real, but both remain early boundary clients rather than mature ecosystem surfaces with richer async/notebook/admin layers.
+- The first partition-aware distributed-truth slice is now implemented only in a single-process in-memory service. Imported facts, federated explain/report surfaces, and durable partition-aware backends are still open.

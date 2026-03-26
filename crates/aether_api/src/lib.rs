@@ -16,6 +16,7 @@ use thiserror::Error;
 
 pub mod deployment;
 pub mod http;
+pub mod partitioned;
 #[doc(hidden)]
 pub mod perf;
 pub mod pilot;
@@ -29,6 +30,11 @@ pub use deployment::{
 pub use http::{
     http_router, http_router_with_options, AuditContext, AuditEntry, AuditLogResponse, AuthScope,
     HealthResponse, HttpAccessToken, HttpAuthConfig, HttpKernelOptions, HttpKernelState,
+};
+pub use partitioned::{
+    FederatedHistoryRequest, FederatedHistoryResponse, PartitionAppendRequest,
+    PartitionAppendResponse, PartitionHistoryRequest, PartitionHistoryResponse,
+    PartitionStateRequest, PartitionStateResponse, PartitionedInMemoryKernelService,
 };
 pub use pilot::{
     coordination_pilot_dsl, coordination_pilot_seed_history,

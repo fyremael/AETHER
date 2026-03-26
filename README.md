@@ -71,7 +71,7 @@ The combination matters. A coordination system that stores facts without recursi
 
 AETHER is:
 
-- a semantic substrate for exact local coordination facts and explicit federated imports
+- a semantic substrate for exact local coordination facts and explicit federated truth boundaries
 - a single-node pilot kernel for exact local truth and replay
 - a Datalog-native recursive derivation core
 - a temporal replay engine for deterministic `AsOf` views
@@ -163,6 +163,8 @@ Implemented today:
 - a first real Go operator shell plus typed Go client over the HTTP API
 - a broader typed Python SDK surface with fixture builders, policy-aware helpers, and live integration coverage against a Rust server
 - a tracked semantic compliance matrix that maps `SPEC.md` sections `1-11` to the implemented v1 single-node semantic surface
+- explicit partition IDs, partition-qualified cuts, and federated-cut types for the first distributed-truth implementation slice
+- a single-process partition-aware in-memory service for exact per-partition append/history/state reads and honest federated-history reads
 
 Deliberately still narrow:
 
@@ -170,6 +172,7 @@ Deliberately still narrow:
 - bounded aggregation is intentionally limited to non-recursive grouped aggregate rules, so richer aggregate syntax remains future work even though the v1 bounded-aggregation requirement is now covered
 - the Go shell and Python SDK are now real, but they are still early boundary clients rather than mature multi-platform ecosystems
 - sidecar federation is now journal-subordinated and temporally exact on the SQLite-backed pilot path, but it is not yet replicated, distributed, or policy-enforced end to end
+- the first partition-aware service slice now exists, but imported-fact reasoning, federated explain surfaces, and replicated authority partitions remain future work
 
 Within that deliberately narrow bar, the current repository can honestly claim
 **full v1 single-node semantic closure**. The remaining gaps are broader

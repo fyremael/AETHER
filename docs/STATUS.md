@@ -45,6 +45,8 @@ Completed:
 - first real Go operator shell implemented against the HTTP API with typed client coverage
 - broader typed Python SDK surface implemented against the HTTP API with fixture builders and live integration coverage
 - semantic compliance matrix added to map `SPEC.md` sections `1-11` to implementation and acceptance evidence for the current v1 single-node closure claim
+- partition IDs, partition-qualified cuts, and federated-cut types implemented in the semantic model
+- single-process partition-aware in-memory service implemented for exact per-partition append/history/state reads plus explicit federated-history reads
 - documentation portal, architecture guide, developer workflow guide, operator guide, glossary, and documentation standards now exist
 - GitHub Pages publishing pipeline added for the documentation portal and generated Rust API reference
 - unit tests added across the Rust core crates
@@ -70,3 +72,4 @@ the now-closed v1 single-node semantic core:
 - continue service-operability hardening beyond the current single-node Windows bundle, with deeper lifecycle management after the new startup-time secret-manager bridge
 - decide which post-v1 ergonomic DSL extensions matter beyond the now-implemented canonical surface
 - continue runtime optimization now that the current bounded-aggregation requirement is covered
+- continue the distributed-truth plan beyond Track 1 / early Track 2: imported facts, federated explain/report surfaces, and partition-aware durable backends

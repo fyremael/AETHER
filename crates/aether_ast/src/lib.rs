@@ -40,6 +40,86 @@ id_type!(RuleId);
 id_type!(TupleId);
 id_type!(ReplicaId);
 
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct PartitionId(pub String);
+
+impl PartitionId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for PartitionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PartitionCut {
+    pub partition: PartitionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub as_of: Option<ElementId>,
+}
+
+impl PartitionCut {
+    pub fn current(partition: impl Into<PartitionId>) -> Self {
+        Self {
+            partition: partition.into(),
+            as_of: None,
+        }
+    }
+
+    pub fn as_of(partition: impl Into<PartitionId>, element: ElementId) -> Self {
+        Self {
+            partition: partition.into(),
+            as_of: Some(element),
+        }
+    }
+
+    pub fn is_current(&self) -> bool {
+        self.as_of.is_none()
+    }
+}
+
+impl fmt::Display for PartitionCut {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.as_of {
+            Some(element) => write!(f, "{}@e{}", self.partition, element.0),
+            None => write!(f, "{}@current", self.partition),
+        }
+    }
+}
+
+impl From<&str> for PartitionId {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<String> for PartitionId {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FederatedCut {
+    pub cuts: Vec<PartitionCut>,
+}
+
+impl FederatedCut {
+    pub fn normalized(mut self) -> Self {
+        self.cuts
+            .sort_by(|left, right| left.partition.cmp(&right.partition));
+        self
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Value {
     #[default]
@@ -470,8 +550,8 @@ pub struct PlanExplanation {
 mod tests {
     use super::{
         merge_policy_envelopes, policy_allows, AttributeId, Datom, DatomProvenance, ElementId,
-        EntityId, FactProvenance, OperationKind, PolicyContext, PolicyEnvelope, ReplicaId,
-        SidecarKind, SidecarOrigin, SourceRef, Value,
+        EntityId, FactProvenance, FederatedCut, OperationKind, PartitionCut, PartitionId,
+        PolicyContext, PolicyEnvelope, ReplicaId, SidecarKind, SidecarOrigin, SourceRef, Value,
     };
 
     #[test]
@@ -479,10 +559,34 @@ mod tests {
         let entity = EntityId::new(7);
         let attribute = AttributeId::new(11);
         let element = ElementId::new(19);
+        let partition = PartitionId::new("ops-west");
 
         assert_eq!(entity, EntityId::new(7));
         assert_eq!(attribute.to_string(), "11");
         assert_eq!(element.to_string(), "19");
+        assert_eq!(partition.to_string(), "ops-west");
+    }
+
+    #[test]
+    fn partition_cuts_format_and_normalize() {
+        let current = PartitionCut::current("tenant-b");
+        let as_of = PartitionCut::as_of("tenant-a", ElementId::new(7));
+
+        assert!(current.is_current());
+        assert_eq!(current.to_string(), "tenant-b@current");
+        assert_eq!(as_of.to_string(), "tenant-a@e7");
+
+        let normalized = FederatedCut {
+            cuts: vec![current.clone(), as_of.clone()],
+        }
+        .normalized();
+        assert_eq!(
+            normalized.cuts,
+            vec![
+                PartitionCut::as_of("tenant-a", ElementId::new(7)),
+                PartitionCut::current("tenant-b"),
+            ]
+        );
     }
 
     #[test]

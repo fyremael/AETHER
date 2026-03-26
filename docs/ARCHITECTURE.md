@@ -156,6 +156,13 @@ transaction.
 Sidecars follow the same rule. Artifact and vector memory may widen
 operationally, but they remain subordinate to committed journal history.
 
+The first executable slice of that model now exists in the codebase:
+
+- explicit `PartitionId`, `PartitionCut`, and `FederatedCut` types in the AST
+- a single-process partition-aware in-memory service in `aether_api`
+- exact local append/history/state reads per partition
+- explicit federated-history reads over a cutset rather than a fake global cut
+
 The longer-form strategy for this lives in
 `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md`.
 The governing ADR is
@@ -170,6 +177,7 @@ The current implementation line is intentionally clear:
 - Go and Python remain boundary layers, not semantic authorities
 - journal storage is in-memory or SQLite-backed
 - the kernel service is in-memory or SQLite-backed, with a minimal authenticated HTTP path plus a hardened packaged pilot-service startup path
+- the first partition-aware service slice is currently in-memory only and focused on partition-local replay plus federated-history reads
 - sidecar federation is implemented at the API boundary and durable on the SQLite-backed path, with registration and `AsOf` semantics subordinated to the kernel journal
 
 This is not an omission of ambition. It is sequencing. The kernel is being made semantically credible before it is made infrastructurally broad.
@@ -192,12 +200,15 @@ This is not an omission of ambition. It is sequencing. The kernel is being made 
 - packaged pilot deployment and CI-enforced launch/drift gating around the single-node service path
 - a first real Go operator shell plus typed Go client over the stable boundary
 - a broader typed Python SDK surface over the stable boundary
+- explicit partition and federated-cut types plus a single-process partition-aware in-memory service
 - operator-facing demonstrations
 - a tracked semantic compliance matrix for the current v1 single-node closure claim
 
 ### Deferred
 
 - broader post-v1 DSL ergonomics
+- imported-fact reasoning and federated explain/report surfaces
+- durable or replicated partition-aware backends
 - distributed or replicated sidecar federation backends
 - production-hardened multi-tenant service boundaries
 - mature Go/Python client ecosystems beyond the current first real boundary clients
