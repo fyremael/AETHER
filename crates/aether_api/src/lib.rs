@@ -327,6 +327,21 @@ fn filter_trace(
     })
 }
 
+fn ensure_visible_element(
+    datoms: &[Datom],
+    at: ElementId,
+    policy_context: Option<&PolicyContext>,
+) -> Result<(), ApiError> {
+    if datoms
+        .iter()
+        .any(|datom| datom.element == at && policy_allows(policy_context, datom.policy.as_ref()))
+    {
+        Ok(())
+    } else {
+        Err(ApiError::Validation(format!("unknown element {}", at.0)))
+    }
+}
+
 impl<J, S> KernelServiceCore<J, S>
 where
     J: Journal,
@@ -378,6 +393,7 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
 
     fn as_of(&self, request: AsOfRequest) -> Result<AsOfResponse, ApiError> {
         let datoms = self.datoms_or_history(&request.datoms)?;
+        ensure_visible_element(&datoms, request.at, request.policy_context.as_ref())?;
         Ok(AsOfResponse {
             state: filter_resolved_state(
                 &MaterializedResolver.as_of(&request.schema, &datoms, &request.at)?,
@@ -799,8 +815,8 @@ pub enum ApiError {
 mod tests {
     use super::{
         coordination_pilot_dsl, coordination_pilot_seed_history, ApiError, AppendRequest,
-        CurrentStateRequest, ExplainArtifact, ExplainTupleRequest, InMemoryKernelService,
-        KernelService, ParseDocumentRequest, RunDocumentRequest,
+        AsOfRequest, CurrentStateRequest, ExplainArtifact, ExplainTupleRequest,
+        InMemoryKernelService, KernelService, ParseDocumentRequest, RunDocumentRequest,
         COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
     };
     use aether_ast::{ElementId, EntityId, PolicyContext, PolicyEnvelope, Value};
@@ -1193,6 +1209,52 @@ query current_cut {
             .expect("explain protected tuple with matching policy")
             .trace;
         assert!(!executor_trace.tuples.is_empty());
+    }
+
+    #[test]
+    fn service_rejects_hidden_as_of_cuts_under_policy() {
+        let mut service = InMemoryKernelService::new();
+        let parsed = service
+            .parse_document(ParseDocumentRequest {
+                dsl: transitive_document_dsl(),
+            })
+            .expect("parse transitive document");
+        service
+            .append(AppendRequest {
+                datoms: vec![dependency_datom(1, 2, 1), {
+                    let mut datom = dependency_datom(2, 3, 2);
+                    datom.policy = Some(PolicyEnvelope {
+                        capabilities: vec!["executor".into()],
+                        visibilities: Vec::new(),
+                    });
+                    datom
+                }],
+            })
+            .expect("append mixed-visibility chain");
+
+        let hidden_as_of = service.as_of(AsOfRequest {
+            schema: parsed.schema.clone(),
+            datoms: Vec::new(),
+            at: ElementId::new(2),
+            policy_context: None,
+        });
+        assert!(matches!(
+            hidden_as_of,
+            Err(ApiError::Validation(message)) if message == "unknown element 2"
+        ));
+
+        let visible_as_of = service
+            .as_of(AsOfRequest {
+                schema: parsed.schema,
+                datoms: Vec::new(),
+                at: ElementId::new(2),
+                policy_context: Some(PolicyContext {
+                    capabilities: vec!["executor".into()],
+                    visibilities: Vec::new(),
+                }),
+            })
+            .expect("authorized as_of should succeed");
+        assert_eq!(visible_as_of.state.as_of, Some(ElementId::new(2)));
     }
 
     fn transitive_document_dsl() -> String {

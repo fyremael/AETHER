@@ -176,6 +176,7 @@ Deliberately still narrow:
 - the Go shell and Python SDK are now real, but they are still early boundary clients rather than mature multi-platform ecosystems
 - sidecar federation is now journal-subordinated and temporally exact on the SQLite-backed pilot path, but it is not yet replicated, distributed, or policy-enforced end to end
 - the first partition-aware service slice now includes imported-fact reasoning, federated explain/report surfaces, and a SQLite-backed durable backend, but replicated authority partitions and failover remain future work
+- imported-fact federation is currently constrained to single-goal tuple-producing query shapes so imported provenance stays semantically exact instead of pretending to justify arbitrary joined rows
 
 Within that deliberately narrow bar, the current repository can honestly claim
 **full v1 single-node semantic closure**. The remaining gaps are broader

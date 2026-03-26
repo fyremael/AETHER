@@ -76,3 +76,4 @@ the now-closed v1 single-node semantic core:
 - decide which post-v1 ergonomic DSL extensions matter beyond the now-implemented canonical surface
 - continue runtime optimization now that the current bounded-aggregation requirement is covered
 - continue the distributed-truth plan beyond the now-landed durable partition slice toward replicated authority partitions, federated service boundaries, and failover semantics
+- decide how far to widen imported-fact federation beyond the current single-goal provenance-preserving query shape

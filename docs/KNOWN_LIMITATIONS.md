@@ -20,3 +20,4 @@ the remaining post-v1, platform-breadth, or operability gaps around that core.
 - Durable storage is currently limited to a local SQLite journal; there is no snapshotting, replication, compaction, or backup story yet.
 - The Go shell and Python SDK are now real, but both remain early boundary clients rather than mature ecosystem surfaces with richer async/notebook/admin layers.
 - The first partition-aware distributed-truth slice now includes imported-fact reasoning, federated explain/report surfaces, and a SQLite-backed durable backend, but it still has no replication, failover, or multi-node authority-partition story.
+- Imported-fact federation is semantically exact for the current slice, but that slice is intentionally narrow: imported queries must currently be single-goal tuple-producing reads rather than arbitrary joined row shapes.

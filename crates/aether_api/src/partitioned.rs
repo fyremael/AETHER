@@ -298,28 +298,18 @@ fn validate_federated_cut(cut: FederatedCut) -> Result<FederatedCut, ApiError> {
     Ok(normalized)
 }
 
-fn filter_partition_datoms(
-    datoms: Vec<Datom>,
-    policy_context: Option<&PolicyContext>,
-) -> Vec<Datom> {
-    datoms
-        .into_iter()
-        .filter(|datom| aether_ast::policy_allows(policy_context, datom.policy.as_ref()))
-        .collect()
-}
-
 fn partition_history_for(
     service: &dyn KernelService,
     request: PartitionHistoryRequest,
 ) -> Result<PartitionHistoryResponse, ApiError> {
     let datoms = match request.cut.as_of {
         Some(element) => {
-            let full_history = service
+            let visible_history = service
                 .history(HistoryRequest {
-                    policy_context: None,
+                    policy_context: request.policy_context.clone(),
                 })?
                 .datoms;
-            let end = full_history
+            let end = visible_history
                 .iter()
                 .position(|datom| datom.element == element)
                 .ok_or_else(|| {
@@ -328,10 +318,7 @@ fn partition_history_for(
                         element, request.cut.partition
                     ))
                 })?;
-            filter_partition_datoms(
-                full_history[..=end].to_vec(),
-                request.policy_context.as_ref(),
-            )
+            visible_history[..=end].to_vec()
         }
         None => {
             service
@@ -354,6 +341,17 @@ fn partition_state_for(
 ) -> Result<PartitionStateResponse, ApiError> {
     let state = match request.cut.as_of {
         Some(element) => {
+            let visible_history = service
+                .history(HistoryRequest {
+                    policy_context: request.policy_context.clone(),
+                })?
+                .datoms;
+            if !visible_history.iter().any(|datom| datom.element == element) {
+                return Err(ApiError::Validation(format!(
+                    "unknown element {} for partition {}",
+                    element, request.cut.partition
+                )));
+            }
             service
                 .as_of(crate::AsOfRequest {
                     schema: request.schema,
@@ -385,6 +383,11 @@ fn import_partition_facts_from_service(
     request: ImportedFactQueryRequest,
     policy_context: Option<PolicyContext>,
 ) -> Result<ImportedFactQueryResponse, ApiError> {
+    let parsed = service.parse_document(ParseDocumentRequest {
+        dsl: request.dsl.clone(),
+    })?;
+    let query_spec = select_query_spec(&parsed, request.query_name.as_deref())?;
+    ensure_importable_query_shape(query_spec, request.query_name.as_deref())?;
     let response = service.run_document(RunDocumentRequest {
         dsl: request.dsl.clone(),
         policy_context,
@@ -611,6 +614,38 @@ fn select_query_result<'a>(
     }
 }
 
+fn select_query_spec<'a>(
+    response: &'a crate::ParseDocumentResponse,
+    query_name: Option<&str>,
+) -> Result<&'a aether_ast::QuerySpec, ApiError> {
+    match query_name {
+        Some(name) => response
+            .queries
+            .iter()
+            .find(|query| query.name.as_deref() == Some(name))
+            .map(|query| &query.spec)
+            .ok_or_else(|| ApiError::Validation(format!("unknown named query {}", name))),
+        None => response
+            .query
+            .as_ref()
+            .ok_or_else(|| ApiError::Validation("document did not produce a primary query".into())),
+    }
+}
+
+fn ensure_importable_query_shape(
+    spec: &aether_ast::QuerySpec,
+    query_name: Option<&str>,
+) -> Result<(), ApiError> {
+    if spec.query.goals.len() == 1 {
+        Ok(())
+    } else {
+        let label = query_name.unwrap_or("<primary>");
+        Err(ApiError::Validation(format!(
+            "imported fact query {label} must have exactly one goal so imported provenance maps to a single semantic row"
+        )))
+    }
+}
+
 fn build_imported_fact(
     request: &ImportedFactQueryRequest,
     index: usize,
@@ -817,7 +852,7 @@ fn filter_derived_set(derived: &DerivedSet, policy_context: Option<&PolicyContex
     let visible_ids = tuples
         .iter()
         .map(|tuple| tuple.tuple.id)
-        .collect::<Vec<_>>();
+        .collect::<std::collections::BTreeSet<_>>();
     let predicate_index = derived
         .predicate_index
         .iter()
@@ -1289,7 +1324,8 @@ mod tests {
     };
     use aether_ast::{
         AttributeId, Datom, DatomProvenance, ElementId, EntityId, FederatedCut, OperationKind,
-        PartitionCut, PartitionId, PolicyEnvelope, PredicateId, PredicateRef, ReplicaId, Value,
+        PartitionCut, PartitionId, PolicyContext, PolicyEnvelope, PredicateId, PredicateRef,
+        ReplicaId, Value,
     };
     use aether_resolver::ResolvedValue;
     use aether_schema::{AttributeClass, AttributeSchema, Schema, ValueType};
@@ -1595,6 +1631,114 @@ mod tests {
     }
 
     #[test]
+    fn imported_fact_queries_must_be_single_goal() {
+        let mut service = PartitionedInMemoryKernelService::new();
+        service
+            .append_partition(PartitionAppendRequest {
+                partition: PartitionId::new("joined"),
+                datoms: vec![
+                    sample_datom(1, 1, "ready", 1, None),
+                    Datom {
+                        entity: EntityId::new(1),
+                        attribute: AttributeId::new(2),
+                        value: Value::String("worker-a".into()),
+                        op: OperationKind::Assert,
+                        element: ElementId::new(2),
+                        replica: ReplicaId::new(1),
+                        causal_context: Default::default(),
+                        provenance: DatomProvenance::default(),
+                        policy: None,
+                    },
+                ],
+            })
+            .expect("append joined datoms");
+
+        let error = service
+            .import_partition_facts(
+                ImportedFactQueryRequest {
+                    cut: PartitionCut::current("joined"),
+                    dsl: joined_import_document(),
+                    predicate: PredicateRef {
+                        id: PredicateId::new(21),
+                        name: "imported_assignment".into(),
+                        arity: 2,
+                    },
+                    query_name: Some("joined_now".into()),
+                },
+                None,
+            )
+            .expect_err("joined import should be rejected");
+
+        match error {
+            crate::ApiError::Validation(message) => assert!(
+                message
+                    .contains("must have exactly one goal so imported provenance maps to a single semantic row"),
+                "{message}"
+            ),
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hidden_partition_cut_is_rejected_under_policy() {
+        let mut service = PartitionedInMemoryKernelService::new();
+        service
+            .append_partition(PartitionAppendRequest {
+                partition: PartitionId::new("secure"),
+                datoms: vec![
+                    sample_datom(1, 1, "ready", 1, None),
+                    sample_datom(
+                        1,
+                        1,
+                        "running",
+                        2,
+                        Some(PolicyEnvelope {
+                            capabilities: vec!["ops".into()],
+                            visibilities: Vec::new(),
+                        }),
+                    ),
+                ],
+            })
+            .expect("append secure datoms");
+
+        let history = service.partition_history(PartitionHistoryRequest {
+            cut: PartitionCut::as_of("secure", ElementId::new(2)),
+            policy_context: None,
+        });
+        assert!(matches!(
+            history,
+            Err(crate::ApiError::Validation(message))
+                if message == "unknown element 2 for partition secure"
+        ));
+
+        let state = service.partition_state(PartitionStateRequest {
+            cut: PartitionCut::as_of("secure", ElementId::new(2)),
+            schema: schema(),
+            policy_context: None,
+        });
+        assert!(matches!(
+            state,
+            Err(crate::ApiError::Validation(message))
+                if message == "unknown element 2 for partition secure"
+        ));
+
+        let visible = service
+            .partition_state(PartitionStateRequest {
+                cut: PartitionCut::as_of("secure", ElementId::new(2)),
+                schema: schema(),
+                policy_context: Some(PolicyContext {
+                    capabilities: vec!["ops".into()],
+                    visibilities: Vec::new(),
+                }),
+            })
+            .expect("authorized cut should resolve");
+        assert_eq!(
+            visible.cut,
+            PartitionCut::as_of("secure", ElementId::new(2))
+        );
+    }
+
+    #[test]
     fn sqlite_partitioned_service_replays_federated_imports_after_restart() {
         let temp = TestPartitionDir::new("partitioned-sqlite");
         {
@@ -1780,6 +1924,31 @@ query actionable_now {
 
 explain actionable_trace {
   tuple actionable_assignment(entity(1), "worker-a")
+}
+"#
+        .into()
+    }
+
+    fn joined_import_document() -> String {
+        r#"
+schema {
+  attr task.status: ScalarLWW<String>
+  attr task.owner: ScalarLWW<String>
+}
+
+predicates {
+  task_status(Entity, String)
+  task_owner(Entity, String)
+}
+
+rules {
+}
+
+query joined_now {
+  current
+  goal task_status(t, "ready")
+  goal task_owner(t, worker)
+  keep t, worker
 }
 "#
         .into()
