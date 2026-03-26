@@ -50,6 +50,7 @@ Completed:
 - imported-fact federation implemented over explicit partition cuts, including provenance-bearing extensional facts that carry source partition/cut context into derived tuples
 - federated document execution, explain traces, and markdown report generation implemented on top of the partition-aware in-memory service
 - SQLite-backed partition-aware service implemented for durable per-partition replay and restart-safe federated imported-fact / explain / report execution
+- structured release-readiness QA suite implemented with a dedicated runner, Pages preview build, package build, and uploaded workflow artifacts for manual/tagged release preparation
 - documentation portal, architecture guide, developer workflow guide, operator guide, glossary, and documentation standards now exist
 - GitHub Pages publishing pipeline added for the documentation portal and generated Rust API reference
 - unit tests added across the Rust core crates

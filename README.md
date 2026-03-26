@@ -270,6 +270,7 @@ cargo test
 python -m unittest discover python/tests -v
 (cd go && go test ./...)
 cargo build -p aether_api --bin aether_pilot_service --release
+powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1
 ```
 
 WSL verification uses the same workspace and the same commands via the Linux toolchain.
@@ -299,6 +300,8 @@ The workspace is currently verified under:
 - WSL Ubuntu stable GNU toolchain
 
 GitHub Actions now runs the same format, lint, and test gates on both Ubuntu and Windows so the public CI badge reflects the actual contributor contract.
+
+For structured release preparation, use the dedicated QA runner described in [`docs/QA.md`](./docs/QA.md). It produces a saved transcript and summary, builds the Pages preview bundle, executes the pilot launch pack, and builds the packaged Windows pilot bundle from the same candidate tree.
 
 ## Development Posture
 

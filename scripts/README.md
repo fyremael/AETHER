@@ -15,6 +15,7 @@ For non-technical operators on Windows:
 - double-click `run-demo-03.cmd` to run the flagship coordination situation-room showcase
 - double-click `run-pilot-report.cmd` to generate the current coordination pilot report artifacts
 - double-click `run-pilot-launch-validation.cmd` to run the full launch-candidate validation pack
+- double-click `run-release-readiness.cmd` to run the structured release-readiness QA suite
 - double-click `build-pilot-package.cmd` to build a packaged durable pilot-service bundle
 - double-click `new-pilot-token.cmd` to generate a fresh pilot bearer token
 - double-click `run-performance-dashboard.cmd` to watch the live console performance dashboard
@@ -30,6 +31,8 @@ For technical users or automation:
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-report.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1 -BaselinePath <accepted-baseline-path>`
+- run `powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1`
+- run `powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1 -BaselinePath <accepted-baseline-path>`
 - run `powershell -ExecutionPolicy Bypass -File scripts/build-pilot-package.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/new-pilot-token.ps1 -OutputPath <token-file>`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-dashboard.ps1`
@@ -50,6 +53,8 @@ Demo reports are written to `artifacts/demos/`.
 Pilot reports are written to `artifacts/pilot/reports/`.
 
 Pilot launch-validation transcripts are written to `artifacts/pilot/launch/`.
+
+Structured release-readiness transcripts and summaries are written to `artifacts/qa/release-readiness/`.
 
 Packaged pilot-service bundles are written to `artifacts/pilot/packages/`.
 

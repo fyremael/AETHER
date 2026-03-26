@@ -37,6 +37,8 @@ The repo now contains two GitHub Actions paths for this same pack:
 - `ci.yml`, where `pilot-launch-gate` makes the launch pack and drift check a required mainline gate
 - `pilot-validation.yml`, which keeps the same validation pack available on a schedule or by manual dispatch and uploads the resulting artifacts
 
+For structured release preparation, the repo now also contains a broader `Release Readiness` path that wraps this launch pack together with the cross-language regression suite, docs preview build, benchmark compile, and package build.
+
 ## One-Command Validation
 
 Windows operator path:

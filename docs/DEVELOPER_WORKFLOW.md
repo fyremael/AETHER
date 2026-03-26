@@ -57,6 +57,14 @@ The expected cross-platform baseline is:
 
 For anything nontrivial, verify both. A change is not “done locally” if it only works on one side of the supported toolchain contract.
 
+For a structured release candidate, the expected gate is the dedicated runner:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1
+```
+
+That suite widens the normal gate into boundary-client tests, Pages preview build, benchmark compile, pilot launch validation, and packaged-bundle production.
+
 ## Step 4: Update Documentation
 
 Documentation should move with the code, not after it.

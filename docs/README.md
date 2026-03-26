@@ -125,6 +125,17 @@ Read:
 
 That path explains the operator-facing report, baseline capture, drift comparison, the benchmark harness, the stress workloads, and the target interpretation.
 
+### If you are preparing a release candidate
+
+Read:
+
+1. `docs/QA.md`
+2. `docs/PILOT_LAUNCH.md`
+3. `docs/PILOT_DEPLOYMENT.md`
+4. `scripts/README.md`
+
+That path covers the structured release-readiness suite, its evidence pack, and the packaged pilot-bundle handoff.
+
 ### If you need the boundary-client path
 
 Read:
@@ -174,6 +185,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 | `docs/PILOT_DEPLOYMENT.md` | Packaged single-node deployment path, config model, and secret handling for the pilot service |
 | `docs/PILOT_OPERATIONS_PLAYBOOK.md` | Deployment, rotation, upgrade, rollback, and restart/replay playbooks for the pilot service |
 | `docs/PERFORMANCE.md` | Performance workloads, runner commands, benchmark harness, and interpretation guidance |
+| `docs/QA.md` | Structured QA and regression suite, release-readiness runner, and artifact contract |
 | `docs/COMMERCIALIZATION/README.md` | Hub for commercialization, product framing, buyer narrative, and messaging |
 | `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md` | Distributed truth and consensus strategy for partitioned AETHER scale |
 | `docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md` | Concrete build plan for authority partitions, federated cuts, and imported facts |

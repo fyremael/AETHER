@@ -1,0 +1,66 @@
+name: Release Readiness
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: release-readiness-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-readiness:
+    name: Release Readiness (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+
+      - name: Run release-readiness suite
+        shell: pwsh
+        run: ./scripts/run-release-readiness.ps1 -BaselinePath fixtures/performance/accepted-baseline.windows-x86_64.json
+
+      - name: Upload release-readiness artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-readiness-artifacts
+          path: |
+            artifacts/qa/release-readiness
+            artifacts/pilot/reports
+            artifacts/performance
+            artifacts/pilot/launch
+            artifacts/pilot/packages
+            artifacts/pages-preview-release
+          if-no-files-found: warn
+
+      - name: Publish workflow summary
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path artifacts/qa/release-readiness/latest.md) {
+            Get-Content artifacts/qa/release-readiness/latest.md | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          } else {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Release-readiness summary was not generated."
+          }

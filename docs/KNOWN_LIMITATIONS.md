@@ -16,6 +16,7 @@ the remaining post-v1, platform-breadth, or operability gaps around that core.
 - Operator reports are now policy-aware fixed-format incident summaries in markdown and JSON, but they are still not interactive investigation tools.
 - The pilot service now has a packaged deployment path with config-backed startup, package-local rotation tooling, and secret-file/env/command token resolution, but it is still a single-node bundle rather than a fully managed deployment story with automated rotation services, revocation, or native cloud secret-manager integrations.
 - The performance suite now supports local baseline capture, drift comparison, stress fixtures, and a required CI launch/drift gate, but it does not yet maintain historical benchmark trends beyond uploaded workflow artifacts.
+- The structured release-readiness suite now produces a coherent QA evidence pack, but it is still a pre-release verification flow rather than a signed artifact and promotion pipeline.
 - Memory figures in the performance report are structural lower-bound estimates rather than allocator-exact telemetry.
 - Durable storage is currently limited to a local SQLite journal; there is no snapshotting, replication, compaction, or backup story yet.
 - The Go shell and Python SDK are now real, but both remain early boundary clients rather than mature ecosystem surfaces with richer async/notebook/admin layers.
