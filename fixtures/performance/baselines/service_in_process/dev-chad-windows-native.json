@@ -1,0 +1,116 @@
+{
+  "label": "accepted-service-in-process-dev-chad-windows-native",
+  "generated_at": "1774653506",
+  "suite_id": "service_in_process",
+  "host_snapshot": {
+    "hostname": "CHAD",
+    "os": "Windows 11 (26200)",
+    "arch": "x86_64",
+    "cpu_brand": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+    "physical_cores": 8,
+    "logical_cores": 16,
+    "total_memory_bytes": 68566286336,
+    "execution_environment": "native_windows"
+  },
+  "host_manifest_id": "dev-chad-windows-native",
+  "run_metadata": {
+    "suite_id": "service_in_process",
+    "timestamp": "1774653506",
+    "build_profile": "release",
+    "samples_per_workload": 5,
+    "execution_environment": "native_windows",
+    "git_commit": "2ab2fc3b8805c0831d5d423f35be157234cf158c",
+    "git_dirty": true,
+    "host_manifest_id": "dev-chad-windows-native"
+  },
+  "report": {
+    "samples_per_workload": 5,
+    "measurements": [
+      {
+        "group": "service_in_process",
+        "workload": "Kernel service coordination run",
+        "scale": "128 tasks",
+        "units": 164,
+        "unit_label": "rows/s",
+        "latency": {
+          "samples": 5,
+          "mean": {
+            "secs": 0,
+            "nanos": 4778800
+          },
+          "min": {
+            "secs": 0,
+            "nanos": 4602000
+          },
+          "max": {
+            "secs": 0,
+            "nanos": 4965600
+          }
+        },
+        "throughput_per_second": 34318.238888423875,
+        "metrics": [
+          {
+            "name": "tasks",
+            "value": 128.0,
+            "unit": "tasks"
+          },
+          {
+            "name": "rows",
+            "value": 164.0,
+            "unit": "rows"
+          }
+        ],
+        "notes": [
+          "164 expected worker-task claimability rows",
+          "includes parse, compile, resolve, evaluate, and query through the kernel service"
+        ]
+      },
+      {
+        "group": "service_in_process",
+        "workload": "Durable restart coordination replay",
+        "scale": "128 tasks",
+        "units": 656,
+        "unit_label": "rows/s",
+        "latency": {
+          "samples": 5,
+          "mean": {
+            "secs": 0,
+            "nanos": 30889000
+          },
+          "min": {
+            "secs": 0,
+            "nanos": 29734500
+          },
+          "max": {
+            "secs": 0,
+            "nanos": 33378400
+          }
+        },
+        "throughput_per_second": 21237.333678655832,
+        "metrics": [
+          {
+            "name": "tasks",
+            "value": 128.0,
+            "unit": "tasks"
+          },
+          {
+            "name": "rows",
+            "value": 164.0,
+            "unit": "rows"
+          },
+          {
+            "name": "restart_passes",
+            "value": 4.0,
+            "unit": "passes"
+          }
+        ],
+        "notes": [
+          "164 expected worker-task claimability rows",
+          "each sample reopens the durable kernel, replays the SQLite journal, and runs the coordination document",
+          "4 restart-and-replay passes per sample to reduce timer jitter"
+        ]
+      }
+    ],
+    "footprints": []
+  }
+}

@@ -1,0 +1,470 @@
+{
+  "label": "accepted-core-kernel-dev-chad-windows-native",
+  "generated_at": "1774653920",
+  "suite_id": "core_kernel",
+  "host_snapshot": {
+    "hostname": "CHAD",
+    "os": "Windows 11 (26200)",
+    "arch": "x86_64",
+    "cpu_brand": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+    "physical_cores": 8,
+    "logical_cores": 16,
+    "total_memory_bytes": 68566286336,
+    "execution_environment": "native_windows"
+  },
+  "host_manifest_id": "dev-chad-windows-native",
+  "run_metadata": {
+    "suite_id": "core_kernel",
+    "timestamp": "1774653920",
+    "build_profile": "release",
+    "samples_per_workload": 5,
+    "execution_environment": "native_windows",
+    "git_commit": "2ab2fc3b8805c0831d5d423f35be157234cf158c",
+    "git_dirty": true,
+    "host_manifest_id": "dev-chad-windows-native"
+  },
+  "report": {
+    "samples_per_workload": 5,
+    "measurements": [
+      {
+        "group": "core_kernel",
+        "workload": "Journal append throughput",
+        "scale": "10,000 datoms",
+        "units": 10000,
+        "unit_label": "datoms/s",
+        "latency": {
+          "samples": 5,
+          "mean": {
+            "secs": 0,
+            "nanos": 2200060
+          },
+          "min": {
+            "secs": 0,
+            "nanos": 1756400
+          },
+          "max": {
+            "secs": 0,
+            "nanos": 2581800
+          }
+        },
+        "throughput_per_second": 4545330.581893221,
+        "metrics": [
+          {
+            "name": "datoms",
+            "value": 10000.0,
+            "unit": "datoms"
+          }
+        ],
+        "notes": [
+          "10,000 unique element IDs appended into an empty journal each sample"
+        ]
+      },
+      {
+        "group": "core_kernel",
+        "workload": "Journal append throughput",
+        "scale": "50,000 datoms",
+        "units": 50000,
+        "unit_label": "datoms/s",
+        "latency": {
+          "samples": 5,
+          "mean": {
+            "secs": 0,
+            "nanos": 11852840
+          },
+          "min": {
+            "secs": 0,
+            "nanos": 11675700
+          },
+          "max": {
+            "secs": 0,
+            "nanos": 12087300
+          }
+        },
+        "throughput_per_second": 4218398.291042484,
+        "metrics": [
+          {
+            "name": "datoms",
+            "value": 50000.0,
+            "unit": "datoms"
+          }
+        ],
+        "notes": [
+          "50,000 unique element IDs appended into an empty journal each sample"
+        ]
+      },
+      {
+        "group": "core_kernel",
+        "workload": "Resolver current throughput",
+        "scale": "1,000 entities",
+        "units": 16000,
+        "unit_label": "entities/s",
+        "latency": {
+          "samples": 5,
+          "mean": {
+            "secs": 0,
+            "nanos": 45003200
+          },
+          "min": {
+            "secs": 0,
+            "nanos": 43715400
+          },
+          "max": {
+            "secs": 0,
+            "nanos": 47197300
+          }
+        },
+        "throughput_per_second": 355530.27340278024,
+        "metrics": [
+          {
+            "name": "entities",
+            "value": 1000.0,
+            "unit": "entities"
+          },
+          {
+            "name": "datoms",
+            "value": 4332.0,
+            "unit": "datoms"
+          }
+        ],
+        "notes": [
+          "4,332 datoms across scalar, set, and ref attributes",
+          "16 resolver passes per sample to reduce timer jitter on this state microbenchmark"
+        ]
+      },
+      {
+        "group": "core_kernel",
+        "workload": "Resolver as-of throughput",
+        "scale": "1,000 entities",
+        "units": 16000,
+        "unit_label": "entities/s",
+        "latency": {
+          "samples": 5,
+          "mean": {
+            "secs": 0,
+            "nanos": 22300400
+          },
+          "min": {
+            "secs": 0,
+            "nanos": 20996100
+          },
+          "max": {
+            "secs": 0,
+            "nanos": 24603100
+          }
+        },
+        "throughput_per_second": 717475.9197144445,
+        "metrics": [
+          {
+            "name": "entities",
+            "value": 1000.0,
+            "unit": "entities"
+          },
+          {
+            "name": "datoms",
+            "value": 4332.0,
+            "unit": "datoms"
+          },
+          {
+            "name": "as_of_element",
+            "value": 2166.0,
+            "unit": "element"
+          }
+        ],
+        "notes": [
+          "Inclusive prefix cut at 2166 across 4,332 datoms",
+          "16 resolver passes per sample to reduce timer jitter on this temporal microbenchmark"
+        ]
+      },
+      {
+        "group": "core_kernel",
+        "workload": "Durable restart current replay",
+        "scale": "1,000 entities",
+        "units": 4000,
+        "unit_label": "entities/s",
+        "latency": {
+          "samples": 5,
+          "mean": {
+            "secs": 0,
+            "nanos": 66691380
+          },
+          "min": {
+            "secs": 0,
+            "nanos": 62699100
+          },
+          "max": {
+            "secs": 0,
+            "nanos": 69151400
+          }
+        },
+        "throughput_per_second": 59977.76624205407,
+        "metrics": [
+          {
+            "name": "entities",
+            "value": 1000.0,
+            "unit": "entities"
+          },
+          {
+            "name": "datoms",
+            "value": 4332.0,
+            "unit": "datoms"
+          },
+          {
+            "name": "restart_passes",
+            "value": 4.0,
+            "unit": "passes"
+          }
+        ],
+        "notes": [
+          "4,332 durable datoms persisted into a SQLite journal",
+          "each sample reopens the durable kernel and resolves current state from committed history",
+          "4 restart-and-replay passes per sample to reduce timer jitter"
+        ]
+      },
+      {
+        "group": "core_kernel",
+        "workload": "Compiler SCC planning",
+        "scale": "recursive width 16",
+        "units": 2048,
+        "unit_label": "predicates/s",
+        "latency": {
+          "samples": 5,
+          "mean": {
+            "secs": 0,
+            "nanos": 8973060
+          },
+          "min": {
+            "secs": 0,
+            "nanos": 8799300
+          },
+          "max": {
+            "secs": 0,
+            "nanos": 9152400
+          }
+        },
+        "throughput_per_second": 228238.75021453106,
+        "metrics": [
+          {
+            "name": "predicates",
+            "value": 17.0,
+            "unit": "predicates"
+          },
+          {
+            "name": "rules",
+            "value": 17.0,
+            "unit": "rules"
+          }
+        ],
+        "notes": [
+          "17 predicates and 17 rules with one large recursive SCC",
+          "128 compiler passes per sample to reduce timer jitter on this microbenchmark"
+        ]
+      },
+      {
+        "group": "core_kernel",
+        "workload": "Compiler SCC planning",
+        "scale": "recursive width 64",
+        "units": 8192,
+        "unit_label": "predicates/s",
+        "latency": {
+          "samples": 5,
+          "mean": {
+            "secs": 0,
+            "nanos": 30954540
+          },
+          "min": {
+            "secs": 0,
+            "nanos": 29624200
+          },
+          "max": {
+            "secs": 0,
+            "nanos": 32521600
+          }
+        },
+        "throughput_per_second": 264646.1552974136,
+        "metrics": [
+          {
+            "name": "predicates",
+            "value": 65.0,
+            "unit": "predicates"
+          },
+          {
+            "name": "rules",
+            "value": 65.0,
+            "unit": "rules"
+          }
+        ],
+        "notes": [
+          "65 predicates and 65 rules with one large recursive SCC",
+          "128 compiler passes per sample to reduce timer jitter on this microbenchmark"
+        ]
+      },
+      {
+        "group": "core_kernel",
+        "workload": "Recursive closure runtime",
+        "scale": "chain 64",
+        "units": 2016,
+        "unit_label": "tuples/s",
+        "latency": {
+          "samples": 5,
+          "mean": {
+            "secs": 0,
+            "nanos": 37196300
+          },
+          "min": {
+            "secs": 0,
+            "nanos": 36697000
+          },
+          "max": {
+            "secs": 0,
+            "nanos": 37877800
+          }
+        },
+        "throughput_per_second": 54198.939141796356,
+        "metrics": [
+          {
+            "name": "chain_len",
+            "value": 64.0,
+            "unit": "nodes"
+          },
+          {
+            "name": "expected_tuples",
+            "value": 2016.0,
+            "unit": "tuples"
+          }
+        ],
+        "notes": [
+          "2,016 derived tuples expected from a linear dependency chain"
+        ]
+      },
+      {
+        "group": "core_kernel",
+        "workload": "Recursive closure runtime",
+        "scale": "chain 128",
+        "units": 8128,
+        "unit_label": "tuples/s",
+        "latency": {
+          "samples": 5,
+          "mean": {
+            "secs": 0,
+            "nanos": 284160580
+          },
+          "min": {
+            "secs": 0,
+            "nanos": 278840800
+          },
+          "max": {
+            "secs": 0,
+            "nanos": 298748300
+          }
+        },
+        "throughput_per_second": 28603.54522080438,
+        "metrics": [
+          {
+            "name": "chain_len",
+            "value": 128.0,
+            "unit": "nodes"
+          },
+          {
+            "name": "expected_tuples",
+            "value": 8128.0,
+            "unit": "tuples"
+          }
+        ],
+        "notes": [
+          "8,128 derived tuples expected from a linear dependency chain"
+        ]
+      },
+      {
+        "group": "core_kernel",
+        "workload": "Tuple explanation runtime",
+        "scale": "chain 128",
+        "units": 8128,
+        "unit_label": "trace-tuples/s",
+        "latency": {
+          "samples": 5,
+          "mean": {
+            "secs": 0,
+            "nanos": 212357240
+          },
+          "min": {
+            "secs": 0,
+            "nanos": 203600500
+          },
+          "max": {
+            "secs": 0,
+            "nanos": 224063000
+          }
+        },
+        "throughput_per_second": 38275.12544427494,
+        "metrics": [
+          {
+            "name": "chain_len",
+            "value": 128.0,
+            "unit": "nodes"
+          },
+          {
+            "name": "trace_tuples",
+            "value": 127.0,
+            "unit": "tuples"
+          }
+        ],
+        "notes": [
+          "127 tuples in the longest proof trace",
+          "root tuple carries 127 source datom IDs",
+          "64 explanation passes per sample to reduce timer jitter on this proof microbenchmark"
+        ]
+      }
+    ],
+    "footprints": [
+      {
+        "group": "core_kernel",
+        "workload": "Derived-set footprint estimate",
+        "scale": "chain 128",
+        "estimated_bytes": 8720992,
+        "metrics": [
+          {
+            "name": "chain_len",
+            "value": 128.0,
+            "unit": "nodes"
+          },
+          {
+            "name": "tuples",
+            "value": 8128.0,
+            "unit": "tuples"
+          },
+          {
+            "name": "iterations",
+            "value": 128.0,
+            "unit": "iterations"
+          }
+        ],
+        "notes": [
+          "8,128 tuples across 128 iterations",
+          "structural lower-bound estimate for regression tracking"
+        ]
+      },
+      {
+        "group": "core_kernel",
+        "workload": "Derivation-trace footprint estimate",
+        "scale": "chain 128",
+        "estimated_bytes": 106904,
+        "metrics": [
+          {
+            "name": "chain_len",
+            "value": 128.0,
+            "unit": "nodes"
+          },
+          {
+            "name": "trace_tuples",
+            "value": 127.0,
+            "unit": "tuples"
+          }
+        ],
+        "notes": [
+          "127 tuples in the reconstructed proof graph",
+          "structural lower-bound estimate for regression tracking"
+        ]
+      }
+    ]
+  }
+}

@@ -1,16 +1,24 @@
 param(
+    [string]$Suite = "full_stack",
+    [string]$HostManifestPath,
     [switch]$PauseOnExit
 )
 
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Path $PSScriptRoot -Parent
+if (-not $HostManifestPath) {
+    $HostManifestPath = Join-Path $repoRoot "fixtures\performance\hosts\dev-chad-windows-native.json"
+}
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 $outputTimestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$reportDir = Join-Path $repoRoot "artifacts\performance"
-$reportPath = Join-Path $reportDir "performance-report-$outputTimestamp.md"
-$latestPath = Join-Path $reportDir "latest.md"
-$commandText = "cargo run -p aether_api --example performance_report --release"
+$hostManifest = Get-Content -Path $HostManifestPath | ConvertFrom-Json
+$hostId = $hostManifest.host_id
+$runDir = Join-Path $repoRoot ("artifacts\performance\runs\{0}-{1}-{2}" -f $outputTimestamp, $Suite, $hostId)
+$bundlePath = Join-Path $runDir "bundle.json"
+$reportPath = Join-Path $runDir "report.md"
+$latestBundlePath = Join-Path $repoRoot "artifacts\performance\latest.json"
+$latestReportPath = Join-Path $repoRoot "artifacts\performance\latest.md"
 
 function Close-Runner([int]$ExitCode) {
     if ($PauseOnExit) {
@@ -24,52 +32,47 @@ Write-Host ""
 Write-Host "AETHER Performance Runner"
 Write-Host "========================"
 Write-Host "Started: $timestamp"
+Write-Host "Suite:   $Suite"
+Write-Host "Host:    $hostId"
 Write-Host ""
 
 $cargo = Get-Command cargo -ErrorAction SilentlyContinue
 if (-not $cargo) {
     Write-Host "Rust is not installed or cargo is not on PATH." -ForegroundColor Red
-    Write-Host "Ask the platform team to restore the AETHER Rust toolchain before running performance reports."
     Close-Runner 1
 }
 
-New-Item -ItemType Directory -Force $reportDir | Out-Null
+New-Item -ItemType Directory -Force $runDir | Out-Null
+New-Item -ItemType Directory -Force (Split-Path -Parent $latestBundlePath) | Out-Null
 
-Write-Host "This runner will:"
-Write-Host "  - execute the release-mode performance report example"
-Write-Host "  - save a timestamped markdown report"
-Write-Host "  - refresh artifacts\performance\latest.md"
-Write-Host ""
-Write-Host "Running: $commandText"
+$arguments = @(
+    "run", "-p", "aether_api", "--example", "performance_report", "--release", "--",
+    "--suite", $Suite,
+    "--host-manifest", (Resolve-Path $HostManifestPath).Path,
+    "--bundle-path", $bundlePath,
+    "--report-path", $reportPath
+)
+
+Write-Host "Running: cargo $($arguments -join ' ')"
+Write-Host "Bundle:  $bundlePath"
 Write-Host "Report:  $reportPath"
 Write-Host ""
 
-$outputLines = & cmd.exe /d /c "$commandText 2>&1" | Tee-Object -Variable outputLines
+& $cargo.Source @arguments
 $exitCode = $LASTEXITCODE
 
-$report = @(
-    "<!-- AETHER performance capture -->"
-    ""
-    "> Generated: $timestamp"
-    "> Repository: $repoRoot"
-    "> Command: $commandText"
-    ""
-) + ($outputLines | ForEach-Object { $_.ToString() })
-
-Set-Content -Path $reportPath -Value $report
-Set-Content -Path $latestPath -Value $report
+if ($exitCode -eq 0) {
+    Copy-Item -Force $bundlePath $latestBundlePath
+    Copy-Item -Force $reportPath $latestReportPath
+}
 
 Write-Host ""
 if ($exitCode -eq 0) {
     Write-Host "Performance report completed successfully." -ForegroundColor Green
+    Write-Host "Latest bundle: $latestBundlePath"
+    Write-Host "Latest report: $latestReportPath"
 } else {
     Write-Host "Performance report failed." -ForegroundColor Red
 }
-Write-Host "Report: $reportPath"
-Write-Host "Latest: $latestPath"
-Write-Host ""
-Write-Host "For the full suite, also run:"
-Write-Host "  cargo bench -p aether_api"
-Write-Host "  cargo test -p aether_api --test performance_stress --release -- --ignored --nocapture"
 
 Close-Runner $exitCode

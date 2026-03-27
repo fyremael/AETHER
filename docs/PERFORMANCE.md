@@ -1,41 +1,155 @@
 # Performance Guide
 
-This document defines the current AETHER performance harness: what it measures, how to run it, how drift is tracked, and how to read the numbers without overclaiming what they mean.
+This document defines the current AETHER benchmark discipline.
 
-The current goal is disciplined early tracking, not synthetic bravado. We want stable local baselines, stress workloads that catch regressions, and a clear operator path for generating fresh numbers when people ask.
+The theme is simple: exact local facts, explicit context, no overclaiming.
+
+AETHER now tracks performance as a **host-aware benchmark matrix**. We do not
+pretend that one machine, one OS, or one point-in-time baseline explains the
+whole system. Instead we record:
+
+- which suite ran
+- which host it ran on
+- what the runtime looked like
+- which workloads are release-gated
+- which workloads are measured but still exploratory
 
 ## What Exists Today
 
-The performance suite now has six layers:
+The performance program now has seven aligned layers:
 
-1. A live console dashboard in `crates/aether_api/examples/performance_dashboard.rs`
-2. A release-mode markdown report example in `crates/aether_api/examples/performance_report.rs`
-3. A machine-readable baseline capture example in `crates/aether_api/examples/capture_performance_baseline.rs`
-4. A release-mode drift comparison example in `crates/aether_api/examples/performance_drift_report.rs`
-5. Criterion benchmarks in `crates/aether_api/benches/kernel_perf.rs`
-6. Ignored release-mode stress tests in `crates/aether_api/tests/performance_stress.rs`
+1. a live console dashboard in `crates/aether_api/examples/performance_dashboard.rs`
+2. a host-aware release-mode report example in `crates/aether_api/examples/performance_report.rs`
+3. a host-aware baseline capture example in `crates/aether_api/examples/capture_performance_baseline.rs`
+4. a host-aware drift comparison example in `crates/aether_api/examples/performance_drift_report.rs`
+5. a host snapshot example in `crates/aether_api/examples/performance_host_snapshot.rs`
+6. a matrix summary example in `crates/aether_api/examples/performance_matrix_report.rs`
+7. Criterion benchmarks in `crates/aether_api/benches/kernel_perf.rs`
 
-All six layers share the same fixture builders and drift logic in `crates/aether_api/src/perf.rs`, so the dashboard, saved reports, baselines, drift comparisons, benchmarks, and stress tests stay aligned.
+All of them share the same fixture builders, suite taxonomy, drift logic, and
+run-catalog types in `crates/aether_api/src/perf.rs`.
 
-## Workloads
+## Suites
 
-The current report and bench suite covers these kernel surfaces:
+The suite ids are:
+
+- `core_kernel`
+- `service_in_process`
+- `http_pilot_boundary`
+- `replicated_partition`
+- `full_stack`
+
+`full_stack` is a composed run of the other groups. It is useful for matrix
+artifacts and operator review. It is not the first release gate.
+
+### Current release-gated suites
+
+These are the suites that currently drive the accepted regression gate on the
+canonical dev host:
+
+- `core_kernel`
+- `service_in_process`
+
+### Current observational suites
+
+These are captured from day one, but they are not fail-level release gates yet:
+
+- `http_pilot_boundary`
+- `replicated_partition`
+
+That line is deliberate. We measure them now so we can learn their variance
+before pretending they are stable enough to gate releases.
+
+## Workload Groups
+
+### `core_kernel`
 
 - journal append throughput
-- resolver throughput for both `Current` and `AsOf`
-- durable restart plus current-state replay from the SQLite-backed kernel
-- compiler SCC planning time
-- recursive closure runtime over linear dependency chains
-- tuple explanation runtime over the deepest recursive tuple in the chain
-- end-to-end kernel service runs for a coordination-style claimability query
-- durable restart plus end-to-end coordination replay through the SQLite-backed kernel
+- resolver `Current`
+- resolver `AsOf`
+- durable restart plus current replay
+- compiler SCC planning
+- recursive closure runtime
+- tuple explanation runtime
 
-The footprint estimates currently track:
+### `service_in_process`
 
-- derived-set structural size for recursive closure output
-- derivation-trace structural size for a deep recursive proof
+- kernel service coordination run
+- durable restart plus coordination replay
 
-These footprint figures are intentionally conservative lower-bound estimates. They are useful for regression tracking. They are not allocator-exact memory telemetry.
+### `http_pilot_boundary`
+
+- `GET /health`
+- `GET /v1/status`
+- `GET /v1/history`
+- `POST /v1/reports/pilot/coordination`
+- `POST /v1/explain/tuple`
+- `POST /v1/reports/pilot/coordination-delta`
+
+### `replicated_partition`
+
+- leader append batch admission
+- follower replay and catch-up
+- federated history read
+- federated run/report latency
+- manual promotion latency
+- stale-leader append rejection
+
+Imported-fact and federated measurements stay within the current exactness
+contract. We benchmark only the supported multi-stream imported-fact path, not
+arbitrary joined-row import.
+
+## Host Manifests And Accepted Baselines
+
+Tracked host manifests live in:
+
+- `fixtures/performance/hosts/dev-chad-windows-native.json`
+- `fixtures/performance/hosts/dev-chad-wsl-ubuntu.json`
+- `fixtures/performance/hosts/github-windows-latest.json`
+- `fixtures/performance/hosts/github-ubuntu-latest.json`
+
+Tracked accepted baselines live in:
+
+- `fixtures/performance/baselines/<suite-id>/<host-id>.json`
+
+Today the canonical accepted baselines are:
+
+- `fixtures/performance/baselines/core_kernel/dev-chad-windows-native.json`
+- `fixtures/performance/baselines/service_in_process/dev-chad-windows-native.json`
+
+That means the current formal accepted gate is the native Windows dev host:
+
+- host id: `dev-chad-windows-native`
+- machine: `CHAD`
+- chassis: Dell G5 5090
+- CPU: Intel i9-9900K
+- cores: 8 physical / 16 logical
+- RAM: 64 GB
+- OS: Windows 11 Home `10.0.26200`
+
+The GitHub runners and WSL host manifests are part of the matrix from the first
+implementation slice, but they are not yet tracked accepted baselines in-repo.
+
+## Run Artifacts
+
+Raw run artifacts live under:
+
+- `artifacts/performance/runs/<timestamp>-<suite-id>-<host-id>/bundle.json`
+- `artifacts/performance/runs/<timestamp>-<suite-id>-<host-id>/report.md`
+- `artifacts/performance/runs/<timestamp>-<suite-id>-<host-id>/drift.md`
+
+The latest matrix surfaces live under:
+
+- `artifacts/performance/matrix/latest.json`
+- `artifacts/performance/matrix/latest.md`
+
+The local convenience copies still exist too:
+
+- `artifacts/performance/latest.json`
+- `artifacts/performance/latest.md`
+- `artifacts/performance/latest-drift.md`
+- `artifacts/performance/latest-drift-core_kernel.md`
+- `artifacts/performance/latest-drift-service_in_process.md`
 
 ## Commands
 
@@ -53,9 +167,16 @@ Technical path:
 cargo run -p aether_api --example performance_dashboard --release
 ```
 
-That view streams sample-by-sample timing and throughput data while the suite is running, then leaves the collected measures and footprint estimates in the same console surface.
+### Capture a host snapshot
 
-### Operator-facing report
+```bash
+cargo run -p aether_api --example performance_host_snapshot --release
+```
+
+Use this when you need the auto-discovered runtime facts without running the
+full suite.
+
+### Run a host-aware report
 
 Windows operator path:
 
@@ -66,12 +187,17 @@ double-click scripts/run-performance-report.cmd
 Technical path:
 
 ```bash
-cargo run -p aether_api --example performance_report --release
+cargo run -p aether_api --example performance_report --release -- \
+  --suite full_stack \
+  --host-manifest fixtures/performance/hosts/dev-chad-windows-native.json \
+  --bundle-path artifacts/performance/runs/<timestamp>-full_stack-dev-chad-windows-native/bundle.json \
+  --report-path artifacts/performance/runs/<timestamp>-full_stack-dev-chad-windows-native/report.md
 ```
 
-The PowerShell runner writes reports to `artifacts/performance/`, including a timestamped report and `latest.md`.
+The PowerShell runner writes the timestamped bundle/report pair and refreshes
+`artifacts/performance/latest.{json,md}`.
 
-### Baseline capture
+### Capture an accepted or local baseline
 
 Windows operator path:
 
@@ -82,12 +208,17 @@ double-click scripts/run-performance-baseline.cmd
 Technical path:
 
 ```bash
-cargo run -p aether_api --example capture_performance_baseline --release
+cargo run -p aether_api --example capture_performance_baseline --release -- \
+  --suite core_kernel \
+  --host-manifest fixtures/performance/hosts/dev-chad-windows-native.json \
+  --output fixtures/performance/baselines/core_kernel/dev-chad-windows-native.json
 ```
 
-That command writes `artifacts/performance/baseline.json`. Treat that file as the current local reference point for drift comparison.
+Use repo-tracked fixture paths only when you are deliberately updating an
+accepted reference. For local experiments, write to
+`artifacts/performance/baselines/<suite-id>/<host-id>.json`.
 
-### Drift comparison
+### Run a same-host drift comparison
 
 Windows operator path:
 
@@ -98,107 +229,101 @@ double-click scripts/run-performance-drift.cmd
 Technical path:
 
 ```bash
-cargo run -p aether_api --example performance_drift_report --release -- artifacts/performance/baseline.json
+cargo run -p aether_api --example performance_drift_report --release -- \
+  --suite core_kernel \
+  --host-manifest fixtures/performance/hosts/dev-chad-windows-native.json \
+  --baseline fixtures/performance/baselines/core_kernel/dev-chad-windows-native.json
 ```
 
-The PowerShell runner writes a timestamped markdown capture plus `latest-drift.md` to `artifacts/performance/`.
+The drift tool rejects suite mismatch and host-manifest mismatch by default. A
+cross-host comparison belongs in the matrix report, not in the release gate.
 
-For reproducible review on a fresh machine, the repository also carries a tracked accepted baseline at `fixtures/performance/accepted-baseline.windows-x86_64.json`.
-
-By default, the drift comparison applies these budgets:
-
-- throughput regression warning at `15%`
-- throughput regression failure at `30%`
-- footprint growth warning at `10%`
-- footprint growth failure at `20%`
-
-The example exits with code `2` when any workload crosses a fail-level threshold. That behavior is intentional so the same tool can become a future CI gate.
-
-The repository now also runs this drift path through both:
-
-- the mainline `CI` workflow as part of the required `pilot-launch-gate`
-- the scheduled/manual `Pilot Validation` workflow, which uploads the generated performance and drift artifacts for review
-
-### Pilot launch validation
+### Run a local Windows plus WSL matrix
 
 Windows operator path:
 
 ```text
-double-click scripts/run-pilot-launch-validation.cmd
+double-click scripts/run-performance-matrix.cmd
 ```
 
 Technical path:
 
 ```bash
-powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1
+powershell -ExecutionPolicy Bypass -File scripts/run-performance-matrix.ps1 -Suite full_stack
 ```
 
-That validation pack runs the pilot report, performance report, drift comparison, release-mode `aether_api` tests, the ignored pilot soak suite, and the ignored performance stress suite, then writes a transcript to `artifacts/pilot/launch/`.
+If WSL is unavailable, the matrix report stays honest and records that absence
+explicitly instead of silently dropping the Linux row.
 
-By default it prefers `artifacts/performance/baseline.json` when present and otherwise falls back to `fixtures/performance/accepted-baseline.windows-x86_64.json`. Pass `-BaselinePath <path>` when you need to pin the comparison to a different accepted reference.
-
-### Criterion benchmarks
+### Build a matrix summary from run bundles
 
 ```bash
-cargo bench -p aether_api
+cargo run -p aether_api --example performance_matrix_report --release -- \
+  --output-json artifacts/performance/matrix/latest.json \
+  --output-report artifacts/performance/matrix/latest.md \
+  <bundle-path-1> <bundle-path-2> ...
 ```
 
-That suite exercises the same fixture set with Criterion’s statistical harness.
+## Launch And Release Gates
 
-### Stress tests
+`run-pilot-launch-validation.ps1` and `run-release-readiness.ps1` now resolve
+baselines by **suite + host id**, not by a single anonymous baseline file.
 
-```bash
-cargo test -p aether_api --test performance_stress --release -- --ignored --nocapture
-```
+For the canonical local Windows host, the launch path resolves in this order:
 
-Those tests are intentionally heavier and are excluded from the normal CI loop.
+1. explicit `-BaselinePath` for the `core_kernel` suite
+2. local artifact baseline in `artifacts/performance/baselines/<suite>/<host>.json`
+3. tracked fixture baseline in `fixtures/performance/baselines/<suite>/<host>.json`
+
+The launch pack runs:
+
+- `full_stack` report capture
+- `core_kernel` drift
+- `service_in_process` drift
+- pilot report
+- release-mode API tests
+- soak suite
+- stress suite
+
+The current release gate treats:
+
+- `core_kernel` and `service_in_process` as gated
+- `http_pilot_boundary` and `replicated_partition` as measured but observational
 
 ## Reading The Numbers
 
-Use the report as a baseline, not a promise.
+Use the benchmark bundle as a context-bearing record, not a boast.
 
-Use the dashboard when you need live visibility into how the suite is progressing.
+The right questions are:
 
-Use the baseline and drift tools together when you need to answer whether the kernel has materially slowed down since the last accepted pilot checkpoint.
-
-- The numbers are single-node local measurements.
-- The service benchmark includes parsing, compilation, resolution, runtime evaluation, and query execution.
-- The durable restart/replay benchmarks include reopening the SQLite journal and replaying committed history before serving the request.
-- Throughput values are derived from mean latency over several samples.
-- The stress tests are for correctness under load plus rough elapsed-time observation, not SLO certification.
-- The drift report compares like-for-like workload keys only. Missing baseline entries are called out explicitly rather than guessed.
-
-The right questions to ask of this suite are:
-
-- Did throughput regress relative to the previous baseline?
-- Did a code change inflate derived-set or trace footprint materially?
-- Can the current machine still handle the coordination and recursive workloads we intend to demo?
-- Are there workloads now large enough that the next optimization phase should become urgent?
+- Did the same host regress on the same suite?
+- Did a kernel change inflate derived-set or trace footprint?
+- What changed between the dev host, WSL, and GitHub runners?
+- Are HTTP or replicated-path costs stabilizing enough to become future gates?
 
 The wrong question is:
 
 - “What exact production capacity does this prove?”
 
-The repository does not yet have network fanout, multi-node execution, or production workload capture, so the current suite should not be presented as production capacity certification.
+This suite is still single-host instrumentation with host facts plus
+kernel/runtime counters. It is not profiler-grade telemetry, multi-node
+capacity certification, or production traffic replay.
 
-## Recommended Operating Rhythm
+## CI And Matrix Reporting
 
-Use this rhythm unless the work is unusually narrow:
+The current rollout is:
 
-1. Capture a fresh baseline with `cargo run -p aether_api --example capture_performance_baseline --release` at every pilot checkpoint you want to preserve.
-2. Run `cargo run -p aether_api --example performance_drift_report --release -- artifacts/performance/baseline.json` after major semantic or API changes.
-3. Run `cargo run -p aether_api --example performance_report --release` when you need a shareable markdown artifact instead of only pass/fail drift output.
-4. Run `cargo bench -p aether_api` when changing runtime, resolver, or compiler internals.
-5. Run the ignored stress suite before milestone demos, RC tags, or architecture reviews that will invite scaling questions.
+- native Windows dev host remains the first accepted release baseline
+- `release-readiness` and `pilot-launch-validation` remain anchored to the mature Windows `core_kernel` and `service_in_process` slices
+- the `Performance Matrix` workflow publishes Windows and Ubuntu run bundles plus a comparative summary
+- HTTP and replicated-partition measurements are emitted into artifacts immediately, but they do not fail the release gate yet
 
 ## Current Gaps
 
-The current performance program is real, but not complete.
+The matrix is real, but it is not the end of the story.
 
-- Baseline comparison is point-in-time rather than a historical trend store.
-- The launch/drift gate is now enforced in CI, but the project still lacks a historical benchmark trend store beyond point-in-time baselines and uploaded workflow artifacts.
-- Memory tracking is structural rather than allocator-exact.
-- The HTTP boundary is not benchmarked independently of the in-process kernel service yet.
-- There is no fixture set derived from captured production-like workloads because the project is not at that deployment stage yet.
-
-Those are reasonable next steps once the current harness starts catching real regressions.
+- Historical trend storage is still artifact-based rather than a persistent benchmark database.
+- GitHub-host accepted baselines are not yet promoted into tracked fixture references.
+- HTTP and replicated-partition suites are measured, but they are still observational rather than fail-level release gates.
+- Memory figures remain structural lower-bound estimates rather than allocator-exact telemetry.
+- Telemetry stops at host facts plus benchmark counters; profiler-grade CPU or allocator tracing is still out of scope for this phase.

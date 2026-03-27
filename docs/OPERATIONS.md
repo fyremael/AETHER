@@ -58,7 +58,7 @@ If you need to check whether the latest build regressed against the current acce
 double-click scripts/run-performance-drift.cmd
 ```
 
-That comparison usually uses the current local baseline in `artifacts/performance/baseline.json`. For reproducible review on a fresh machine, the repo also includes `fixtures/performance/accepted-baseline.windows-x86_64.json`.
+That comparison is now host-aware and suite-aware. On the canonical Windows dev host it resolves against `artifacts/performance/baselines/<suite>/<host>.json` first and then `fixtures/performance/baselines/<suite>/<host>.json`, with `core_kernel` and `service_in_process` as the current accepted gates.
 
 If you need the full launch candidate validation pack for the current design-partner pilot, run:
 
@@ -222,12 +222,18 @@ The release-mode report produces:
 
 The baseline capture produces:
 
-- `baseline.json`, which becomes the current local drift reference
+- a suite-specific local baseline under `artifacts/performance/baselines/<suite-id>/<host-id>.json`
 
 The drift runner produces:
 
 - a timestamped markdown drift report
 - `latest-drift.md`, which points to the most recent drift capture
+- `latest-drift-core_kernel.md` and `latest-drift-service_in_process.md` for the current gated suites
+
+The matrix runner produces:
+
+- `artifacts/performance/matrix/latest.md`
+- `artifacts/performance/matrix/latest.json`
 
 Pilot coordination reports are written to:
 

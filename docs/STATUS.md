@@ -38,6 +38,8 @@ Completed:
 - release-mode performance report example, Criterion benchmarks, and ignored stress workloads added for early performance tracking
 - live console dashboard added for real-time and collected instrument views over the performance suite
 - machine-readable performance baseline capture and point-in-time drift reporting implemented for the pilot path
+- host-aware benchmark catalog implemented with typed host snapshots, tracked host manifests, suite-specific accepted baselines, timestamped run bundles, and matrix summaries across the native dev host, WSL, and GitHub runner surfaces
+- release and launch validation now resolve baselines by suite plus host id, with `core_kernel` and `service_in_process` remaining the accepted regression gates on the canonical Windows dev host while HTTP and replicated-partition suites remain measured but observational
 - authenticated HTTP restart-cycle drills added to preserve semantic answers and persisted audit context across repeated service restarts
 - ignored release-mode soak and misuse drills added for the authenticated pilot HTTP path
 - a one-command pilot launch validation pack added to produce the current report, drift, soak, and stress evidence set
@@ -75,7 +77,7 @@ Still open:
 - broader durable storage backends beyond the current SQLite journal
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
 - mature Go/Python client ecosystems beyond the current first real boundary clients
-- historical benchmark dashboards and fully release-gated drift enforcement on the main CI path
+- historical benchmark dashboards and long-lived trend storage beyond the current run bundles, matrix summaries, and uploaded workflow artifacts
 
 ## Immediate focus
 

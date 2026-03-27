@@ -34,6 +34,7 @@ For documentation publishing:
 - double-click `run-performance-report.cmd`
 - double-click `run-performance-baseline.cmd`
 - double-click `run-performance-drift.cmd`
+- double-click `run-performance-matrix.cmd`
 
 ## Technical Commands
 
@@ -63,10 +64,12 @@ For documentation publishing:
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-report.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-baseline.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-drift.ps1`
+- run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-matrix.ps1`
 - run `cargo run -p aether_api --example pilot_coordination_report --release`
 - run `cargo run -p aether_api --example pilot_coordination_delta_report --release`
-- run `cargo run -p aether_api --example capture_performance_baseline --release`
-- run `cargo run -p aether_api --example performance_drift_report --release -- artifacts/performance/baseline.json`
+- run `cargo run -p aether_api --example capture_performance_baseline --release -- --suite core_kernel --host-manifest fixtures/performance/hosts/dev-chad-windows-native.json --output fixtures/performance/baselines/core_kernel/dev-chad-windows-native.json`
+- run `cargo run -p aether_api --example performance_drift_report --release -- --suite core_kernel --host-manifest fixtures/performance/hosts/dev-chad-windows-native.json --baseline fixtures/performance/baselines/core_kernel/dev-chad-windows-native.json`
+- run `cargo run -p aether_api --example performance_matrix_report --release -- --output-json artifacts/performance/matrix/latest.json --output-report artifacts/performance/matrix/latest.md <bundle-path-1> <bundle-path-2>`
 - run `cargo bench -p aether_api`
 - run `cargo test -p aether_api --test performance_stress --release -- --ignored --nocapture`
 
@@ -100,8 +103,8 @@ They now also include:
 That makes the packaged bundle self-contained for both the pilot service and the
 read-only operator cockpit.
 
-Performance reports, baselines, and drift captures are written to `artifacts/performance/`.
+Performance reports, baselines, drift captures, and matrix summaries are written under `artifacts/performance/`, with timestamped run bundles in `artifacts/performance/runs/` and matrix summaries in `artifacts/performance/matrix/`.
 
-The launch-validation runner prefers `artifacts/performance/baseline.json`, falls back to `fixtures/performance/accepted-baseline.windows-x86_64.json`, and records the chosen source in the transcript.
+The launch-validation runner now resolves host-aware, suite-specific baselines from `artifacts/performance/baselines/<suite>/<host>.json` first and then `fixtures/performance/baselines/<suite>/<host>.json`, and records the chosen source in the transcript.
 
 Exportable presentation assets are written to `site/assets/presentation/` and exposed through the live Pages showcase in `site/showcase.html`.

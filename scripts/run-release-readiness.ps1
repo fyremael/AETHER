@@ -1,6 +1,7 @@
 param(
     [switch]$PauseOnExit,
-    [string]$BaselinePath
+    [string]$BaselinePath,
+    [string]$HostManifestPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,9 +18,12 @@ $latestTranscriptPath = Join-Path $reportDir "latest.txt"
 $summaryPath = Join-Path $reportDir "release-readiness-$outputTimestamp.md"
 $latestSummaryPath = Join-Path $reportDir "latest.md"
 $pagesPreviewDir = Join-Path $repoRoot "artifacts\pages-preview-release"
-$localBaselinePath = Join-Path $repoRoot "artifacts\performance\baseline.json"
-$fixtureBaselinePath = Join-Path $repoRoot "fixtures\performance\accepted-baseline.windows-x86_64.json"
 $transcript = [System.Collections.Generic.List[string]]::new()
+if (-not $HostManifestPath) {
+    $HostManifestPath = Join-Path $repoRoot "fixtures\performance\hosts\dev-chad-windows-native.json"
+}
+$hostManifest = Get-Content -Path $HostManifestPath | ConvertFrom-Json
+$hostId = $hostManifest.host_id
 
 function Close-Runner([int]$ExitCode) {
     if ($PauseOnExit) {
@@ -56,8 +60,8 @@ function Format-CommandText([string]$Command, [string[]]$Arguments, [string]$Wor
 function Resolve-BaselineReference {
     param(
         [string]$ExplicitPath,
-        [string]$LocalPath,
-        [string]$FixturePath
+        [string]$RepoRoot,
+        [string]$HostId
     )
 
     if ($ExplicitPath) {
@@ -70,21 +74,23 @@ function Resolve-BaselineReference {
         }
     }
 
-    if (Test-Path $LocalPath) {
+    $localPath = Join-Path $RepoRoot ("artifacts\performance\baselines\core_kernel\{0}.json" -f $HostId)
+    if (Test-Path $localPath) {
         return [pscustomobject]@{
-            Path = (Resolve-Path $LocalPath).Path
+            Path = (Resolve-Path $localPath).Path
             Source = "local artifact"
         }
     }
 
-    if (Test-Path $FixturePath) {
+    $fixturePath = Join-Path $RepoRoot ("fixtures\performance\baselines\core_kernel\{0}.json" -f $HostId)
+    if (Test-Path $fixturePath) {
         return [pscustomobject]@{
-            Path = (Resolve-Path $FixturePath).Path
+            Path = (Resolve-Path $fixturePath).Path
             Source = "tracked fixture"
         }
     }
 
-    throw "No performance baseline was found. Provide -BaselinePath, capture a local baseline in artifacts/performance/baseline.json, or restore fixtures/performance/accepted-baseline.windows-x86_64.json."
+    throw "No core-kernel performance baseline was found for host $HostId. Provide -BaselinePath, capture a local baseline in artifacts/performance/baselines/core_kernel/$HostId.json, or restore fixtures/performance/baselines/core_kernel/$HostId.json."
 }
 
 function Invoke-Step(
@@ -178,7 +184,7 @@ if (-not $pwsh) {
 }
 
 try {
-    $baseline = Resolve-BaselineReference -ExplicitPath $BaselinePath -LocalPath $localBaselinePath -FixturePath $fixtureBaselinePath
+    $baseline = Resolve-BaselineReference -ExplicitPath $BaselinePath -RepoRoot $repoRoot -HostId $hostId
 } catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
     Write-Host "Capture a local baseline with scripts/run-performance-baseline.cmd or pass -BaselinePath explicitly."
@@ -198,11 +204,13 @@ Add-TranscriptLine("==============================")
 Add-TranscriptLine("Generated: $timestamp")
 Add-TranscriptLine("Repository: $repoRoot")
 Add-TranscriptLine("Commit: $commit")
+Add-TranscriptLine("Host manifest: $HostManifestPath")
 Add-TranscriptLine("Baseline: $($baseline.Path)")
 Add-TranscriptLine("Baseline source: $($baseline.Source)")
 Add-TranscriptLine("")
 
 Write-Host "Baseline: $($baseline.Path) [$($baseline.Source)]"
+Write-Host "Host:     $hostId"
 Write-Host "Commit:   $commit"
 Write-Host ""
 
@@ -218,7 +226,7 @@ try {
     Invoke-Step "Rust API docs" $cargo.Source @("doc", "--workspace", "--no-deps")
     Invoke-Step "Pages preview" $python.Source @("scripts/build_pages.py", "--out-dir", $pagesPreviewDir)
     Invoke-Step "Benchmark compile" $cargo.Source @("bench", "-p", "aether_api", "--no-run")
-    Invoke-Step "Pilot launch validation" $pwsh.Source @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $repoRoot "scripts/run-pilot-launch-validation.ps1"), "-BaselinePath", $baseline.Path)
+    Invoke-Step "Pilot launch validation" $pwsh.Source @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $repoRoot "scripts/run-pilot-launch-validation.ps1"), "-BaselinePath", $baseline.Path, "-HostManifestPath", (Resolve-Path $HostManifestPath).Path)
     Invoke-Step "Pilot package build" $pwsh.Source @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $repoRoot "scripts/build-pilot-package.ps1"))
 } catch {
     $failed = $true

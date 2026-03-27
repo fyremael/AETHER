@@ -19,8 +19,10 @@ indexmap.workspace = true
 rusqlite = { version = "=0.32.1", features = ["bundled"] }
 serde.workspace = true
 serde_json = "1.0.133"
+sysinfo = "=0.30.13"
 thiserror.workspace = true
 tokio = { version = "=1.41.1", features = ["macros", "rt-multi-thread", "net"] }
+tower = { version = "=0.5.1", features = ["util"] }
 
 [dev-dependencies]
 clap = "=4.5.20"

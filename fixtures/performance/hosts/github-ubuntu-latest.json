@@ -1,0 +1,18 @@
+{
+  "host_id": "github-ubuntu-latest",
+  "display_name": "GitHub Actions ubuntu-latest",
+  "host_class": "ci",
+  "execution_environment": "github_ubuntu",
+  "vendor": null,
+  "model": null,
+  "owner": "github-actions",
+  "notes": [
+    "Ephemeral CI runner used for comparative matrix reporting.",
+    "Do not treat cross-host differences as release-gated drift."
+  ],
+  "tags": [
+    "ci",
+    "github-actions",
+    "ubuntu"
+  ]
+}

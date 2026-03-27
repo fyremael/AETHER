@@ -1,0 +1,22 @@
+{
+  "host_id": "dev-chad-windows-native",
+  "display_name": "CHAD (Windows native)",
+  "host_class": "dev",
+  "execution_environment": "native_windows",
+  "vendor": "Dell Inc.",
+  "model": "G5 5090",
+  "owner": "jamie",
+  "notes": [
+    "Canonical development workstation for first host-aware benchmark baselines.",
+    "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+    "8 physical cores / 16 logical processors",
+    "64 GB RAM",
+    "Windows 11 Home 10.0.26200"
+  ],
+  "tags": [
+    "windows",
+    "dev-host",
+    "chad",
+    "i9-9900k"
+  ]
+}

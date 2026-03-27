@@ -68,9 +68,9 @@ That suite executes, in order:
 
 The runner resolves the accepted performance baseline in this order:
 
-1. `-BaselinePath`
-2. `artifacts/performance/baseline.json`
-3. `fixtures/performance/accepted-baseline.windows-x86_64.json`
+1. `-BaselinePath` for the `core_kernel` suite
+2. `artifacts/performance/baselines/<suite>/<host>.json`
+3. `fixtures/performance/baselines/<suite>/<host>.json`
 
 ## Artifact Pack
 

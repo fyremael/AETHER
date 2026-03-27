@@ -1,5 +1,6 @@
 use aether_api::perf::{
-    default_performance_report_with_events, FootprintEstimate, PerfEvent, PerfMeasurement,
+    default_performance_report_with_events, FootprintEstimate, PerfEvent, PerfHostSnapshot,
+    PerfMeasurement, PerfSuiteId,
 };
 use std::io::{self, IsTerminal, Write};
 use std::time::{Duration, Instant};
@@ -7,8 +8,11 @@ use std::time::{Duration, Instant};
 struct DashboardState {
     started: Instant,
     interactive: bool,
+    suite_id: Option<PerfSuiteId>,
+    host_snapshot: Option<PerfHostSnapshot>,
     total_workloads: usize,
     samples_per_workload: usize,
+    current_group: Option<PerfSuiteId>,
     current: Option<ActiveMeasurement>,
     completed: Vec<PerfMeasurement>,
     footprints: Vec<FootprintEstimate>,
@@ -36,8 +40,11 @@ impl DashboardState {
         Self {
             started: Instant::now(),
             interactive,
+            suite_id: None,
+            host_snapshot: None,
             total_workloads: 0,
             samples_per_workload: 0,
+            current_group: None,
             current: None,
             completed: Vec::new(),
             footprints: Vec::new(),
@@ -47,18 +54,27 @@ impl DashboardState {
     fn apply(&mut self, event: PerfEvent) {
         match event {
             PerfEvent::SuiteStart {
+                suite_id,
+                host_snapshot,
                 total_workloads,
                 samples_per_workload,
             } => {
+                self.suite_id = Some(suite_id);
+                self.host_snapshot = Some(host_snapshot);
                 self.total_workloads = total_workloads;
                 self.samples_per_workload = samples_per_workload;
             }
+            PerfEvent::WorkloadGroupStart { group, .. } => {
+                self.current_group = Some(group);
+            }
             PerfEvent::MeasurementStart {
+                group: _,
                 workload,
                 scale,
                 total_samples,
                 units,
                 unit_label,
+                metrics: _,
                 notes,
             } => {
                 self.current = Some(ActiveMeasurement {
@@ -129,6 +145,15 @@ impl DashboardState {
         output.push_str("AETHER Performance Dashboard\n");
         output.push_str("============================\n");
         output.push_str("Live console view of real-time and collected kernel measures.\n\n");
+        if let Some(suite_id) = self.suite_id {
+            output.push_str(&format!("Suite: {suite_id}\n"));
+        }
+        if let Some(host_snapshot) = &self.host_snapshot {
+            output.push_str(&format!(
+                "Host: {} | {} | {}\n",
+                host_snapshot.hostname, host_snapshot.os, host_snapshot.cpu_brand
+            ));
+        }
         output.push_str(&format!(
             "Elapsed: {} | Workloads: {}/{} | Samples: {}/{}\n",
             format_elapsed(self.started.elapsed()),
@@ -146,6 +171,9 @@ impl DashboardState {
         output.push_str("-------------------\n");
         if let Some(current) = &self.current {
             let max_throughput = self.max_throughput().max(current.last_throughput);
+            if let Some(group) = self.current_group {
+                output.push_str(&format!("Group: {group}\n"));
+            }
             output.push_str(&format!("{} | {}\n", current.workload, current.scale));
             output.push_str(&format!(
                 "Samples: {} {}/{}\n",

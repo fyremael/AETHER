@@ -175,6 +175,7 @@ Implemented today:
 - a release-mode performance report, Criterion benchmark suite, durable restart/replay benchmarks, and ignored stress workloads for early regression tracking
 - a live console performance dashboard for real-time and collected instrument views
 - machine-readable performance baseline capture and point-in-time drift reporting for the pilot path
+- a host-aware benchmark matrix with tracked host manifests, suite-specific accepted baselines, run bundles, and comparative matrix summaries across Windows, WSL, and GitHub runner surfaces
 - a one-command pilot launch validation pack with soak, stress, and artifact capture
 - a journal-anchored artifact/vector sidecar federation boundary with external artifact references, SQLite-backed durability for the pilot service, HTTP endpoints, and provenance-bearing semantic fact projection
 - a required mainline CI launch/drift gate plus a packaged pilot-service artifact build on Windows
@@ -299,14 +300,15 @@ For performance tracking:
 
 ```bash
 cargo run -p aether_api --example performance_dashboard --release
-cargo run -p aether_api --example performance_report --release
-cargo run -p aether_api --example capture_performance_baseline --release
-cargo run -p aether_api --example performance_drift_report --release -- artifacts/performance/baseline.json
+cargo run -p aether_api --example performance_report --release -- --suite full_stack --host-manifest fixtures/performance/hosts/dev-chad-windows-native.json
+cargo run -p aether_api --example capture_performance_baseline --release -- --suite core_kernel --host-manifest fixtures/performance/hosts/dev-chad-windows-native.json --output fixtures/performance/baselines/core_kernel/dev-chad-windows-native.json
+cargo run -p aether_api --example performance_drift_report --release -- --suite core_kernel --host-manifest fixtures/performance/hosts/dev-chad-windows-native.json --baseline fixtures/performance/baselines/core_kernel/dev-chad-windows-native.json
+cargo run -p aether_api --example performance_matrix_report --release -- --output-json artifacts/performance/matrix/latest.json --output-report artifacts/performance/matrix/latest.md <bundle-path-1> <bundle-path-2>
 cargo bench -p aether_api
 cargo test -p aether_api --test performance_stress --release -- --ignored --nocapture
 ```
 
-For reproducible launch review on a fresh machine, the repo also carries a tracked accepted baseline at `fixtures/performance/accepted-baseline.windows-x86_64.json`.
+The current tracked accepted release baselines live under `fixtures/performance/baselines/<suite-id>/<host-id>.json`. Today the canonical gated references are the native Windows dev-host suites `core_kernel` and `service_in_process`.
 
 For packaged pilot deployment review on Windows:
 

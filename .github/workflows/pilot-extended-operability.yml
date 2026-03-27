@@ -23,9 +23,15 @@ jobs:
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-pilot-package.ps1
 
+      - name: Seed CI host baselines
+        shell: pwsh
+        run: |
+          ./scripts/run-performance-baseline.ps1 -Suite core_kernel -HostManifestPath fixtures/performance/hosts/github-windows-latest.json -OutputPath artifacts/performance/baselines/core_kernel/github-windows-latest.json
+          ./scripts/run-performance-baseline.ps1 -Suite service_in_process -HostManifestPath fixtures/performance/hosts/github-windows-latest.json -OutputPath artifacts/performance/baselines/service_in_process/github-windows-latest.json
+
       - name: Run launch validation
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1 -BaselinePath fixtures/performance/accepted-baseline.windows-x86_64.json
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1 -HostManifestPath fixtures/performance/hosts/github-windows-latest.json
 
       - name: Upload extended operability artifacts
         uses: actions/upload-artifact@v4

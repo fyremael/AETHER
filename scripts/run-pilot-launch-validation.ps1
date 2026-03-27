@@ -1,6 +1,7 @@
 param(
     [switch]$PauseOnExit,
-    [string]$BaselinePath
+    [string]$BaselinePath,
+    [string]$HostManifestPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,13 +10,17 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
 }
 
 $repoRoot = Split-Path -Path $PSScriptRoot -Parent
+if (-not $HostManifestPath) {
+    $HostManifestPath = Join-Path $repoRoot "fixtures\performance\hosts\dev-chad-windows-native.json"
+}
+$hostManifest = Get-Content -Path $HostManifestPath | ConvertFrom-Json
+$hostId = $hostManifest.host_id
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 $outputTimestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $reportDir = Join-Path $repoRoot "artifacts\pilot\launch"
 $reportPath = Join-Path $reportDir "pilot-launch-validation-$outputTimestamp.txt"
 $latestPath = Join-Path $reportDir "latest.txt"
-$localBaselinePath = Join-Path $repoRoot "artifacts\performance\baseline.json"
-$fixtureBaselinePath = Join-Path $repoRoot "fixtures\performance\accepted-baseline.windows-x86_64.json"
+$performanceSummaryPath = Join-Path $repoRoot "artifacts\performance\latest-drift.md"
 $transcript = [System.Collections.Generic.List[string]]::new()
 
 function Close-Runner([int]$ExitCode) {
@@ -46,9 +51,10 @@ function Format-CommandText([string]$Command, [string[]]$Arguments) {
 
 function Resolve-BaselineReference {
     param(
+        [string]$Suite,
         [string]$ExplicitPath,
-        [string]$LocalPath,
-        [string]$FixturePath
+        [string]$RepoRoot,
+        [string]$HostId
     )
 
     if ($ExplicitPath) {
@@ -61,21 +67,23 @@ function Resolve-BaselineReference {
         }
     }
 
-    if (Test-Path $LocalPath) {
+    $localPath = Join-Path $RepoRoot ("artifacts\performance\baselines\{0}\{1}.json" -f $Suite, $HostId)
+    if (Test-Path $localPath) {
         return [pscustomobject]@{
-            Path = (Resolve-Path $LocalPath).Path
+            Path = (Resolve-Path $localPath).Path
             Source = "local artifact"
         }
     }
 
-    if (Test-Path $FixturePath) {
+    $fixturePath = Join-Path $RepoRoot ("fixtures\performance\baselines\{0}\{1}.json" -f $Suite, $HostId)
+    if (Test-Path $fixturePath) {
         return [pscustomobject]@{
-            Path = (Resolve-Path $FixturePath).Path
+            Path = (Resolve-Path $fixturePath).Path
             Source = "tracked fixture"
         }
     }
 
-    throw "No performance baseline was found. Provide -BaselinePath, capture a local baseline in artifacts/performance/baseline.json, or restore fixtures/performance/accepted-baseline.windows-x86_64.json."
+    throw "No baseline found for suite $Suite on host $HostId."
 }
 
 function Invoke-Step([string]$Label, [string]$Command, [string[]]$Arguments) {
@@ -137,22 +145,25 @@ Write-Host ""
 Write-Host "AETHER Pilot Launch Validation"
 Write-Host "=============================="
 Write-Host "Started: $timestamp"
+Write-Host "Host:    $hostId"
 Write-Host ""
 
 $cargo = Get-Command cargo -ErrorAction SilentlyContinue
+$pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
 if (-not $cargo) {
     Write-Host "Rust is not installed or cargo is not on PATH." -ForegroundColor Red
-    Write-Host "Ask the platform team to restore the AETHER Rust toolchain before running launch validation."
+    Close-Runner 1
+}
+if (-not $pwsh) {
+    Write-Host "PowerShell 7 (pwsh) is not available on PATH." -ForegroundColor Red
     Close-Runner 1
 }
 
-$cargoPath = $cargo.Source
-
 try {
-    $baseline = Resolve-BaselineReference -ExplicitPath $BaselinePath -LocalPath $localBaselinePath -FixturePath $fixtureBaselinePath
+    $coreBaseline = Resolve-BaselineReference -Suite "core_kernel" -ExplicitPath $BaselinePath -RepoRoot $repoRoot -HostId $hostId
+    $serviceBaseline = Resolve-BaselineReference -Suite "service_in_process" -ExplicitPath $null -RepoRoot $repoRoot -HostId $hostId
 } catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
-    Write-Host "Capture a local baseline with scripts/run-performance-baseline.cmd or pass -BaselinePath explicitly."
     Close-Runner 1
 }
 
@@ -162,23 +173,26 @@ Add-TranscriptLine("AETHER Pilot Launch Validation")
 Add-TranscriptLine("==============================")
 Add-TranscriptLine("Generated: $timestamp")
 Add-TranscriptLine("Repository: $repoRoot")
-Add-TranscriptLine("Baseline: $($baseline.Path)")
-Add-TranscriptLine("Baseline source: $($baseline.Source)")
+Add-TranscriptLine("Host manifest: $HostManifestPath")
+Add-TranscriptLine("Core baseline: $($coreBaseline.Path)")
+Add-TranscriptLine("Service baseline: $($serviceBaseline.Path)")
 Add-TranscriptLine("")
 
-Write-Host "Baseline: $($baseline.Path) [$($baseline.Source)]"
+Write-Host "Core baseline:    $($coreBaseline.Path) [$($coreBaseline.Source)]"
+Write-Host "Service baseline: $($serviceBaseline.Path) [$($serviceBaseline.Source)]"
 Write-Host ""
 
 $failed = $false
 $failureMessage = $null
 
 try {
-    Invoke-Step "Pilot report" $cargoPath @("run", "-p", "aether_api", "--example", "pilot_coordination_report", "--release")
-    Invoke-Step "Performance report" $cargoPath @("run", "-p", "aether_api", "--example", "performance_report", "--release")
-    Invoke-Step "Performance drift" $cargoPath @("run", "-p", "aether_api", "--example", "performance_drift_report", "--release", "--", $baseline.Path)
-    Invoke-Step "Release API tests" $cargoPath @("test", "-p", "aether_api", "--release")
-    Invoke-Step "Pilot soak suite" $cargoPath @("test", "-p", "aether_api", "--test", "pilot_soak", "--release", "--", "--ignored", "--nocapture")
-    Invoke-Step "Performance stress suite" $cargoPath @("test", "-p", "aether_api", "--test", "performance_stress", "--release", "--", "--ignored", "--nocapture")
+    Invoke-Step "Pilot report" $cargo.Source @("run", "-p", "aether_api", "--example", "pilot_coordination_report", "--release")
+    Invoke-Step "Performance report" $pwsh.Source @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $repoRoot "scripts/run-performance-report.ps1"), "-Suite", "full_stack", "-HostManifestPath", (Resolve-Path $HostManifestPath).Path)
+    Invoke-Step "Core drift" $pwsh.Source @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $repoRoot "scripts/run-performance-drift.ps1"), "-Suite", "core_kernel", "-HostManifestPath", (Resolve-Path $HostManifestPath).Path, "-BaselinePath", $coreBaseline.Path)
+    Invoke-Step "Service drift" $pwsh.Source @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $repoRoot "scripts/run-performance-drift.ps1"), "-Suite", "service_in_process", "-HostManifestPath", (Resolve-Path $HostManifestPath).Path, "-BaselinePath", $serviceBaseline.Path)
+    Invoke-Step "Release API tests" $cargo.Source @("test", "-p", "aether_api", "--release")
+    Invoke-Step "Pilot soak suite" $cargo.Source @("test", "-p", "aether_api", "--test", "pilot_soak", "--release", "--", "--ignored", "--nocapture")
+    Invoke-Step "Performance stress suite" $cargo.Source @("test", "-p", "aether_api", "--test", "performance_stress", "--release", "--", "--ignored", "--nocapture")
 } catch {
     $failed = $true
     $failureMessage = $_.Exception.Message
@@ -186,6 +200,30 @@ try {
     Write-Host $failureMessage -ForegroundColor Red
     Add-TranscriptLine("Launch validation failed: $failureMessage")
 }
+
+$combinedDrift = [System.Collections.Generic.List[string]]::new()
+$combinedDrift.Add("# AETHER Performance Drift Summary")
+$combinedDrift.Add("")
+$combinedDrift.Add("## Core Kernel")
+$combinedDrift.Add("")
+if (Test-Path (Join-Path $repoRoot "artifacts\performance\latest-drift-core_kernel.md")) {
+    foreach ($line in Get-Content -Path (Join-Path $repoRoot "artifacts\performance\latest-drift-core_kernel.md")) {
+        $combinedDrift.Add($line)
+    }
+} else {
+    $combinedDrift.Add("No core-kernel drift report was generated.")
+}
+$combinedDrift.Add("")
+$combinedDrift.Add("## Service In Process")
+$combinedDrift.Add("")
+if (Test-Path (Join-Path $repoRoot "artifacts\performance\latest-drift-service_in_process.md")) {
+    foreach ($line in Get-Content -Path (Join-Path $repoRoot "artifacts\performance\latest-drift-service_in_process.md")) {
+        $combinedDrift.Add($line)
+    }
+} else {
+    $combinedDrift.Add("No service drift report was generated.")
+}
+Set-Content -Path $performanceSummaryPath -Value $combinedDrift
 
 Set-Content -Path $reportPath -Value $transcript
 Set-Content -Path $latestPath -Value $transcript

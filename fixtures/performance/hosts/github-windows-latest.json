@@ -1,0 +1,18 @@
+{
+  "host_id": "github-windows-latest",
+  "display_name": "GitHub Actions windows-latest",
+  "host_class": "ci",
+  "execution_environment": "github_windows",
+  "vendor": null,
+  "model": null,
+  "owner": "github-actions",
+  "notes": [
+    "Ephemeral CI runner used for comparative matrix reporting.",
+    "Do not treat cross-host differences as release-gated drift."
+  ],
+  "tags": [
+    "ci",
+    "github-actions",
+    "windows"
+  ]
+}

@@ -113,10 +113,10 @@ cargo run -p aether_api --example capture_performance_baseline --release
 Compare the current build against that baseline:
 
 ```bash
-cargo run -p aether_api --example performance_drift_report --release -- artifacts/performance/baseline.json
+cargo run -p aether_api --example performance_drift_report --release -- --suite core_kernel --host-manifest fixtures/performance/hosts/dev-chad-windows-native.json --baseline fixtures/performance/baselines/core_kernel/dev-chad-windows-native.json
 ```
 
-For reproducible QA and launch validation on a fresh machine, the repo also carries `fixtures/performance/accepted-baseline.windows-x86_64.json` as a tracked accepted reference.
+For reproducible QA and launch validation on a fresh machine, the repo now carries tracked accepted references under `fixtures/performance/baselines/<suite>/<host>.json`. The current canonical Windows pilot gate uses `core_kernel` and `service_in_process` for `dev-chad-windows-native`.
 
 ## Exit Gates
 

@@ -1,0 +1,19 @@
+{
+  "host_id": "dev-chad-wsl-ubuntu",
+  "display_name": "CHAD (WSL Ubuntu)",
+  "host_class": "dev",
+  "execution_environment": "wsl_ubuntu",
+  "vendor": "Dell Inc.",
+  "model": "G5 5090",
+  "owner": "jamie",
+  "notes": [
+    "Same physical development host as the native Windows baseline, measured through WSL Ubuntu when available.",
+    "Use explicit local runner support; absence should be reported as unavailable rather than silently omitted."
+  ],
+  "tags": [
+    "wsl",
+    "ubuntu",
+    "dev-host",
+    "chad"
+  ]
+}

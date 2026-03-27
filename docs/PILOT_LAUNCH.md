@@ -80,14 +80,14 @@ The validation transcript is written to:
 
 The launch validation resolves its baseline in this order:
 
-1. an explicit `-BaselinePath`
-2. `artifacts/performance/baseline.json`
-3. `fixtures/performance/accepted-baseline.windows-x86_64.json`
+1. an explicit `-BaselinePath` for the `core_kernel` suite
+2. `artifacts/performance/baselines/<suite>/<host>.json`
+3. `fixtures/performance/baselines/<suite>/<host>.json`
 
 If you want the current local checkpoint to be the reference point, capture it first:
 
 ```bash
-cargo run -p aether_api --example capture_performance_baseline --release
+cargo run -p aether_api --example capture_performance_baseline --release -- --suite core_kernel --host-manifest fixtures/performance/hosts/dev-chad-windows-native.json
 ```
 
 The tracked fixture baseline makes the launch path reproducible on a fresh QA machine or CI worker. The transcript records both the resolved baseline path and whether it came from an explicit override, a local artifact, or the tracked fixture.
