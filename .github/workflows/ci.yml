@@ -127,6 +127,11 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+
       - name: Build packaged pilot bundle
         shell: pwsh
         run: ./scripts/build-pilot-package.ps1

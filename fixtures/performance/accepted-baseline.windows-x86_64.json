@@ -1,6 +1,6 @@
 {
   "label": "pilot-accepted-baseline.windows-x86_64",
-  "generated_at": "1774440601",
+  "generated_at": "1774594313",
   "report": {
     "samples_per_workload": 5,
     "measurements": [
@@ -13,18 +13,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 2122240
+            "nanos": 2359120
           },
           "min": {
             "secs": 0,
-            "nanos": 1805900
+            "nanos": 2218700
           },
           "max": {
             "secs": 0,
-            "nanos": 2626900
+            "nanos": 2581600
           }
         },
-        "throughput_per_second": 4712002.412545235,
+        "throughput_per_second": 4238868.730713147,
         "notes": [
           "10,000 unique element IDs appended into an empty journal each sample"
         ]
@@ -38,18 +38,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 12561780
+            "nanos": 12874580
           },
           "min": {
             "secs": 0,
-            "nanos": 11298800
+            "nanos": 12506100
           },
           "max": {
             "secs": 0,
-            "nanos": 15388800
+            "nanos": 13265700
           }
         },
-        "throughput_per_second": 3980327.628727776,
+        "throughput_per_second": 3883621.834654024,
         "notes": [
           "50,000 unique element IDs appended into an empty journal each sample"
         ]
@@ -63,18 +63,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 2844420
+            "nanos": 2788160
           },
           "min": {
             "secs": 0,
-            "nanos": 2586500
+            "nanos": 2555900
           },
           "max": {
             "secs": 0,
-            "nanos": 3242300
+            "nanos": 3357400
           }
         },
-        "throughput_per_second": 351565.5212661984,
+        "throughput_per_second": 358659.4743486744,
         "notes": [
           "4,332 datoms across scalar, set, and ref attributes"
         ]
@@ -88,18 +88,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 1215700
+            "nanos": 1399440
           },
           "min": {
             "secs": 0,
-            "nanos": 1202700
+            "nanos": 1308100
           },
           "max": {
             "secs": 0,
-            "nanos": 1223900
+            "nanos": 1493400
           }
         },
-        "throughput_per_second": 822571.3580653123,
+        "throughput_per_second": 714571.5429028755,
         "notes": [
           "Inclusive prefix cut at 2166 across 4,332 datoms"
         ]
@@ -113,18 +113,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 52858420
+            "nanos": 64837020
           },
           "min": {
             "secs": 0,
-            "nanos": 49449500
+            "nanos": 62753000
           },
           "max": {
             "secs": 0,
-            "nanos": 56937700
+            "nanos": 69118500
           }
         },
-        "throughput_per_second": 75673.84723190742,
+        "throughput_per_second": 61693.149993630184,
         "notes": [
           "4,332 durable datoms persisted into a SQLite journal",
           "each sample reopens the durable kernel and resolves current state from committed history",
@@ -140,18 +140,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 8830240
+            "nanos": 8688820
           },
           "min": {
             "secs": 0,
-            "nanos": 8590100
+            "nanos": 8410700
           },
           "max": {
             "secs": 0,
-            "nanos": 9237400
+            "nanos": 9023400
           }
         },
-        "throughput_per_second": 231930.2759607893,
+        "throughput_per_second": 235705.19357058842,
         "notes": [
           "17 predicates and 17 rules with one large recursive SCC",
           "128 compiler passes per sample to reduce timer jitter on this microbenchmark"
@@ -166,18 +166,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 33146800
+            "nanos": 31298680
           },
           "min": {
             "secs": 0,
-            "nanos": 32303500
+            "nanos": 29939800
           },
           "max": {
             "secs": 0,
-            "nanos": 34165800
+            "nanos": 32057500
           }
         },
-        "throughput_per_second": 247143.012296813,
+        "throughput_per_second": 261736.27769605618,
         "notes": [
           "65 predicates and 65 rules with one large recursive SCC",
           "128 compiler passes per sample to reduce timer jitter on this microbenchmark"
@@ -192,18 +192,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 37204720
+            "nanos": 38679160
           },
           "min": {
             "secs": 0,
-            "nanos": 36348200
+            "nanos": 36900400
           },
           "max": {
             "secs": 0,
-            "nanos": 39021900
+            "nanos": 40279000
           }
         },
-        "throughput_per_second": 54186.67308879089,
+        "throughput_per_second": 52121.09053040449,
         "notes": [
           "2,016 derived tuples expected from a linear dependency chain"
         ]
@@ -217,18 +217,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 282646460
+            "nanos": 293050740
           },
           "min": {
             "secs": 0,
-            "nanos": 276552500
+            "nanos": 279682500
           },
           "max": {
             "secs": 0,
-            "nanos": 291159900
+            "nanos": 320978700
           }
         },
-        "throughput_per_second": 28756.77268344348,
+        "throughput_per_second": 27735.81121139636,
         "notes": [
           "8,128 derived tuples expected from a linear dependency chain"
         ]
@@ -242,18 +242,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 2782220
+            "nanos": 3413120
           },
           "min": {
             "secs": 0,
-            "nanos": 2296900
+            "nanos": 3012400
           },
           "max": {
             "secs": 0,
-            "nanos": 3476900
+            "nanos": 4061400
           }
         },
-        "throughput_per_second": 45647.00131549626,
+        "throughput_per_second": 37209.35683480217,
         "notes": [
           "127 tuples in the longest proof trace",
           "root tuple carries 127 source datom IDs"
@@ -268,18 +268,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 4236980
+            "nanos": 4398160
           },
           "min": {
             "secs": 0,
-            "nanos": 3869400
+            "nanos": 4291300
           },
           "max": {
             "secs": 0,
-            "nanos": 4960700
+            "nanos": 4597200
           }
         },
-        "throughput_per_second": 38706.814759569315,
+        "throughput_per_second": 37288.32057042036,
         "notes": [
           "164 expected worker-task claimability rows",
           "includes parse, compile, resolve, evaluate, and query through the kernel service"
@@ -294,18 +294,18 @@
           "samples": 5,
           "mean": {
             "secs": 0,
-            "nanos": 27626680
+            "nanos": 26836040
           },
           "min": {
             "secs": 0,
-            "nanos": 25136400
+            "nanos": 26220900
           },
           "max": {
             "secs": 0,
-            "nanos": 31029600
+            "nanos": 28189000
           }
         },
-        "throughput_per_second": 23745.162285153336,
+        "throughput_per_second": 24444.739238725237,
         "notes": [
           "164 expected worker-task claimability rows",
           "each sample reopens the durable kernel, replays the SQLite journal, and runs the coordination document",
@@ -317,7 +317,7 @@
       {
         "workload": "Derived-set footprint estimate",
         "scale": "chain 128",
-        "estimated_bytes": 8135776,
+        "estimated_bytes": 8720992,
         "notes": [
           "8,128 tuples across 128 iterations",
           "structural lower-bound estimate for regression tracking"
@@ -326,7 +326,7 @@
       {
         "workload": "Derivation-trace footprint estimate",
         "scale": "chain 128",
-        "estimated_bytes": 97688,
+        "estimated_bytes": 106904,
         "notes": [
           "127 tuples in the reconstructed proof graph",
           "structural lower-bound estimate for regression tracking"

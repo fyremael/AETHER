@@ -81,7 +81,7 @@ AETHER is:
 - a temporal replay engine for deterministic `AsOf` views
 - a provenance-carrying kernel for explainable results
 - a Rust workspace with clear crate ownership boundaries
-- a live Go operator shell and a typed Python boundary SDK over the stable HTTP seam
+- a live Go operator shell and TUI cockpit plus a typed Python boundary SDK over the stable HTTP seam
 
 AETHER is not:
 
@@ -177,7 +177,7 @@ Implemented today:
 - a journal-anchored artifact/vector sidecar federation boundary with external artifact references, SQLite-backed durability for the pilot service, HTTP endpoints, and provenance-bearing semantic fact projection
 - a required mainline CI launch/drift gate plus a packaged pilot-service artifact build on Windows
 - a scheduled/manual GitHub Actions pilot-validation workflow that runs the launch pack and uploads report/drift artifacts
-- a first real Go operator shell plus typed Go client over the HTTP API
+- a first real Go operator shell, pilot-focused TUI cockpit, and typed Go client over the HTTP API
 - a broader typed Python SDK surface with fixture builders, policy-aware helpers, and live integration coverage against a Rust server
 - a tracked semantic compliance matrix that maps `SPEC.md` sections `1-11` to the implemented v1 single-node semantic surface
 - explicit partition IDs, partition-qualified cuts, and federated-cut types for the first distributed-truth implementation slice

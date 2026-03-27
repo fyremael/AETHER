@@ -83,6 +83,10 @@ pub trait KernelService {
         &mut self,
         request: RunDocumentRequest,
     ) -> Result<RunDocumentResponse, ApiError>;
+    fn coordination_pilot_report(
+        &mut self,
+        request: CoordinationPilotReportRequest,
+    ) -> Result<CoordinationPilotReport, ApiError>;
     fn register_artifact_reference(
         &mut self,
         request: RegisterArtifactReferenceRequest,
@@ -560,6 +564,13 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         })
     }
 
+    fn coordination_pilot_report(
+        &mut self,
+        request: CoordinationPilotReportRequest,
+    ) -> Result<CoordinationPilotReport, ApiError> {
+        build_coordination_pilot_report_with_policy(self, request.policy_context)
+    }
+
     fn register_artifact_reference(
         &mut self,
         request: RegisterArtifactReferenceRequest,
@@ -705,6 +716,12 @@ pub struct ParseDocumentResponse {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunDocumentRequest {
     pub dsl: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_context: Option<PolicyContext>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CoordinationPilotReportRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy_context: Option<PolicyContext>,
 }

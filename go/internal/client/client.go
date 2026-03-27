@@ -27,29 +27,6 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("AETHER API error (%d): %s", e.StatusCode, e.Message)
 }
 
-type PolicyContext struct {
-	Capabilities []string `json:"capabilities,omitempty"`
-	Visibilities []string `json:"visibilities,omitempty"`
-}
-
-type HealthResponse struct {
-	Status string `json:"status"`
-}
-
-type HistoryResponse struct {
-	Datoms []map[string]any `json:"datoms"`
-}
-
-type RunDocumentRequest struct {
-	DSL           string         `json:"dsl"`
-	PolicyContext *PolicyContext `json:"policy_context,omitempty"`
-}
-
-type ExplainTupleRequest struct {
-	TupleID       uint64         `json:"tuple_id"`
-	PolicyContext *PolicyContext `json:"policy_context,omitempty"`
-}
-
 func New(baseURL string, token string) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -76,6 +53,27 @@ func (c *Client) History(ctx context.Context) (*HistoryResponse, error) {
 	return &response, nil
 }
 
+func (c *Client) AuditLog(ctx context.Context) (*AuditLogResponse, error) {
+	var response AuditLogResponse
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/audit", nil, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+func (c *Client) CoordinationPilotReport(
+	ctx context.Context,
+	policy *PolicyContext,
+) (*CoordinationPilotReport, error) {
+	var response CoordinationPilotReport
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/reports/pilot/coordination", CoordinationPilotReportRequest{
+		PolicyContext: policy,
+	}, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
 func (c *Client) RunDocument(ctx context.Context, request RunDocumentRequest) (map[string]any, error) {
 	var response map[string]any
 	if err := c.doJSON(ctx, http.MethodPost, "/v1/documents/run", request, &response); err != nil {
@@ -84,23 +82,23 @@ func (c *Client) RunDocument(ctx context.Context, request RunDocumentRequest) (m
 	return response, nil
 }
 
-func (c *Client) ExplainTuple(ctx context.Context, tupleID uint64) (map[string]any, error) {
-	var response map[string]any
-	if err := c.doJSON(ctx, http.MethodPost, "/v1/explain/tuple", ExplainTupleRequest{TupleID: tupleID}, &response); err != nil {
-		return nil, err
-	}
-	return response, nil
+func (c *Client) ExplainTuple(ctx context.Context, tupleID uint64) (*ExplainTupleResponse, error) {
+	return c.ExplainTupleWithPolicy(ctx, tupleID, nil)
 }
 
-func (c *Client) ExplainTupleWithPolicy(ctx context.Context, tupleID uint64, policy *PolicyContext) (map[string]any, error) {
-	var response map[string]any
+func (c *Client) ExplainTupleWithPolicy(
+	ctx context.Context,
+	tupleID uint64,
+	policy *PolicyContext,
+) (*ExplainTupleResponse, error) {
+	var response ExplainTupleResponse
 	if err := c.doJSON(ctx, http.MethodPost, "/v1/explain/tuple", ExplainTupleRequest{
 		TupleID:       tupleID,
 		PolicyContext: policy,
 	}, &response); err != nil {
 		return nil, err
 	}
-	return response, nil
+	return &response, nil
 }
 
 func (c *Client) doJSON(ctx context.Context, method string, path string, payload any, out any) error {

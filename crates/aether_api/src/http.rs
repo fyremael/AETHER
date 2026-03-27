@@ -1,8 +1,8 @@
 use crate::{
-    ApiError, AppendRequest, AsOfRequest, CurrentStateRequest, ExplainTupleRequest,
-    GetArtifactReferenceRequest, HistoryRequest, KernelService, ParseDocumentRequest,
-    RegisterArtifactReferenceRequest, RegisterVectorRecordRequest, RunDocumentRequest,
-    SearchVectorsRequest,
+    ApiError, AppendRequest, AsOfRequest, CoordinationPilotReportRequest, CurrentStateRequest,
+    ExplainTupleRequest, GetArtifactReferenceRequest, HistoryRequest, KernelService,
+    ParseDocumentRequest, RegisterArtifactReferenceRequest, RegisterVectorRecordRequest,
+    RunDocumentRequest, SearchVectorsRequest,
 };
 use aether_ast::PolicyContext;
 use axum::{
@@ -372,6 +372,10 @@ pub fn http_router_with_options(
         .route("/v1/state/as-of", post(as_of))
         .route("/v1/documents/parse", post(parse_document))
         .route("/v1/documents/run", post(run_document))
+        .route(
+            "/v1/reports/pilot/coordination",
+            post(coordination_pilot_report),
+        )
         .route("/v1/explain/tuple", post(explain_tuple))
         .route(
             "/v1/sidecars/artifacts/register",
@@ -837,6 +841,46 @@ async fn run_document(
             context.last_element = response.state.as_of.map(|element| element.0);
             context.derived_tuple_count = Some(response.derived.tuples.len());
             context.row_count = response.query.as_ref().map(|query| query.rows.len());
+            Ok(response)
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn coordination_pilot_report(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<CoordinationPilotReportRequest>,
+) -> Result<Json<crate::CoordinationPilotReport>, HttpError> {
+    let request_context = AuditContext {
+        temporal_view: Some("coordination_pilot_report".into()),
+        ..Default::default()
+    };
+    let response = state.execute(
+        &headers,
+        "POST",
+        "/v1/reports/pilot/coordination",
+        AuthScope::Query,
+        request_context.clone(),
+        |service, principal, context| {
+            let mut request = request;
+            request.policy_context =
+                apply_policy_binding(principal, request.policy_context, context)?;
+            let response = service
+                .coordination_pilot_report(request)
+                .map_err(HttpError::Api)?;
+            context.datom_count = Some(response.history_len);
+            context.row_count = Some(
+                response.pre_heartbeat_authorized.len()
+                    + response.as_of_authorized.len()
+                    + response.live_heartbeats.len()
+                    + response.current_authorized.len()
+                    + response.claimable.len()
+                    + response.accepted_outcomes.len()
+                    + response.rejected_outcomes.len(),
+            );
+            context.trace_tuple_count = response.trace.as_ref().map(|trace| trace.tuple_count);
+            context.tuple_id = response.trace.as_ref().map(|trace| trace.root.0);
             Ok(response)
         },
     )?;

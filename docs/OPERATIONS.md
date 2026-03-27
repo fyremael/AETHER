@@ -6,7 +6,18 @@ It assumes you are not trying to extend the kernel. It assumes you want the clea
 
 ## The Short Version
 
-If you only need one showcase, run Demo 03.
+If you are operating a live pilot service, start with the operator cockpit.
+
+Inside a packaged bundle, the shortest path is:
+
+```text
+double-click run-aether-ops.cmd
+```
+
+That launches `aetherctl tui` against the local authenticated pilot service
+with the packaged operator token.
+
+If you only need one showcase rather than a live service cockpit, run Demo 03.
 
 On Windows, the simplest path is:
 
@@ -83,6 +94,7 @@ Use this guide by the question you need answered:
 
 | If you need to know... | Use |
 | --- | --- |
+| “What is happening in the live pilot service right now?” | `run-aether-ops.cmd` inside the package |
 | “What is the clearest single showcase?” | Demo 03 |
 | “How does replay and closure work?” | Demo 01 |
 | “How do heartbeats, handoff, and fencing work?” | Demo 02 |
@@ -160,11 +172,13 @@ Available endpoints today:
 
 - `GET /health`
 - `GET /v1/history`
+- `GET /v1/audit`
 - `POST /v1/append`
 - `POST /v1/state/current`
 - `POST /v1/state/as-of`
 - `POST /v1/documents/parse`
 - `POST /v1/documents/run`
+- `POST /v1/reports/pilot/coordination`
 - `POST /v1/explain/tuple`
 - `POST /v1/sidecars/artifacts/register`
 - `POST /v1/sidecars/artifacts/get`

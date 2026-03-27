@@ -20,6 +20,7 @@ implemented system.
 - HTTP authorization still uses coarse endpoint scopes, but tokens now also bind maximum semantic policy visibility for history, state, documents, explanation, sidecar access, and reports. The remaining gap is richer governance ergonomics, not the absence of token-bound semantic policy or policy-aware derivation.
 - Audit entries now capture effective policy decisions plus requested, granted, and effective semantic visibility, but they still do not capture full operator intent or semantic diffs between cuts.
 - Operator reports are now policy-aware fixed-format incident summaries in markdown and JSON, but they are still not interactive investigation tools.
+- The Go operator TUI is now implemented as the primary live pilot cockpit, but it is intentionally pilot-focused and read-only in v1 rather than a general workflow IDE or mutation surface.
 - The pilot service now has a packaged deployment path with config-backed startup, package-local rotation tooling, and secret-file/env/command token resolution, but it is still a single-node bundle rather than a fully managed deployment story with automated rotation services, revocation, or native cloud secret-manager integrations.
 
 ## Performance, Storage, And Release Discipline

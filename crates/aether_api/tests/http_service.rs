@@ -1,11 +1,11 @@
 use aether_api::{
     coordination_pilot_dsl, coordination_pilot_seed_history, http_router, http_router_with_options,
-    AppendRequest, AuditEntry, AuditLogResponse, AuthScope, ExplainTupleRequest,
-    GetArtifactReferenceRequest, HealthResponse, HistoryResponse, HttpAuthConfig,
-    HttpKernelOptions, InMemoryKernelService, KernelService, ParseDocumentRequest,
-    ParseDocumentResponse, RegisterArtifactReferenceRequest, RegisterVectorRecordRequest,
-    RunDocumentRequest, RunDocumentResponse, SearchVectorsRequest, SearchVectorsResponse,
-    SqliteKernelService, VectorFactProjection, VectorMetric,
+    AppendRequest, AuditEntry, AuditLogResponse, AuthScope, CoordinationPilotReport,
+    CoordinationPilotReportRequest, ExplainTupleRequest, GetArtifactReferenceRequest,
+    HealthResponse, HistoryResponse, HttpAuthConfig, HttpKernelOptions, InMemoryKernelService,
+    KernelService, ParseDocumentRequest, ParseDocumentResponse, RegisterArtifactReferenceRequest,
+    RegisterVectorRecordRequest, RunDocumentRequest, RunDocumentResponse, SearchVectorsRequest,
+    SearchVectorsResponse, SqliteKernelService, VectorFactProjection, VectorMetric,
     COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
 use aether_ast::{
@@ -562,6 +562,128 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
     assert!(audit_contents.contains("\"path\":\"/v1/documents/run\""));
     assert!(audit_contents.contains("\"temporal_view\":\"current\""));
     assert!(audit_contents.contains("\"query_goal\":\"execution_authorized(t, worker, epoch)\""));
+
+    stop_server(server).await;
+}
+
+#[tokio::test]
+async fn authenticated_http_service_exposes_policy_aware_coordination_reports() {
+    let audit = TestAuditPath::new("coordination-report-audit");
+    let options = HttpKernelOptions::new()
+        .with_auth(pilot_auth())
+        .with_audit_log_path(audit.path().to_path_buf());
+    let (base_url, server) = spawn_server_with_options(InMemoryKernelService::new(), options).await;
+    let client = Client::new();
+
+    let mut datoms = coordination_pilot_seed_history();
+    for datom in &mut datoms {
+        if datom.element.0 >= 6 {
+            datom.policy = Some(PolicyEnvelope {
+                capabilities: vec!["executor".into()],
+                visibilities: Vec::new(),
+            });
+        }
+    }
+
+    let append = client
+        .post(format!("{base_url}/v1/append"))
+        .bearer_auth("pilot-operator-token")
+        .json(&AppendRequest { datoms })
+        .send()
+        .await
+        .expect("append coordination seed history");
+    assert!(append.status().is_success());
+
+    let operator_report = client
+        .post(format!("{base_url}/v1/reports/pilot/coordination"))
+        .bearer_auth("pilot-operator-token")
+        .json(&CoordinationPilotReportRequest {
+            policy_context: None,
+        })
+        .send()
+        .await
+        .expect("operator report request");
+    assert!(operator_report.status().is_success());
+    let operator_report = operator_report
+        .json::<CoordinationPilotReport>()
+        .await
+        .expect("operator report response");
+    assert_eq!(operator_report.history_len, 25);
+    assert_eq!(operator_report.current_authorized.len(), 1);
+    assert!(operator_report.trace.is_some());
+
+    let public_report = client
+        .post(format!("{base_url}/v1/reports/pilot/coordination"))
+        .bearer_auth("pilot-query-token")
+        .json(&CoordinationPilotReportRequest {
+            policy_context: None,
+        })
+        .send()
+        .await
+        .expect("public report request");
+    assert!(public_report.status().is_success());
+    let public_report = public_report
+        .json::<CoordinationPilotReport>()
+        .await
+        .expect("public report response");
+    assert_eq!(public_report.history_len, 5);
+    assert!(public_report.as_of_authorized.is_empty());
+    assert!(public_report.current_authorized.is_empty());
+    assert!(public_report.accepted_outcomes.is_empty());
+    assert!(public_report.trace.is_none());
+
+    let persisted = read_audit_entries(audit.path());
+    assert!(persisted.iter().any(|entry| {
+        entry.path == "/v1/reports/pilot/coordination"
+            && entry.principal == "pilot-operator"
+            && entry.context.temporal_view.as_deref() == Some("coordination_pilot_report")
+            && entry.context.datom_count == Some(25)
+            && entry.context.row_count.is_some()
+            && entry.context.trace_tuple_count.is_some()
+            && entry.context.policy_decision.as_deref() == Some("token_default")
+    }));
+    assert!(persisted.iter().any(|entry| {
+        entry.path == "/v1/reports/pilot/coordination"
+            && entry.principal == "query-client"
+            && entry.context.temporal_view.as_deref() == Some("coordination_pilot_report")
+            && entry.context.datom_count == Some(5)
+            && entry.context.trace_tuple_count.is_none()
+            && entry.context.policy_decision.as_deref() == Some("public")
+    }));
+
+    stop_server(server).await;
+}
+
+#[tokio::test]
+async fn coordination_report_endpoint_matches_query_auth_behavior() {
+    let options = HttpKernelOptions::new().with_auth(pilot_auth().with_token(
+        "pilot-ops-only-token",
+        "ops-only",
+        [AuthScope::Ops],
+    ));
+    let (base_url, server) = spawn_server_with_options(InMemoryKernelService::new(), options).await;
+    let client = Client::new();
+
+    let unauthorized = client
+        .post(format!("{base_url}/v1/reports/pilot/coordination"))
+        .json(&CoordinationPilotReportRequest {
+            policy_context: None,
+        })
+        .send()
+        .await
+        .expect("unauthorized report request");
+    assert_eq!(unauthorized.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let forbidden = client
+        .post(format!("{base_url}/v1/reports/pilot/coordination"))
+        .bearer_auth("pilot-ops-only-token")
+        .json(&CoordinationPilotReportRequest {
+            policy_context: None,
+        })
+        .send()
+        .await
+        .expect("forbidden report request");
+    assert_eq!(forbidden.status(), reqwest::StatusCode::FORBIDDEN);
 
     stop_server(server).await;
 }

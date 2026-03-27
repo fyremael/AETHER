@@ -16,6 +16,7 @@ $packageRoot = if ($OutputDir) {
 }
 $zipPath = "$packageRoot.zip"
 $binarySource = Join-Path $repoRoot "target\release\aether_pilot_service.exe"
+$shellBinarySource = Join-Path $repoRoot "target\release\aetherctl.exe"
 $templatePath = Join-Path $repoRoot "fixtures\deployment\pilot-service.template.json"
 $deploymentDocSource = Join-Path $repoRoot "docs\PILOT_DEPLOYMENT.md"
 $playbookDocSource = Join-Path $repoRoot "docs\PILOT_OPERATIONS_PLAYBOOK.md"
@@ -28,6 +29,8 @@ $tokenPath = Join-Path $configDir "pilot-operator.token"
 $configPath = Join-Path $configDir "pilot-service.json"
 $runPs1Path = Join-Path $packageRoot "run-pilot-service.ps1"
 $runCmdPath = Join-Path $packageRoot "run-pilot-service.cmd"
+$opsPs1Path = Join-Path $packageRoot "run-aether-ops.ps1"
+$opsCmdPath = Join-Path $packageRoot "run-aether-ops.cmd"
 $rotatePs1Path = Join-Path $packageRoot "rotate-pilot-token.ps1"
 $rotateCmdPath = Join-Path $packageRoot "rotate-pilot-token.cmd"
 
@@ -45,10 +48,21 @@ if (-not $SkipBuild) {
     } finally {
         Pop-Location
     }
+
+    Write-Host "Building Go operator shell..." -ForegroundColor Cyan
+    Push-Location (Join-Path $repoRoot "go")
+    try {
+        go build -o $shellBinarySource ./cmd/aetherctl
+    } finally {
+        Pop-Location
+    }
 }
 
 if (-not (Test-Path $binarySource)) {
     throw "Pilot service binary not found at $binarySource"
+}
+if (-not (Test-Path $shellBinarySource)) {
+    throw "Go operator shell binary not found at $shellBinarySource"
 }
 
 if (Test-Path $packageRoot) {
@@ -57,6 +71,7 @@ if (Test-Path $packageRoot) {
 New-Item -ItemType Directory -Force -Path $binDir, $configDir, $docsDir, $dataDir, $logsDir | Out-Null
 
 Copy-Item -Path $binarySource -Destination (Join-Path $binDir "aether_pilot_service.exe")
+Copy-Item -Path $shellBinarySource -Destination (Join-Path $binDir "aetherctl.exe")
 Copy-Item -Path $deploymentDocSource -Destination (Join-Path $docsDir "PILOT_DEPLOYMENT.md")
 Copy-Item -Path $playbookDocSource -Destination (Join-Path $docsDir "PILOT_OPERATIONS_PLAYBOOK.md")
 
@@ -89,6 +104,32 @@ if (-not (Test-Path $binary)) {
 @echo off
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0run-pilot-service.ps1" %*
 '@ | Set-Content -Path $runCmdPath
+
+@'
+param(
+    [string]$BaseUrl = "http://127.0.0.1:3000",
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$TuiArgs
+)
+
+$ErrorActionPreference = "Stop"
+$binary = Join-Path $PSScriptRoot "bin\aetherctl.exe"
+$token = Join-Path $PSScriptRoot "config\pilot-operator.token"
+
+if (-not (Test-Path $binary)) {
+    throw "Operator shell binary not found at $binary"
+}
+if (-not (Test-Path $token)) {
+    throw "Pilot operator token file not found at $token"
+}
+
+& $binary --base-url $BaseUrl --token-file $token tui @TuiArgs
+'@ | Set-Content -Path $opsPs1Path
+
+@'
+@echo off
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0run-aether-ops.ps1" %*
+'@ | Set-Content -Path $opsCmdPath
 
 @'
 param(
@@ -139,4 +180,5 @@ Write-Host "Package zip:  $zipPath"
 Write-Host "Config:       $configPath"
 Write-Host "Token file:   $tokenPath"
 Write-Host "Launch with:  $runCmdPath"
+Write-Host "Operate with: $opsCmdPath"
 Write-Host "Rotate with:  $rotateCmdPath"

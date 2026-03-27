@@ -106,6 +106,7 @@ By default that produces:
 The package contains:
 
 - `bin/aether_pilot_service.exe`
+- `bin/aetherctl.exe`
 - `config/pilot-service.json`
 - `config/pilot-operator.token`
 - `data/`
@@ -114,6 +115,8 @@ The package contains:
 - `docs/PILOT_OPERATIONS_PLAYBOOK.md`
 - `run-pilot-service.ps1`
 - `run-pilot-service.cmd`
+- `run-aether-ops.ps1`
+- `run-aether-ops.cmd`
 - `rotate-pilot-token.ps1`
 - `rotate-pilot-token.cmd`
 
@@ -137,6 +140,30 @@ The service will:
 - open the sidecar catalog adjacent to that journal
 - write audit JSONL to `logs/audit.jsonl`
 - enforce bearer-token auth plus token-bound semantic policy ceilings
+
+## Running The Packaged Operator Cockpit
+
+Inside the package directory:
+
+```text
+double-click run-aether-ops.cmd
+```
+
+or:
+
+```bash
+powershell -ExecutionPolicy Bypass -File .\run-aether-ops.ps1
+```
+
+That launcher:
+
+- targets `http://127.0.0.1:3000`
+- reads `config/pilot-operator.token`
+- starts `aetherctl tui` as the live pilot operations cockpit
+
+The v1 cockpit is intentionally read-only. It is for observing health,
+coordination state, audit entries, history, and tuple proof traces from the
+running authenticated service.
 
 ## CI Posture
 

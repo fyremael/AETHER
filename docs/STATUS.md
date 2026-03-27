@@ -46,6 +46,7 @@ Completed:
 - launch validation and drift promotion completed into a required mainline CI gate
 - packaged durable pilot-service bundles implemented with config-backed startup, package-local rotation tooling, restart/replay benchmark coverage, and secret-file/env/command token resolution
 - first real Go operator shell implemented against the HTTP API with typed client coverage
+- pilot-focused Go operator TUI implemented as the live cockpit for health, coordination state, audit entries, history, and tuple proof traces
 - broader typed Python SDK surface implemented against the HTTP API with fixture builders and live integration coverage
 - semantic compliance matrix added to map `SPEC.md` sections `1-11` to implementation and acceptance evidence for the current v1 single-node closure claim
 - partition IDs, partition-qualified cuts, and federated-cut types implemented in the semantic model

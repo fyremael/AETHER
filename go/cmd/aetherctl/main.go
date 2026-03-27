@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/fyremael/aether/go/internal/client"
+	opstui "github.com/fyremael/aether/go/internal/tui"
 )
 
 func main() {
@@ -19,18 +21,39 @@ func main() {
 }
 
 func run() error {
-	baseURL := flag.String("base-url", "http://127.0.0.1:3000", "AETHER HTTP base URL")
-	token := flag.String("token", "", "Bearer token for authenticated endpoints")
-	flag.Parse()
+	return runWithArgs(os.Args[1:], os.Getenv, os.ReadFile)
+}
 
-	if flag.NArg() == 0 {
+func runWithArgs(
+	args []string,
+	getenv func(string) string,
+	readFile func(string) ([]byte, error),
+) error {
+	root := flag.NewFlagSet("aetherctl", flag.ContinueOnError)
+	root.SetOutput(ioDiscard{})
+
+	baseURL := root.String("base-url", "http://127.0.0.1:3000", "AETHER HTTP base URL")
+	tokenFlag := root.String("token", "", "Bearer token for authenticated endpoints")
+	tokenFile := root.String("token-file", "", "Path to a bearer token file for authenticated endpoints")
+
+	if err := root.Parse(args); err != nil {
+		return err
+	}
+	if len(root.Args()) == 0 {
 		return usageError("missing command")
 	}
 
-	api := client.New(*baseURL, *token)
+	token, err := resolveBearerToken(*tokenFlag, *tokenFile, getenv, readFile)
+	if err != nil {
+		return err
+	}
+
+	commandName := root.Args()[0]
+	commandArgs := root.Args()[1:]
+	api := client.New(*baseURL, token)
 	ctx := context.Background()
 
-	switch flag.Arg(0) {
+	switch commandName {
 	case "health":
 		response, err := api.Health(ctx)
 		if err != nil {
@@ -49,7 +72,7 @@ func run() error {
 		dslFile := command.String("file", "", "Path to an AETHER DSL document")
 		capabilities := command.String("capabilities", "", "Comma-separated capabilities")
 		visibilities := command.String("visibilities", "", "Comma-separated visibilities")
-		if err := command.Parse(flag.Args()[1:]); err != nil {
+		if err := command.Parse(commandArgs); err != nil {
 			return err
 		}
 		if *dslFile == "" {
@@ -72,20 +95,67 @@ func run() error {
 		command := flag.NewFlagSet("explain", flag.ContinueOnError)
 		command.SetOutput(ioDiscard{})
 		tupleID := command.Uint64("tuple-id", 0, "Tuple ID to explain")
-		if err := command.Parse(flag.Args()[1:]); err != nil {
+		capabilities := command.String("capabilities", "", "Comma-separated capabilities")
+		visibilities := command.String("visibilities", "", "Comma-separated visibilities")
+		if err := command.Parse(commandArgs); err != nil {
 			return err
 		}
 		if *tupleID == 0 {
 			return usageError("explain requires --tuple-id")
 		}
-		response, err := api.ExplainTuple(ctx, *tupleID)
+		response, err := api.ExplainTupleWithPolicy(
+			ctx,
+			*tupleID,
+			buildPolicyContext(*capabilities, *visibilities),
+		)
 		if err != nil {
 			return err
 		}
 		return printJSON(response)
+	case "tui":
+		command := flag.NewFlagSet("tui", flag.ContinueOnError)
+		command.SetOutput(ioDiscard{})
+		capabilities := command.String("capabilities", "", "Comma-separated capabilities")
+		visibilities := command.String("visibilities", "", "Comma-separated visibilities")
+		refresh := command.Duration("refresh", 2*time.Second, "Refresh interval for live tabs")
+		if err := command.Parse(commandArgs); err != nil {
+			return err
+		}
+		if strings.TrimSpace(token) == "" {
+			return usageError("tui requires --token, --token-file, or AETHER_TOKEN")
+		}
+		return opstui.Run(api, *baseURL, buildPolicyContext(*capabilities, *visibilities), *refresh)
 	default:
-		return usageError("unknown command: " + flag.Arg(0))
+		return usageError("unknown command: " + commandName)
 	}
+}
+
+func resolveBearerToken(
+	tokenFlag string,
+	tokenFile string,
+	getenv func(string) string,
+	readFile func(string) ([]byte, error),
+) (string, error) {
+	tokenFlag = strings.TrimSpace(tokenFlag)
+	tokenFile = strings.TrimSpace(tokenFile)
+	if tokenFlag != "" && tokenFile != "" {
+		return "", fmt.Errorf("use either --token or --token-file, not both")
+	}
+	if tokenFlag != "" {
+		return tokenFlag, nil
+	}
+	if tokenFile != "" {
+		content, err := readFile(tokenFile)
+		if err != nil {
+			return "", err
+		}
+		token := strings.TrimSpace(string(content))
+		if token == "" {
+			return "", fmt.Errorf("token file %s is empty", tokenFile)
+		}
+		return token, nil
+	}
+	return strings.TrimSpace(getenv("AETHER_TOKEN")), nil
 }
 
 func buildPolicyContext(capabilities string, visibilities string) *client.PolicyContext {
@@ -121,7 +191,7 @@ func printJSON(value any) error {
 }
 
 func usageError(message string) error {
-	return fmt.Errorf("%s\nusage: aetherctl [-base-url URL] [-token TOKEN] <health|history|run|explain> [flags]", message)
+	return fmt.Errorf("%s\nusage: aetherctl [-base-url URL] [-token TOKEN | -token-file PATH] <health|history|run|explain|tui> [flags]", message)
 }
 
 type ioDiscard struct{}
