@@ -50,12 +50,13 @@ Read these in order:
 
 1. `docs/COMMERCIALIZATION/EXECUTIVE_SUMMARY.md`
 2. `docs/COMMERCIALIZATION/SCALING_PLAN.md`
-3. `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md`
-4. `docs/ADR/0001-authority-partitions-and-federated-cuts.md`
-5. `docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md`
-6. `docs/ARCHITECTURE.md`
-7. `docs/PERFORMANCE.md`
-8. `docs/KNOWN_LIMITATIONS.md`
+3. `docs/COMMERCIALIZATION/BENCHMARK_BRIEF.md`
+4. `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md`
+5. `docs/ADR/0001-authority-partitions-and-federated-cuts.md`
+6. `docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md`
+7. `docs/ARCHITECTURE.md`
+8. `docs/PERFORMANCE.md`
+9. `docs/KNOWN_LIMITATIONS.md`
 
 That path grounds the company story in present proof, scaling sequence, system
 shape, and remaining hard constraints.
@@ -85,6 +86,7 @@ That path keeps the visual system, copy system, and public front door aligned.
 | `docs/COMMERCIALIZATION/CATEGORY_MAP.md` | Where AETHER sits relative to adjacent categories and why it is distinct |
 | `docs/COMMERCIALIZATION/EXECUTIVE_BRIEF.md` | One-page outward-facing summary for sponsors, executives, and evaluators |
 | `docs/COMMERCIALIZATION/SCALING_PLAN.md` | Technical scaling and execution plan for advisors, diligence, and long-range architecture review |
+| `docs/COMMERCIALIZATION/BENCHMARK_BRIEF.md` | Short benchmark brief with charts and plain-language interpretation for release, diligence, and stakeholder review |
 | `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md` | Distributed consensus and truth-federation stance for scaling AETHER without weakening semantic authority |
 | `docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md` | Concrete implementation sequence for authority partitions, federated cuts, and imported facts |
 | `docs/COMMERCIALIZATION/CUSTOMER_DECK.md` | Presentation-ready customer deck script with slide-level copy guidance |

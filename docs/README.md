@@ -92,9 +92,10 @@ Read:
 4. `docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md`
 5. `docs/ARCHITECTURE.md`
 6. `docs/SEMANTIC_COMPLIANCE_MATRIX.md`
-7. `docs/PERFORMANCE.md`
-8. `docs/KNOWN_LIMITATIONS.md`
-9. `docs/PILOT_LAUNCH.md`
+7. `docs/COMMERCIALIZATION/BENCHMARK_BRIEF.md`
+8. `docs/PERFORMANCE.md`
+9. `docs/KNOWN_LIMITATIONS.md`
+10. `docs/PILOT_LAUNCH.md`
 
 That path shows how the current kernel is shaped, how it is being measured, and
 how we intend to scale it without dissolving the semantic center.
@@ -131,9 +132,10 @@ They now also describe the scheduled/manual CI launch-validation path and the cu
 
 Read:
 
-1. `docs/PERFORMANCE.md`
-2. `scripts/README.md`
-3. `TESTPLAN.md`
+1. `docs/COMMERCIALIZATION/BENCHMARK_BRIEF.md`
+2. `docs/PERFORMANCE.md`
+3. `scripts/README.md`
+4. `TESTPLAN.md`
 
 That path explains the operator-facing report, baseline capture, drift comparison, the benchmark harness, the stress workloads, and the target interpretation.
 
@@ -199,6 +201,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 | `docs/PERFORMANCE.md` | Performance workloads, runner commands, benchmark harness, and interpretation guidance |
 | `docs/QA.md` | Structured QA and regression suite, release-readiness runner, and artifact contract |
 | `docs/COMMERCIALIZATION/README.md` | Hub for commercialization, product framing, buyer narrative, and messaging |
+| `docs/COMMERCIALIZATION/BENCHMARK_BRIEF.md` | Stakeholder-ready benchmark summary with release-style charts and interpretation |
 | `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md` | Distributed truth and consensus strategy for partitioned AETHER scale |
 | `docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md` | Concrete build plan for authority partitions, federated cuts, and imported facts |
 | `docs/GLOSSARY.md` | Canonical vocabulary for the codebase and its semantics |
