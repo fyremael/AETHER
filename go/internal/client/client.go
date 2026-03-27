@@ -45,6 +45,22 @@ func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 	return &response, nil
 }
 
+func (c *Client) Status(ctx context.Context) (*ServiceStatusResponse, error) {
+	var response ServiceStatusResponse
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/status", nil, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+func (c *Client) ReloadAuth(ctx context.Context) (*AuthReloadResponse, error) {
+	var response AuthReloadResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/admin/auth/reload", struct{}{}, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
 func (c *Client) History(ctx context.Context) (*HistoryResponse, error) {
 	var response HistoryResponse
 	if err := c.doJSON(ctx, http.MethodGet, "/v1/history", nil, &response); err != nil {
@@ -67,6 +83,23 @@ func (c *Client) CoordinationPilotReport(
 ) (*CoordinationPilotReport, error) {
 	var response CoordinationPilotReport
 	if err := c.doJSON(ctx, http.MethodPost, "/v1/reports/pilot/coordination", CoordinationPilotReportRequest{
+		PolicyContext: policy,
+	}, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+func (c *Client) CoordinationDeltaReport(
+	ctx context.Context,
+	left CoordinationCut,
+	right CoordinationCut,
+	policy *PolicyContext,
+) (*CoordinationDeltaReport, error) {
+	var response CoordinationDeltaReport
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/reports/pilot/coordination-delta", CoordinationDeltaReportRequest{
+		Left:          left,
+		Right:         right,
 		PolicyContext: policy,
 	}, &response); err != nil {
 		return nil, err

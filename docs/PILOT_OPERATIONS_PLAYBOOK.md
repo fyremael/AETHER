@@ -6,6 +6,8 @@ It describes the safe, repeatable motions for:
 
 - first deployment
 - token rotation
+- auth reload
+- backup and restore
 - external secret-manager startup
 - in-place upgrade
 - rollback
@@ -27,6 +29,8 @@ The current scope is still a single-node pilot service. The goal is disciplined 
    - `config/pilot-service.json`
    - `config/pilot-operator.token`
    - `rotate-pilot-token.ps1`
+   - `backup-pilot-state.ps1`
+   - `restore-pilot-state.ps1`
    - `docs/PILOT_DEPLOYMENT.md`
 4. Start the service with `run-pilot-service.cmd`.
 5. Confirm:
@@ -34,6 +38,7 @@ The current scope is still a single-node pilot service. The goal is disciplined 
    - `logs/audit.jsonl` is created
    - `data/coordination.sqlite` is created
    - `/health` responds
+   - `/v1/status` reports the expected config/schema/service mode
 6. Run the launch pack before exposing the pilot to stakeholders:
 
    ```text
@@ -59,6 +64,54 @@ Default file-backed rotation path:
    - audit entries continue to append normally
 
 The packaged rotation script backs up the previous token file before writing the new one.
+
+## Auth Reload Playbook
+
+Use explicit auth reload when the config-backed principal or revocation state
+changes but the bind and storage paths do not.
+
+1. Update `config/pilot-service.json`.
+2. Call:
+
+   ```text
+   POST /v1/admin/auth/reload
+   ```
+
+   with an operator token that still has `ops` scope.
+3. Verify:
+   - `/v1/status` shows the updated principal set and revoked counts
+   - revoked tokens now fail
+   - non-revoked operator tokens still succeed
+
+If the bind or storage paths changed, restart the service instead of reloading auth in place.
+
+## Backup And Restore Playbook
+
+1. Stop the service if you need a quiet snapshot.
+2. Export a package-local snapshot:
+
+   ```text
+   .\backup-pilot-state.cmd
+   ```
+
+3. Preserve the generated snapshot directory with the release evidence.
+
+To restore:
+
+1. Stop the service.
+2. Apply:
+
+   ```text
+   .\restore-pilot-state.cmd -SnapshotDir <snapshot-dir>
+   ```
+
+3. Restart the service.
+4. Verify:
+   - `/health`
+   - `/v1/status`
+   - authenticated query
+   - authenticated explain
+   - audit append
 
 ## External Secret-Manager Playbook
 

@@ -210,6 +210,52 @@ type HealthResponse struct {
 	Status string `json:"status"`
 }
 
+type ServiceStatusStorage struct {
+	DatabasePath *string `json:"database_path,omitempty"`
+	SidecarPath  *string `json:"sidecar_path,omitempty"`
+	AuditLogPath *string `json:"audit_log_path,omitempty"`
+	PartitionRoot *string `json:"partition_root,omitempty"`
+}
+
+type PrincipalStatusSummary struct {
+	Principal     string         `json:"principal"`
+	PrincipalID   string         `json:"principal_id"`
+	TokenID       string         `json:"token_id"`
+	Scopes        []string       `json:"scopes"`
+	PolicyContext *PolicyContext `json:"policy_context,omitempty"`
+	Source        string         `json:"source"`
+	Revoked       bool           `json:"revoked,omitempty"`
+}
+
+type ReplicaStatusSummary struct {
+	Partition      string  `json:"partition"`
+	ReplicaID      uint64  `json:"replica_id"`
+	Role           string  `json:"role"`
+	LeaderEpoch    uint64  `json:"leader_epoch"`
+	AppliedElement *uint64 `json:"applied_element,omitempty"`
+	ReplicationLag uint64  `json:"replication_lag"`
+	Healthy        bool    `json:"healthy"`
+	Detail         *string `json:"detail,omitempty"`
+}
+
+type ServiceStatusResponse struct {
+	Status        string                   `json:"status"`
+	BuildVersion  string                   `json:"build_version"`
+	ConfigVersion string                   `json:"config_version"`
+	SchemaVersion string                   `json:"schema_version"`
+	BindAddr      *string                  `json:"bind_addr,omitempty"`
+	ServiceMode   string                   `json:"service_mode"`
+	Storage       ServiceStatusStorage     `json:"storage"`
+	Principals    []PrincipalStatusSummary `json:"principals"`
+	Replicas      []ReplicaStatusSummary   `json:"replicas"`
+}
+
+type AuthReloadResponse struct {
+	ReloadedAtMS uint64 `json:"reloaded_at_ms"`
+	PrincipalCount int  `json:"principal_count"`
+	RevokedCount   int  `json:"revoked_count"`
+}
+
 type AuditContext struct {
 	TemporalView          *string  `json:"temporal_view"`
 	QueryGoal             *string  `json:"query_goal"`
@@ -233,6 +279,8 @@ type AuditContext struct {
 type AuditEntry struct {
 	TimestampMS uint64       `json:"timestamp_ms"`
 	Principal   string       `json:"principal"`
+	PrincipalID *string      `json:"principal_id,omitempty"`
+	TokenID     *string      `json:"token_id,omitempty"`
 	Method      string       `json:"method"`
 	Path        string       `json:"path"`
 	Status      uint16       `json:"status"`
@@ -248,6 +296,64 @@ type AuditLogResponse struct {
 
 type CoordinationPilotReportRequest struct {
 	PolicyContext *PolicyContext `json:"policy_context,omitempty"`
+}
+
+type CoordinationCut struct {
+	Kind    string  `json:"kind"`
+	Element *uint64 `json:"element,omitempty"`
+}
+
+func CurrentCut() CoordinationCut {
+	return CoordinationCut{Kind: "current"}
+}
+
+func AsOfCut(element uint64) CoordinationCut {
+	return CoordinationCut{Kind: "as_of", Element: &element}
+}
+
+type CoordinationDeltaReportRequest struct {
+	Left          CoordinationCut `json:"left"`
+	Right         CoordinationCut `json:"right"`
+	PolicyContext *PolicyContext  `json:"policy_context,omitempty"`
+}
+
+type CoordinationTraceHandle struct {
+	TupleID        uint64      `json:"tuple_id"`
+	TupleCount     int         `json:"tuple_count"`
+	SourceDatomIDs []ElementID `json:"source_datom_ids"`
+	ParentTupleIDs []TupleID   `json:"parent_tuple_ids"`
+}
+
+type ReportRowDiff struct {
+	Row   ReportRow               `json:"row"`
+	Trace *CoordinationTraceHandle `json:"trace,omitempty"`
+}
+
+type ReportRowChange struct {
+	Before      ReportRow                `json:"before"`
+	After       ReportRow                `json:"after"`
+	BeforeTrace *CoordinationTraceHandle `json:"before_trace,omitempty"`
+	AfterTrace  *CoordinationTraceHandle `json:"after_trace,omitempty"`
+}
+
+type ReportSectionDelta struct {
+	Added   []ReportRowDiff   `json:"added"`
+	Removed []ReportRowDiff   `json:"removed"`
+	Changed []ReportRowChange `json:"changed"`
+}
+
+type CoordinationDeltaReport struct {
+	GeneratedAtMS    uint64            `json:"generated_at_ms"`
+	Left             CoordinationCut   `json:"left"`
+	Right            CoordinationCut   `json:"right"`
+	PolicyContext    *PolicyContext    `json:"policy_context,omitempty"`
+	LeftHistoryLen   int               `json:"left_history_len"`
+	RightHistoryLen  int               `json:"right_history_len"`
+	CurrentAuthorized ReportSectionDelta `json:"current_authorized"`
+	Claimable         ReportSectionDelta `json:"claimable"`
+	LiveHeartbeats    ReportSectionDelta `json:"live_heartbeats"`
+	AcceptedOutcomes  ReportSectionDelta `json:"accepted_outcomes"`
+	RejectedOutcomes  ReportSectionDelta `json:"rejected_outcomes"`
 }
 
 type ReportRow struct {

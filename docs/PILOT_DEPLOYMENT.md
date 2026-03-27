@@ -36,10 +36,15 @@ The package builder copies that template into the package `config/` directory an
 
 The config defines:
 
+- config version
+- schema version
+- service mode
 - bind address
 - SQLite journal path
 - audit log path
 - one or more auth principals
+- explicit principal IDs and token IDs
+- optional config-backed revoked token or principal IDs
 - per-principal scopes
 - optional semantic policy context
 - a secret source for each token
@@ -119,6 +124,10 @@ The package contains:
 - `run-aether-ops.cmd`
 - `rotate-pilot-token.ps1`
 - `rotate-pilot-token.cmd`
+- `backup-pilot-state.ps1`
+- `backup-pilot-state.cmd`
+- `restore-pilot-state.ps1`
+- `restore-pilot-state.cmd`
 
 ## Running The Packaged Service
 
@@ -140,6 +149,7 @@ The service will:
 - open the sidecar catalog adjacent to that journal
 - write audit JSONL to `logs/audit.jsonl`
 - enforce bearer-token auth plus token-bound semantic policy ceilings
+- expose `GET /v1/status` for live status and `POST /v1/admin/auth/reload` for explicit auth reload
 
 ## Running The Packaged Operator Cockpit
 
@@ -162,8 +172,40 @@ That launcher:
 - starts `aetherctl tui` as the live pilot operations cockpit
 
 The v1 cockpit is intentionally read-only. It is for observing health,
-coordination state, audit entries, history, and tuple proof traces from the
-running authenticated service.
+coordination state, cut diffs, audit entries, history, and tuple proof traces
+from the running authenticated service.
+
+## Backup And Restore
+
+Inside the package directory:
+
+```text
+double-click backup-pilot-state.cmd
+```
+
+exports a timestamped snapshot containing:
+
+- `config/pilot-service.json`
+- package-local token files
+- the SQLite journal
+- the adjacent sidecar catalog
+- the audit JSONL log
+- a `manifest.json` describing the captured paths
+
+To restore from a snapshot:
+
+```text
+double-click restore-pilot-state.cmd
+```
+
+or:
+
+```bash
+powershell -ExecutionPolicy Bypass -File .\restore-pilot-state.ps1 -SnapshotDir <snapshot-dir>
+```
+
+The restore helper can back up the current package state before applying the
+selected snapshot.
 
 ## CI Posture
 

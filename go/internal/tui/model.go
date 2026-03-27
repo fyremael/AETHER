@@ -15,9 +15,11 @@ import (
 
 type DataSource interface {
 	Health(context.Context) (*client.HealthResponse, error)
+	Status(context.Context) (*client.ServiceStatusResponse, error)
 	History(context.Context) (*client.HistoryResponse, error)
 	AuditLog(context.Context) (*client.AuditLogResponse, error)
 	CoordinationPilotReport(context.Context, *client.PolicyContext) (*client.CoordinationPilotReport, error)
+	CoordinationDeltaReport(context.Context, client.CoordinationCut, client.CoordinationCut, *client.PolicyContext) (*client.CoordinationDeltaReport, error)
 	ExplainTupleWithPolicy(context.Context, uint64, *client.PolicyContext) (*client.ExplainTupleResponse, error)
 }
 
@@ -26,6 +28,7 @@ type Tab int
 const (
 	OverviewTab Tab = iota
 	CoordinationTab
+	DeltaTab
 	AuditTab
 	HistoryTab
 	ExplainTab
@@ -37,6 +40,8 @@ func (t Tab) Title() string {
 		return "Overview"
 	case CoordinationTab:
 		return "Coordination"
+	case DeltaTab:
+		return "Delta"
 	case AuditTab:
 		return "Audit"
 	case HistoryTab:
@@ -75,6 +80,31 @@ func (s CoordinationSection) Title() string {
 	}
 }
 
+type DeltaPreset int
+
+const (
+	AuthorizedHandoffPreset DeltaPreset = iota
+	PreHeartbeatToCurrentPreset
+)
+
+func (p DeltaPreset) Title() string {
+	switch p {
+	case PreHeartbeatToCurrentPreset:
+		return "AsOf(e5) -> Current"
+	default:
+		return "AsOf(e9) -> Current"
+	}
+}
+
+func (p DeltaPreset) Cuts() (client.CoordinationCut, client.CoordinationCut) {
+	switch p {
+	case PreHeartbeatToCurrentPreset:
+		return client.AsOfCut(5), client.CurrentCut()
+	default:
+		return client.AsOfCut(9), client.CurrentCut()
+	}
+}
+
 type keyMap struct {
 	nextTab     key.Binding
 	prevTab     key.Binding
@@ -83,6 +113,7 @@ type keyMap struct {
 	tabThree    key.Binding
 	tabFour     key.Binding
 	tabFive     key.Binding
+	tabSix      key.Binding
 	up          key.Binding
 	down        key.Binding
 	sectionPrev key.Binding
@@ -102,6 +133,7 @@ func newKeyMap() keyMap {
 		tabThree:    key.NewBinding(key.WithKeys("3"), key.WithHelp("", "")),
 		tabFour:     key.NewBinding(key.WithKeys("4"), key.WithHelp("", "")),
 		tabFive:     key.NewBinding(key.WithKeys("5"), key.WithHelp("", "")),
+		tabSix:      key.NewBinding(key.WithKeys("6"), key.WithHelp("", "")),
 		up:          key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "move")),
 		down:        key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "move")),
 		sectionPrev: key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "prev section")),
@@ -119,16 +151,18 @@ func (k keyMap) ShortHelp() []key.Binding {
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.nextTab, k.prevTab, k.tabOne, k.up, k.down, k.open},
+		{k.nextTab, k.prevTab, k.tabOne, k.tabSix, k.up, k.down, k.open},
 		{k.sectionPrev, k.sectionNext, k.refresh, k.help, k.quit},
 	}
 }
 
 type liveDataMsg struct {
 	health  *client.HealthResponse
+	status  *client.ServiceStatusResponse
 	history *client.HistoryResponse
 	audit   *client.AuditLogResponse
 	report  *client.CoordinationPilotReport
+	delta   *client.CoordinationDeltaReport
 	err     error
 }
 
@@ -152,6 +186,7 @@ type Model struct {
 	refreshInterval    time.Duration
 	activeTab          Tab
 	section            CoordinationSection
+	deltaPreset        DeltaPreset
 	coordSelection     map[CoordinationSection]int
 	auditSelection     int
 	historySelection   int
@@ -159,11 +194,13 @@ type Model struct {
 	historyDetailOpen  bool
 	selectedTupleID    *uint64
 	health             *client.HealthResponse
+	status             *client.ServiceStatusResponse
 	liveHistory        *client.HistoryResponse
 	history            *client.HistoryResponse
 	historyLoaded      bool
 	audit              *client.AuditLogResponse
 	report             *client.CoordinationPilotReport
+	delta              *client.CoordinationDeltaReport
 	explain            *client.ExplainTupleResponse
 	lastLiveRefresh    time.Time
 	lastHistoryRefresh time.Time
@@ -196,6 +233,7 @@ func NewModel(
 		refreshInterval: refreshInterval,
 		activeTab:       OverviewTab,
 		section:         CurrentAuthorizedSection,
+		deltaPreset:     AuthorizedHandoffPreset,
 		coordSelection: map[CoordinationSection]int{
 			CurrentAuthorizedSection: 0,
 			ClaimableSection:         0,
@@ -240,12 +278,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.tickCmd()
 		}
 		m.health = msg.health
+		m.status = msg.status
 		m.liveHistory = msg.history
 		if !m.historyLoaded {
 			m.history = msg.history
 		}
 		m.audit = msg.audit
 		m.report = msg.report
+		m.delta = msg.delta
 		m.lastLiveRefresh = time.Now()
 		m.staleMessage = ""
 		m.clampSelections()
@@ -281,10 +321,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.helpModel.ShowAll = m.showHelp
 			return m, nil
 		case key.Matches(msg, m.keys.nextTab):
-			m.setActiveTab((int(m.activeTab) + 1) % 5)
+			m.setActiveTab((int(m.activeTab) + 1) % 6)
 			return m, m.tabEntryCmd()
 		case key.Matches(msg, m.keys.prevTab):
-			m.setActiveTab((int(m.activeTab) + 4) % 5)
+			m.setActiveTab((int(m.activeTab) + 5) % 6)
 			return m, m.tabEntryCmd()
 		case key.Matches(msg, m.keys.tabOne):
 			m.setActiveTab(0)
@@ -301,14 +341,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.tabFive):
 			m.setActiveTab(4)
 			return m, m.tabEntryCmd()
+		case key.Matches(msg, m.keys.tabSix):
+			m.setActiveTab(5)
+			return m, m.tabEntryCmd()
 		case key.Matches(msg, m.keys.sectionPrev):
 			if m.activeTab == CoordinationTab {
 				m.section = CoordinationSection((int(m.section) + 4) % 5)
+				return m, nil
+			}
+			if m.activeTab == DeltaTab {
+				m.deltaPreset = DeltaPreset((int(m.deltaPreset) + 1) % 2)
+				return m, m.loadLiveDataCmd()
 			}
 			return m, nil
 		case key.Matches(msg, m.keys.sectionNext):
 			if m.activeTab == CoordinationTab {
 				m.section = CoordinationSection((int(m.section) + 1) % 5)
+				return m, nil
+			}
+			if m.activeTab == DeltaTab {
+				m.deltaPreset = DeltaPreset((int(m.deltaPreset) + 1) % 2)
+				return m, m.loadLiveDataCmd()
 			}
 			return m, nil
 		case key.Matches(msg, m.keys.up):
@@ -362,7 +415,7 @@ func (m Model) tabEntryCmd() tea.Cmd {
 
 func (m Model) refreshCurrentTabCmd() tea.Cmd {
 	switch m.activeTab {
-	case OverviewTab, CoordinationTab, AuditTab:
+	case OverviewTab, CoordinationTab, DeltaTab, AuditTab:
 		return m.loadLiveDataCmd()
 	case HistoryTab:
 		return m.loadHistoryCmd()
@@ -466,7 +519,7 @@ func (m *Model) clampSelections() {
 }
 
 func (m Model) isLiveTab() bool {
-	return m.activeTab == OverviewTab || m.activeTab == CoordinationTab || m.activeTab == AuditTab
+	return m.activeTab == OverviewTab || m.activeTab == CoordinationTab || m.activeTab == DeltaTab || m.activeTab == AuditTab
 }
 
 func (m Model) loadLiveDataCmd() tea.Cmd {
@@ -475,6 +528,10 @@ func (m Model) loadLiveDataCmd() tea.Cmd {
 		defer cancel()
 
 		health, err := m.dataSource.Health(ctx)
+		if err != nil {
+			return liveDataMsg{err: err}
+		}
+		status, err := m.dataSource.Status(ctx)
 		if err != nil {
 			return liveDataMsg{err: err}
 		}
@@ -490,12 +547,19 @@ func (m Model) loadLiveDataCmd() tea.Cmd {
 		if err != nil {
 			return liveDataMsg{err: err}
 		}
+		left, right := m.deltaPreset.Cuts()
+		delta, err := m.dataSource.CoordinationDeltaReport(ctx, left, right, m.policy)
+		if err != nil {
+			return liveDataMsg{err: err}
+		}
 
 		return liveDataMsg{
 			health:  health,
+			status:  status,
 			history: history,
 			audit:   audit,
 			report:  report,
+			delta:   delta,
 		}
 	}
 }
@@ -619,6 +683,7 @@ func (m Model) renderTabs() string {
 	tabs := []string{
 		OverviewTab.Title(),
 		CoordinationTab.Title(),
+		DeltaTab.Title(),
 		AuditTab.Title(),
 		HistoryTab.Title(),
 		ExplainTab.Title(),
@@ -640,6 +705,8 @@ func (m Model) renderBody() string {
 		return m.renderOverview()
 	case CoordinationTab:
 		return m.renderCoordination()
+	case DeltaTab:
+		return m.renderDelta()
 	case AuditTab:
 		return m.renderAudit()
 	case HistoryTab:
@@ -678,6 +745,16 @@ func (m Model) renderOverview() string {
 	var lines []string
 	lines = append(lines, highlight.Render("Live service summary"))
 	lines = append(lines, fmt.Sprintf("Health: %s", status))
+	if m.status != nil {
+		lines = append(lines, fmt.Sprintf("Mode: %s", m.status.ServiceMode))
+		lines = append(lines, fmt.Sprintf("Build/config/schema: %s / %s / %s", stringOrDefault(m.status.BuildVersion, "-"), stringOrDefault(m.status.ConfigVersion, "-"), stringOrDefault(m.status.SchemaVersion, "-")))
+		if m.status.BindAddr != nil {
+			lines = append(lines, fmt.Sprintf("Bind: %s", *m.status.BindAddr))
+		}
+		if m.status.Storage.DatabasePath != nil {
+			lines = append(lines, fmt.Sprintf("Database: %s", *m.status.Storage.DatabasePath))
+		}
+	}
 	lines = append(lines, fmt.Sprintf("Journal entries: %d", historyCount))
 	lines = append(lines, fmt.Sprintf("Latest element: %s", latestElement))
 	if m.report != nil {
@@ -689,9 +766,78 @@ func (m Model) renderOverview() string {
 	} else {
 		lines = append(lines, muted.Render("Waiting for first live report..."))
 	}
+	if m.status != nil {
+		lines = append(lines, "")
+		lines = append(lines, highlight.Render("Operator identity surface"))
+		lines = append(lines, fmt.Sprintf("Configured principals: %d", len(m.status.Principals)))
+		revoked := 0
+		for _, principal := range m.status.Principals {
+			if principal.Revoked {
+				revoked++
+			}
+		}
+		lines = append(lines, fmt.Sprintf("Revoked principals: %d", revoked))
+		if len(m.status.Replicas) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, highlight.Render("Replica summary"))
+			for _, replica := range m.status.Replicas {
+				applied := "-"
+				if replica.AppliedElement != nil {
+					applied = fmt.Sprintf("e%d", *replica.AppliedElement)
+				}
+				lines = append(lines, fmt.Sprintf(
+					"%s/%d | %s | epoch=%d | applied=%s | lag=%d | healthy=%t",
+					replica.Partition,
+					replica.ReplicaID,
+					replica.Role,
+					replica.LeaderEpoch,
+					applied,
+					replica.ReplicationLag,
+					replica.Healthy,
+				))
+			}
+		}
+	}
 
 	if !m.lastLiveRefresh.IsZero() {
 		lines = append(lines, muted.Render("Last refresh: "+m.lastLiveRefresh.Format(time.RFC3339)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderDelta() string {
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	active := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("230")).Background(lipgloss.Color("63")).Padding(0, 1)
+	inactive := lipgloss.NewStyle().Foreground(lipgloss.Color("248")).Padding(0, 1)
+	if m.delta == nil {
+		return muted.Render("No coordination delta loaded yet.")
+	}
+
+	presets := []DeltaPreset{AuthorizedHandoffPreset, PreHeartbeatToCurrentPreset}
+	var tabs []string
+	for _, preset := range presets {
+		if preset == m.deltaPreset {
+			tabs = append(tabs, active.Render(preset.Title()))
+		} else {
+			tabs = append(tabs, inactive.Render(preset.Title()))
+		}
+	}
+
+	lines := []string{
+		strings.Join(tabs, " "),
+		"",
+		fmt.Sprintf("Left history: %d", m.delta.LeftHistoryLen),
+		fmt.Sprintf("Right history: %d", m.delta.RightHistoryLen),
+		"",
+		renderSectionDelta("Authorization", m.delta.CurrentAuthorized),
+		"",
+		renderSectionDelta("Claimable", m.delta.Claimable),
+		"",
+		renderSectionDelta("Heartbeats", m.delta.LiveHeartbeats),
+		"",
+		renderSectionDelta("Accepted outcomes", m.delta.AcceptedOutcomes),
+		"",
+		renderSectionDelta("Rejected outcomes", m.delta.RejectedOutcomes),
 	}
 	return strings.Join(lines, "\n")
 }
@@ -854,6 +1000,9 @@ func (m Model) renderExplain() string {
 			formatElementIDs(tuple.Metadata.SourceDatomIDs),
 			formatTupleIDs(tuple.Metadata.ParentTupleIDs),
 		))
+		if len(tuple.Metadata.ImportedCuts) > 0 {
+			lines = append(lines, fmt.Sprintf("  imported cuts=%s", formatImportedCuts(tuple.Metadata.ImportedCuts)))
+		}
 	}
 	return strings.Join(lines, "\n")
 }
@@ -948,4 +1097,34 @@ func formatSourceRef(source client.SourceRef) string {
 		return source.URI
 	}
 	return fmt.Sprintf("%s (%s)", source.URI, *source.Digest)
+}
+
+func renderSectionDelta(title string, section client.ReportSectionDelta) string {
+	lines := []string{title}
+	lines = append(lines, fmt.Sprintf("  added=%d removed=%d changed=%d", len(section.Added), len(section.Removed), len(section.Changed)))
+	for _, row := range section.Added {
+		lines = append(lines, fmt.Sprintf("  + %s", client.FormatValues(row.Row.Values)))
+	}
+	for _, row := range section.Removed {
+		lines = append(lines, fmt.Sprintf("  - %s", client.FormatValues(row.Row.Values)))
+	}
+	for _, row := range section.Changed {
+		lines = append(lines, fmt.Sprintf("  ~ %s -> %s", client.FormatValues(row.Before.Values), client.FormatValues(row.After.Values)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatImportedCuts(cuts []client.ImportedCut) string {
+	if len(cuts) == 0 {
+		return "-"
+	}
+	parts := make([]string, 0, len(cuts))
+	for _, cut := range cuts {
+		if cut.AsOf == nil {
+			parts = append(parts, cut.Partition+"@current")
+		} else {
+			parts = append(parts, fmt.Sprintf("%s@e%d", cut.Partition, *cut.AsOf))
+		}
+	}
+	return strings.Join(parts, ", ")
 }

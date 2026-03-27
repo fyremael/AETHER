@@ -69,13 +69,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     println!("  GET  /health");
+    println!("  GET  /v1/status");
     println!("  GET  /v1/audit");
+    println!("  POST /v1/admin/auth/reload");
     println!("  GET  /v1/history");
     println!("  POST /v1/append");
     println!("  POST /v1/state/current");
     println!("  POST /v1/state/as-of");
     println!("  POST /v1/documents/parse");
     println!("  POST /v1/documents/run");
+    println!("  POST /v1/reports/pilot/coordination-delta");
     println!("  POST /v1/explain/tuple");
     println!("  POST /v1/sidecars/artifacts/register");
     println!("  POST /v1/sidecars/artifacts/get");

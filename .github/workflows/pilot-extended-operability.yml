@@ -1,0 +1,36 @@
+name: Pilot Extended Operability
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * *"
+
+jobs:
+  extended-operability:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run extended pilot soak
+        shell: pwsh
+        run: cargo test -p aether_api --test pilot_soak --release -- --ignored --nocapture
+
+      - name: Build pilot package
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-pilot-package.ps1
+
+      - name: Run launch validation
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1 -BaselinePath fixtures/performance/accepted-baseline.windows-x86_64.json
+
+      - name: Upload extended operability artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pilot-extended-operability
+          path: |
+            artifacts/pilot/launch
+            artifacts/pilot/packages

@@ -168,8 +168,10 @@ Implemented today:
 - explicit policy-context filtering for datoms, DSL-authored extensional facts, and sidecar reads/searches, with request policy now allowed to narrow token-granted visibility but not widen it
 - policy-matched explanation, visible-history filtering, and policy-aware coordination reports on the service/operator path
 - a config-backed pilot service binary with secret-file/env/command token resolution, package-local rotation tooling, and packaged single-node deployment bundles
+- a live service-status surface with explicit config/schema/service-mode identity plus config-backed auth reload for principal and revocation changes
 - auditable pilot request logging with semantic cut, query, tuple, and count context plus persisted JSONL output
 - operator-grade coordination pilot report generation in markdown and JSON
+- coordination delta report generation in markdown and JSON for “what changed between cuts?” operator workflows
 - a release-mode performance report, Criterion benchmark suite, durable restart/replay benchmarks, and ignored stress workloads for early regression tracking
 - a live console performance dashboard for real-time and collected instrument views
 - machine-readable performance baseline capture and point-in-time drift reporting for the pilot path
@@ -185,6 +187,7 @@ Implemented today:
 - imported-fact federation over explicit partition cuts, with source partition/cut provenance carried into derived tuples
 - federated document execution, explain traces, and markdown reports over partition-local truth without inventing a fake global clock
 - a SQLite-backed partition-aware service for durable per-partition replay plus restart-safe imported-fact and federated explain/report execution
+- a single-host leader/follower replicated authority-partition prototype with manual promotion, leader epochs, stale-epoch fencing, follower replay, federated HTTP routes, and exact-response reuse for repeated federated run/report polling
 
 Deliberately still narrow:
 
@@ -192,7 +195,7 @@ Deliberately still narrow:
 - bounded aggregation is intentionally limited to non-recursive grouped aggregate rules, so richer aggregate syntax remains future work even though the v1 bounded-aggregation requirement is now covered
 - the Go shell and Python SDK are now real, but they are still early boundary clients rather than mature multi-platform ecosystems
 - sidecar federation is now journal-subordinated and temporally exact on the SQLite-backed pilot path, but it is not yet replicated, distributed, or policy-enforced end to end
-- the first partition-aware service slice now includes imported-fact reasoning, federated explain/report surfaces, and a SQLite-backed durable backend, but replicated authority partitions and failover remain future work
+- the first partition-aware service slice now includes imported-fact reasoning, federated explain/report surfaces, a SQLite-backed durable backend, and a single-host replicated authority-partition prototype; generalized multi-host consensus and failover remain future work
 - imported-fact federation is currently constrained to single-goal tuple-producing query shapes so imported provenance stays semantically exact instead of pretending to justify arbitrary joined rows
 
 Within that deliberately narrow bar, the current repository can honestly claim

@@ -1,8 +1,12 @@
 use crate::{
-    ApiError, AppendRequest, AsOfRequest, CoordinationPilotReportRequest, CurrentStateRequest,
-    ExplainTupleRequest, GetArtifactReferenceRequest, HistoryRequest, KernelService,
-    ParseDocumentRequest, RegisterArtifactReferenceRequest, RegisterVectorRecordRequest,
-    RunDocumentRequest, SearchVectorsRequest,
+    deployment::PilotServiceConfig, ApiError, AppendRequest, AsOfRequest, AuthReloadResponse,
+    CoordinationDeltaReportRequest, CoordinationPilotReportRequest, CurrentStateRequest,
+    ExplainTupleRequest, FederatedExplainReport, FederatedHistoryRequest,
+    FederatedRunDocumentRequest, GetArtifactReferenceRequest, HistoryRequest, KernelService,
+    ParseDocumentRequest, PartitionAppendRequest, PartitionHistoryRequest, PartitionStateRequest,
+    PartitionStatusResponse, PromoteReplicaRequest, RegisterArtifactReferenceRequest,
+    RegisterVectorRecordRequest, ReplicatedAuthorityPartitionService, RunDocumentRequest,
+    SearchVectorsRequest, ServiceMode, ServiceStatusResponse,
 };
 use aether_ast::PolicyContext;
 use axum::{
@@ -25,8 +29,11 @@ use std::{
 #[derive(Clone)]
 pub struct HttpKernelState {
     service: Arc<Mutex<Box<dyn KernelService + Send>>>,
-    auth: HttpAuth,
+    partitioned: Option<Arc<Mutex<ReplicatedAuthorityPartitionService>>>,
+    auth: Arc<Mutex<HttpAuth>>,
     audit: AuditLog,
+    status: Arc<Mutex<ServiceStatusResponse>>,
+    auth_reload_config_path: Option<PathBuf>,
 }
 
 impl HttpKernelState {
@@ -34,14 +41,35 @@ impl HttpKernelState {
         Self::with_options(service, HttpKernelOptions::default())
     }
 
+    pub fn with_partitioned_options(
+        service: impl KernelService + Send + 'static,
+        partitioned: ReplicatedAuthorityPartitionService,
+        options: HttpKernelOptions,
+    ) -> Self {
+        Self::with_optional_partitioned(service, Some(partitioned), options)
+    }
+
     pub fn with_options(
         service: impl KernelService + Send + 'static,
         options: HttpKernelOptions,
     ) -> Self {
+        Self::with_optional_partitioned(service, None, options)
+    }
+
+    fn with_optional_partitioned(
+        service: impl KernelService + Send + 'static,
+        partitioned: Option<ReplicatedAuthorityPartitionService>,
+        options: HttpKernelOptions,
+    ) -> Self {
         Self {
             service: Arc::new(Mutex::new(Box::new(service))),
-            auth: HttpAuth::from_config(options.auth),
+            partitioned: partitioned.map(|service| Arc::new(Mutex::new(service))),
+            auth: Arc::new(Mutex::new(HttpAuth::from_config(options.auth))),
             audit: AuditLog::new(options.audit_log_path),
+            status: Arc::new(Mutex::new(options.service_status.unwrap_or_else(|| {
+                ServiceStatusResponse::single_node(env!("CARGO_PKG_VERSION"), "pilot-v1", "v1")
+            }))),
+            auth_reload_config_path: options.auth_reload_config_path,
         }
     }
 
@@ -51,12 +79,84 @@ impl HttpKernelState {
         self.service.lock().map_err(|_| HttpError::LockPoisoned)
     }
 
+    fn partitioned_service(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, ReplicatedAuthorityPartitionService>, HttpError> {
+        let partitioned = self.partitioned.as_ref().ok_or_else(|| {
+            HttpError::Api(ApiError::Validation(
+                "partitioned prototype is not configured for this service".into(),
+            ))
+        })?;
+        partitioned.lock().map_err(|_| HttpError::LockPoisoned)
+    }
+
     fn authorize(
         &self,
         headers: &HeaderMap,
         required_scope: AuthScope,
     ) -> Result<AuthenticatedPrincipal, HttpError> {
-        self.auth.authorize(headers, required_scope)
+        self.auth
+            .lock()
+            .map_err(|_| HttpError::LockPoisoned)?
+            .authorize(headers, required_scope)
+    }
+
+    fn status_snapshot(&self) -> Result<ServiceStatusResponse, HttpError> {
+        let mut status = self
+            .status
+            .lock()
+            .map(|status| status.clone())
+            .map_err(|_| HttpError::LockPoisoned)?;
+        if let Some(partitioned) = &self.partitioned {
+            let partition_status = partitioned
+                .lock()
+                .map_err(|_| HttpError::LockPoisoned)?
+                .partition_status()
+                .map_err(HttpError::Api)?;
+            status.service_mode = ServiceMode::Partitioned;
+            status.replicas = flatten_replica_status(&partition_status);
+        }
+        Ok(status)
+    }
+
+    fn reload_auth_from_config(&self) -> Result<AuthReloadResponse, HttpError> {
+        let Some(config_path) = &self.auth_reload_config_path else {
+            return Err(HttpError::Api(ApiError::Validation(
+                "auth reload is not configured for this service".into(),
+            )));
+        };
+        let resolved = PilotServiceConfig::load(config_path)
+            .and_then(|config| config.resolve(config_path))
+            .map_err(|error| HttpError::Api(ApiError::Validation(error.to_string())))?;
+        let mut status = self.status.lock().map_err(|_| HttpError::LockPoisoned)?;
+        if status.bind_addr.as_deref() != Some(resolved.bind_addr.as_str())
+            || status.storage.database_path.as_ref() != Some(&resolved.database_path)
+            || status.storage.audit_log_path.as_ref() != Some(&resolved.audit_log_path)
+        {
+            return Err(HttpError::Api(ApiError::Validation(
+                "auth reload cannot change bind or storage paths".into(),
+            )));
+        }
+        {
+            let mut auth = self.auth.lock().map_err(|_| HttpError::LockPoisoned)?;
+            *auth = HttpAuth::from_config(resolved.auth.clone());
+        }
+        status.config_version = resolved.config_version.clone();
+        status.schema_version = resolved.schema_version.clone();
+        status.principals = resolved
+            .token_summaries
+            .iter()
+            .map(|summary| summary.status_summary())
+            .collect();
+        Ok(AuthReloadResponse {
+            reloaded_at_ms: now_millis(),
+            principal_count: status.principals.len(),
+            revoked_count: status
+                .principals
+                .iter()
+                .filter(|principal| principal.revoked)
+                .count(),
+        })
     }
 
     fn execute<T, F>(
@@ -83,6 +183,8 @@ impl HttpKernelState {
                     path,
                     error.status_code(),
                     error.audit_principal(),
+                    None,
+                    None,
                     required_scope,
                     error.audit_message(),
                     context,
@@ -104,10 +206,66 @@ impl HttpKernelState {
             method,
             path,
             status,
-            principal.id,
+            &principal,
             required_scope,
             context,
         ));
+
+        result
+    }
+
+    fn execute_partitioned<T, F>(
+        &self,
+        headers: &HeaderMap,
+        method: &'static str,
+        path: &'static str,
+        required_scope: AuthScope,
+        context: AuditContext,
+        operation: F,
+    ) -> Result<T, HttpError>
+    where
+        F: FnOnce(
+            &mut ReplicatedAuthorityPartitionService,
+            &AuthenticatedPrincipal,
+            &mut AuditContext,
+        ) -> Result<T, HttpError>,
+    {
+        let principal = match self.authorize(headers, required_scope) {
+            Ok(principal) => principal,
+            Err(error) => {
+                self.audit.record(AuditEntry::for_denied(
+                    method,
+                    path,
+                    error.status_code(),
+                    error.audit_principal(),
+                    None,
+                    None,
+                    required_scope,
+                    error.audit_message(),
+                    context,
+                ));
+                return Err(error);
+            }
+        };
+
+        let result = {
+            let mut service = self.partitioned_service()?;
+            let mut context = context;
+            let result = operation(&mut service, &principal, &mut context);
+            let status = match &result {
+                Ok(_) => StatusCode::OK,
+                Err(error) => error.status_code(),
+            };
+            self.audit.record(AuditEntry::for_request(
+                method,
+                path,
+                status,
+                &principal,
+                required_scope,
+                context,
+            ));
+            result
+        };
 
         result
     }
@@ -121,6 +279,8 @@ impl HttpKernelState {
                     "/v1/audit",
                     error.status_code(),
                     error.audit_principal(),
+                    None,
+                    None,
                     AuthScope::Ops,
                     error.audit_message(),
                     AuditContext::default(),
@@ -136,7 +296,7 @@ impl HttpKernelState {
             "GET",
             "/v1/audit",
             StatusCode::OK,
-            principal.id,
+            &principal,
             AuthScope::Ops,
             AuditContext::default(),
         ));
@@ -182,9 +342,13 @@ impl HttpAuthConfig {
     ) -> Self {
         self.tokens.push(HttpAccessToken {
             token: token.into(),
+            token_id: String::new(),
             principal: principal.into(),
+            principal_id: String::new(),
             scopes: scopes.into_iter().collect(),
             policy_context: None,
+            source: "inline".into(),
+            revoked: false,
         });
         self
     }
@@ -198,9 +362,13 @@ impl HttpAuthConfig {
     ) -> Self {
         self.tokens.push(HttpAccessToken {
             token: token.into(),
+            token_id: String::new(),
             principal: principal.into(),
+            principal_id: String::new(),
             scopes: scopes.into_iter().collect(),
             policy_context: normalize_policy_context(Some(policy_context)),
+            source: "inline".into(),
+            revoked: false,
         });
         self
     }
@@ -209,15 +377,25 @@ impl HttpAuthConfig {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct HttpAccessToken {
     pub token: String,
+    #[serde(default)]
+    pub token_id: String,
     pub principal: String,
+    #[serde(default)]
+    pub principal_id: String,
     pub scopes: Vec<AuthScope>,
     pub policy_context: Option<PolicyContext>,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub revoked: bool,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct HttpKernelOptions {
     pub auth: HttpAuthConfig,
     pub audit_log_path: Option<PathBuf>,
+    pub service_status: Option<ServiceStatusResponse>,
+    pub auth_reload_config_path: Option<PathBuf>,
 }
 
 impl HttpKernelOptions {
@@ -234,12 +412,26 @@ impl HttpKernelOptions {
         self.audit_log_path = Some(path.into());
         self
     }
+
+    pub fn with_service_status(mut self, status: ServiceStatusResponse) -> Self {
+        self.service_status = Some(status);
+        self
+    }
+
+    pub fn with_auth_reload_config_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.auth_reload_config_path = Some(path.into());
+        self
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AuditEntry {
     pub timestamp_ms: u64,
     pub principal: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub principal_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_id: Option<String>,
     pub method: String,
     pub path: String,
     pub status: u16,
@@ -275,13 +467,15 @@ impl AuditEntry {
         method: impl Into<String>,
         path: impl Into<String>,
         status: StatusCode,
-        principal: impl Into<String>,
+        principal: &AuthenticatedPrincipal,
         scope: AuthScope,
         context: AuditContext,
     ) -> Self {
         Self {
             timestamp_ms: now_millis(),
-            principal: principal.into(),
+            principal: principal.id.clone(),
+            principal_id: principal.principal_id.clone(),
+            token_id: principal.token_id.clone(),
             method: method.into(),
             path: path.into(),
             status: status.as_u16(),
@@ -296,11 +490,14 @@ impl AuditEntry {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn for_denied(
         method: impl Into<String>,
         path: impl Into<String>,
         status: StatusCode,
         principal: impl Into<String>,
+        principal_id: Option<String>,
+        token_id: Option<String>,
         scope: AuthScope,
         detail: impl Into<String>,
         context: AuditContext,
@@ -308,6 +505,8 @@ impl AuditEntry {
         Self {
             timestamp_ms: now_millis(),
             principal: principal.into(),
+            principal_id,
+            token_id,
             method: method.into(),
             path: path.into(),
             status: status.as_u16(),
@@ -326,6 +525,8 @@ impl AuditEntry {
         Self {
             timestamp_ms: now_millis(),
             principal: "aether".into(),
+            principal_id: None,
+            token_id: None,
             method: "AUDIT".into(),
             path: path.display().to_string(),
             status: StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
@@ -359,14 +560,17 @@ pub fn http_router(service: impl KernelService + Send + 'static) -> Router {
     http_router_with_options(service, HttpKernelOptions::default())
 }
 
-pub fn http_router_with_options(
+pub fn http_router_with_partitioned_options(
     service: impl KernelService + Send + 'static,
+    partitioned: ReplicatedAuthorityPartitionService,
     options: HttpKernelOptions,
 ) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/v1/status", get(service_status))
         .route("/v1/history", get(history))
         .route("/v1/audit", get(audit_log))
+        .route("/v1/admin/auth/reload", post(reload_auth))
         .route("/v1/append", post(append))
         .route("/v1/state/current", post(current_state))
         .route("/v1/state/as-of", post(as_of))
@@ -375,6 +579,59 @@ pub fn http_router_with_options(
         .route(
             "/v1/reports/pilot/coordination",
             post(coordination_pilot_report),
+        )
+        .route(
+            "/v1/reports/pilot/coordination-delta",
+            post(coordination_delta_report),
+        )
+        .route("/v1/explain/tuple", post(explain_tuple))
+        .route("/v1/partitions/status", get(partition_status))
+        .route("/v1/partitions/promote", post(promote_replica))
+        .route("/v1/partitions/append", post(partition_append))
+        .route("/v1/partitions/history", post(partition_history))
+        .route("/v1/partitions/state", post(partition_state))
+        .route("/v1/federated/history", post(federated_history))
+        .route("/v1/federated/run", post(federated_run_document))
+        .route("/v1/federated/report", post(federated_report))
+        .route(
+            "/v1/sidecars/artifacts/register",
+            post(register_artifact_reference),
+        )
+        .route("/v1/sidecars/artifacts/get", post(get_artifact_reference))
+        .route(
+            "/v1/sidecars/vectors/register",
+            post(register_vector_record),
+        )
+        .route("/v1/sidecars/vectors/search", post(search_vectors))
+        .with_state(HttpKernelState::with_partitioned_options(
+            service,
+            partitioned,
+            options,
+        ))
+}
+
+pub fn http_router_with_options(
+    service: impl KernelService + Send + 'static,
+    options: HttpKernelOptions,
+) -> Router {
+    Router::new()
+        .route("/health", get(health))
+        .route("/v1/status", get(service_status))
+        .route("/v1/history", get(history))
+        .route("/v1/audit", get(audit_log))
+        .route("/v1/admin/auth/reload", post(reload_auth))
+        .route("/v1/append", post(append))
+        .route("/v1/state/current", post(current_state))
+        .route("/v1/state/as-of", post(as_of))
+        .route("/v1/documents/parse", post(parse_document))
+        .route("/v1/documents/run", post(run_document))
+        .route(
+            "/v1/reports/pilot/coordination",
+            post(coordination_pilot_report),
+        )
+        .route(
+            "/v1/reports/pilot/coordination-delta",
+            post(coordination_delta_report),
         )
         .route("/v1/explain/tuple", post(explain_tuple))
         .route(
@@ -393,6 +650,8 @@ pub fn http_router_with_options(
 #[derive(Clone, Debug)]
 struct AuthenticatedPrincipal {
     id: String,
+    principal_id: Option<String>,
+    token_id: Option<String>,
     policy_context: Option<PolicyContext>,
     policy_bound: bool,
 }
@@ -442,12 +701,25 @@ impl HttpAuth {
     fn from_config(config: HttpAuthConfig) -> Self {
         let mut tokens = HashMap::new();
         for access in config.tokens {
+            let principal_id = if access.principal_id.trim().is_empty() {
+                Some(format!("principal:{}", access.principal))
+            } else {
+                Some(access.principal_id.clone())
+            };
+            let token_id = if access.token_id.trim().is_empty() {
+                Some(format!("token:{}", access.principal))
+            } else {
+                Some(access.token_id.clone())
+            };
             tokens.insert(
                 access.token,
                 AuthenticatedToken {
                     principal: access.principal,
+                    principal_id,
+                    token_id,
                     scopes: access.scopes.into_iter().collect(),
                     policy_context: access.policy_context,
+                    revoked: access.revoked,
                 },
             );
         }
@@ -462,6 +734,8 @@ impl HttpAuth {
         if self.tokens.is_empty() {
             return Ok(AuthenticatedPrincipal {
                 id: "anonymous".into(),
+                principal_id: None,
+                token_id: None,
                 policy_context: None,
                 policy_bound: false,
             });
@@ -495,9 +769,17 @@ impl HttpAuth {
                 message: format!("token lacks {} scope", required_scope.as_str()),
             });
         }
+        if access.revoked {
+            return Err(HttpError::Forbidden {
+                principal: access.principal.clone(),
+                message: "token is revoked".into(),
+            });
+        }
 
         Ok(AuthenticatedPrincipal {
             id: access.principal.clone(),
+            principal_id: access.principal_id.clone(),
+            token_id: access.token_id.clone(),
             policy_context: access.policy_context.clone(),
             policy_bound: true,
         })
@@ -507,8 +789,11 @@ impl HttpAuth {
 #[derive(Clone, Debug)]
 struct AuthenticatedToken {
     principal: String,
+    principal_id: Option<String>,
+    token_id: Option<String>,
     scopes: BTreeSet<AuthScope>,
     policy_context: Option<PolicyContext>,
+    revoked: bool,
 }
 
 fn normalize_policy_context(policy_context: Option<PolicyContext>) -> Option<PolicyContext> {
@@ -516,6 +801,28 @@ fn normalize_policy_context(policy_context: Option<PolicyContext>) -> Option<Pol
         Some(policy_context) if policy_context.is_empty() => None,
         other => other,
     }
+}
+
+fn flatten_replica_status(status: &PartitionStatusResponse) -> Vec<crate::ReplicaStatusSummary> {
+    let mut replicas = Vec::new();
+    for partition in &status.partitions {
+        for replica in &partition.replicas {
+            replicas.push(crate::ReplicaStatusSummary {
+                partition: partition.partition.to_string(),
+                replica_id: replica.replica_id.0,
+                role: match replica.role {
+                    crate::ReplicaRole::Leader => "leader".into(),
+                    crate::ReplicaRole::Follower => "follower".into(),
+                },
+                leader_epoch: replica.leader_epoch.0,
+                applied_element: replica.applied_element.map(|element| element.0),
+                replication_lag: replica.replication_lag,
+                healthy: replica.healthy,
+                detail: replica.detail.clone(),
+            });
+        }
+    }
+    replicas
 }
 
 fn bound_policy_context(
@@ -687,6 +994,45 @@ async fn health() -> Json<HealthResponse> {
     Json(HealthResponse::default())
 }
 
+async fn service_status(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+) -> Result<Json<ServiceStatusResponse>, HttpError> {
+    let principal = match state.authorize(&headers, AuthScope::Ops) {
+        Ok(principal) => principal,
+        Err(error) => {
+            state.audit.record(AuditEntry::for_denied(
+                "GET",
+                "/v1/status",
+                error.status_code(),
+                error.audit_principal(),
+                None,
+                None,
+                AuthScope::Ops,
+                error.audit_message(),
+                AuditContext {
+                    temporal_view: Some("service_status".into()),
+                    ..Default::default()
+                },
+            ));
+            return Err(error);
+        }
+    };
+    let response = state.status_snapshot()?;
+    state.audit.record(AuditEntry::for_request(
+        "GET",
+        "/v1/status",
+        StatusCode::OK,
+        &principal,
+        AuthScope::Ops,
+        AuditContext {
+            temporal_view: Some("service_status".into()),
+            ..Default::default()
+        },
+    ));
+    Ok(Json(response))
+}
+
 async fn history(
     State(state): State<HttpKernelState>,
     headers: HeaderMap,
@@ -719,6 +1065,45 @@ async fn audit_log(
     headers: HeaderMap,
 ) -> Result<Json<AuditLogResponse>, HttpError> {
     Ok(Json(state.audit_entries(&headers)?))
+}
+
+async fn reload_auth(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+) -> Result<Json<AuthReloadResponse>, HttpError> {
+    let principal = match state.authorize(&headers, AuthScope::Ops) {
+        Ok(principal) => principal,
+        Err(error) => {
+            state.audit.record(AuditEntry::for_denied(
+                "POST",
+                "/v1/admin/auth/reload",
+                error.status_code(),
+                error.audit_principal(),
+                None,
+                None,
+                AuthScope::Ops,
+                error.audit_message(),
+                AuditContext {
+                    temporal_view: Some("auth_reload".into()),
+                    ..Default::default()
+                },
+            ));
+            return Err(error);
+        }
+    };
+    let response = state.reload_auth_from_config()?;
+    state.audit.record(AuditEntry::for_request(
+        "POST",
+        "/v1/admin/auth/reload",
+        StatusCode::OK,
+        &principal,
+        AuthScope::Ops,
+        AuditContext {
+            temporal_view: Some("auth_reload".into()),
+            ..Default::default()
+        },
+    ));
+    Ok(Json(response))
 }
 
 async fn append(
@@ -881,6 +1266,309 @@ async fn coordination_pilot_report(
             );
             context.trace_tuple_count = response.trace.as_ref().map(|trace| trace.tuple_count);
             context.tuple_id = response.trace.as_ref().map(|trace| trace.root.0);
+            Ok(response)
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn coordination_delta_report(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<CoordinationDeltaReportRequest>,
+) -> Result<Json<crate::CoordinationDeltaReport>, HttpError> {
+    let request_context = AuditContext {
+        temporal_view: Some("coordination_delta_report".into()),
+        ..Default::default()
+    };
+    let response = state.execute(
+        &headers,
+        "POST",
+        "/v1/reports/pilot/coordination-delta",
+        AuthScope::Query,
+        request_context,
+        |service, principal, context| {
+            let mut request = request;
+            request.policy_context =
+                apply_policy_binding(principal, request.policy_context, context)?;
+            let response = service
+                .coordination_delta_report(request)
+                .map_err(HttpError::Api)?;
+            context.datom_count = Some(response.right_history_len);
+            context.row_count = Some(
+                response.current_authorized.added.len()
+                    + response.current_authorized.removed.len()
+                    + response.current_authorized.changed.len()
+                    + response.claimable.added.len()
+                    + response.claimable.removed.len()
+                    + response.claimable.changed.len()
+                    + response.live_heartbeats.added.len()
+                    + response.live_heartbeats.removed.len()
+                    + response.live_heartbeats.changed.len()
+                    + response.accepted_outcomes.added.len()
+                    + response.accepted_outcomes.removed.len()
+                    + response.accepted_outcomes.changed.len()
+                    + response.rejected_outcomes.added.len()
+                    + response.rejected_outcomes.removed.len()
+                    + response.rejected_outcomes.changed.len(),
+            );
+            Ok(response)
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn partition_status(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+) -> Result<Json<PartitionStatusResponse>, HttpError> {
+    let response = state.execute_partitioned(
+        &headers,
+        "GET",
+        "/v1/partitions/status",
+        AuthScope::Ops,
+        AuditContext {
+            temporal_view: Some("partition_status".into()),
+            ..Default::default()
+        },
+        |service, _principal, context| {
+            let response = service.partition_status().map_err(HttpError::Api)?;
+            context.entity_count = Some(response.partitions.len());
+            context.row_count = Some(
+                response
+                    .partitions
+                    .iter()
+                    .map(|partition| partition.replicas.len())
+                    .sum(),
+            );
+            Ok(response)
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn promote_replica(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<PromoteReplicaRequest>,
+) -> Result<Json<crate::PromoteReplicaResponse>, HttpError> {
+    let request_context = AuditContext {
+        temporal_view: Some(format!("partition({})", request.partition)),
+        ..Default::default()
+    };
+    let response = state.execute_partitioned(
+        &headers,
+        "POST",
+        "/v1/partitions/promote",
+        AuthScope::Ops,
+        request_context,
+        |service, _principal, context| {
+            let response = service.promote_replica(request).map_err(HttpError::Api)?;
+            context.requested_element = Some(response.leader_epoch.0);
+            Ok(response)
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn partition_append(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<PartitionAppendRequest>,
+) -> Result<Json<crate::PartitionAppendResponse>, HttpError> {
+    let request_context = AuditContext {
+        temporal_view: Some(format!("partition({})", request.partition)),
+        datom_count: Some(request.datoms.len()),
+        last_element: request.datoms.last().map(|datom| datom.element.0),
+        ..Default::default()
+    };
+    let response = state.execute_partitioned(
+        &headers,
+        "POST",
+        "/v1/partitions/append",
+        AuthScope::Append,
+        request_context,
+        |service, _principal, context| {
+            let response = service.append_partition(request).map_err(HttpError::Api)?;
+            context.requested_element = response.leader_epoch.as_ref().map(|epoch| epoch.0);
+            Ok(response)
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn partition_history(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<PartitionHistoryRequest>,
+) -> Result<Json<crate::PartitionHistoryResponse>, HttpError> {
+    let request_context = AuditContext {
+        temporal_view: Some(request.cut.to_string()),
+        requested_element: request.cut.as_of.map(|element| element.0),
+        ..Default::default()
+    };
+    let response = state.execute_partitioned(
+        &headers,
+        "POST",
+        "/v1/partitions/history",
+        AuthScope::Query,
+        request_context,
+        |service, principal, context| {
+            let mut request = request;
+            request.policy_context =
+                apply_policy_binding(principal, request.policy_context, context)?;
+            let response = service.partition_history(request).map_err(HttpError::Api)?;
+            context.datom_count = Some(response.datoms.len());
+            context.entity_count = Some(
+                response
+                    .datoms
+                    .iter()
+                    .map(|datom| datom.entity)
+                    .collect::<BTreeSet<_>>()
+                    .len(),
+            );
+            context.last_element = response.datoms.last().map(|datom| datom.element.0);
+            Ok(response)
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn partition_state(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<PartitionStateRequest>,
+) -> Result<Json<crate::PartitionStateResponse>, HttpError> {
+    let request_context = AuditContext {
+        temporal_view: Some(request.cut.to_string()),
+        requested_element: request.cut.as_of.map(|element| element.0),
+        ..Default::default()
+    };
+    let response = state.execute_partitioned(
+        &headers,
+        "POST",
+        "/v1/partitions/state",
+        AuthScope::Query,
+        request_context,
+        |service, principal, context| {
+            let mut request = request;
+            request.policy_context =
+                apply_policy_binding(principal, request.policy_context, context)?;
+            let response = service.partition_state(request).map_err(HttpError::Api)?;
+            context.entity_count = Some(response.state.entities.len());
+            context.last_element = response.cut.as_of.map(|element| element.0);
+            Ok(response)
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn federated_history(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<FederatedHistoryRequest>,
+) -> Result<Json<crate::FederatedHistoryResponse>, HttpError> {
+    let request_context = AuditContext {
+        temporal_view: Some("federated_history".into()),
+        ..Default::default()
+    };
+    let response = state.execute_partitioned(
+        &headers,
+        "POST",
+        "/v1/federated/history",
+        AuthScope::Query,
+        request_context,
+        |service, principal, context| {
+            let mut request = request;
+            request.policy_context =
+                apply_policy_binding(principal, request.policy_context, context)?;
+            let response = service.federated_history(request).map_err(HttpError::Api)?;
+            context.datom_count = Some(
+                response
+                    .partitions
+                    .iter()
+                    .map(|partition| partition.datoms.len())
+                    .sum(),
+            );
+            context.entity_count = Some(response.partitions.len());
+            Ok(response)
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn federated_run_document(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<FederatedRunDocumentRequest>,
+) -> Result<Json<crate::FederatedRunDocumentResponse>, HttpError> {
+    let request_context = AuditContext {
+        temporal_view: Some("federated_run_document".into()),
+        ..Default::default()
+    };
+    let response = state.execute_partitioned(
+        &headers,
+        "POST",
+        "/v1/federated/run",
+        AuthScope::Query,
+        request_context,
+        |service, principal, context| {
+            let mut request = request;
+            request.policy_context =
+                apply_policy_binding(principal, request.policy_context, context)?;
+            let response = service
+                .federated_run_document(request)
+                .map_err(HttpError::Api)?;
+            context.entity_count = Some(response.cut.cuts.len());
+            context.row_count = Some(
+                response
+                    .run
+                    .query
+                    .as_ref()
+                    .map(|query| query.rows.len())
+                    .unwrap_or(0),
+            );
+            context.derived_tuple_count = Some(response.run.derived.tuples.len());
+            Ok(response)
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn federated_report(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<FederatedRunDocumentRequest>,
+) -> Result<Json<FederatedExplainReport>, HttpError> {
+    let request_context = AuditContext {
+        temporal_view: Some("federated_report".into()),
+        ..Default::default()
+    };
+    let response = state.execute_partitioned(
+        &headers,
+        "POST",
+        "/v1/federated/report",
+        AuthScope::Explain,
+        request_context,
+        |service, principal, context| {
+            let mut request = request;
+            request.policy_context =
+                apply_policy_binding(principal, request.policy_context, context)?;
+            let response = service
+                .build_federated_explain_report(request)
+                .map_err(HttpError::Api)?;
+            context.entity_count = Some(response.cut.cuts.len());
+            context.row_count = Some(
+                response.primary_query.len()
+                    + response
+                        .named_queries
+                        .iter()
+                        .map(|query| query.rows.len())
+                        .sum::<usize>(),
+            );
+            context.trace_tuple_count =
+                Some(response.traces.iter().map(|trace| trace.tuple_count).sum());
+            context.tuple_id = response.traces.first().map(|trace| trace.root.0);
             Ok(response)
         },
     )?;

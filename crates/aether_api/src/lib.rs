@@ -22,32 +22,39 @@ pub mod perf;
 pub mod pilot;
 pub mod report;
 pub mod sidecar;
+pub mod status;
 
 pub use deployment::{
     default_audit_log_path, serve_pilot_http_service, DeploymentError, PilotAuthConfig,
     PilotServiceConfig, PilotTokenConfig, ResolvedPilotServiceConfig, ResolvedPilotTokenSummary,
 };
 pub use http::{
-    http_router, http_router_with_options, AuditContext, AuditEntry, AuditLogResponse, AuthScope,
-    HealthResponse, HttpAccessToken, HttpAuthConfig, HttpKernelOptions, HttpKernelState,
+    http_router, http_router_with_options, http_router_with_partitioned_options, AuditContext,
+    AuditEntry, AuditLogResponse, AuthScope, HealthResponse, HttpAccessToken, HttpAuthConfig,
+    HttpKernelOptions, HttpKernelState,
 };
 pub use partitioned::{
-    render_federated_explain_report_markdown, FederatedExplainReport, FederatedHistoryRequest,
-    FederatedHistoryResponse, FederatedImportedSourceSummary, FederatedNamedQuerySummary,
-    FederatedReportRow, FederatedRunDocumentRequest, FederatedRunDocumentResponse,
-    FederatedTraceSummary, FederatedTraceTupleSummary, ImportedFactQueryRequest,
-    ImportedFactQueryResponse, PartitionAppendRequest, PartitionAppendResponse,
-    PartitionHistoryRequest, PartitionHistoryResponse, PartitionStateRequest,
-    PartitionStateResponse, PartitionedInMemoryKernelService, SqlitePartitionedKernelService,
+    render_federated_explain_report_markdown, AuthorityPartitionConfig, FederatedExplainReport,
+    FederatedHistoryRequest, FederatedHistoryResponse, FederatedImportedSourceSummary,
+    FederatedNamedQuerySummary, FederatedReportRow, FederatedRunDocumentRequest,
+    FederatedRunDocumentResponse, FederatedTraceSummary, FederatedTraceTupleSummary,
+    ImportedFactQueryRequest, ImportedFactQueryResponse, LeaderEpoch, PartitionAppendRequest,
+    PartitionAppendResponse, PartitionHistoryRequest, PartitionHistoryResponse,
+    PartitionStateRequest, PartitionStateResponse, PartitionStatus, PartitionStatusResponse,
+    PartitionedInMemoryKernelService, PromoteReplicaRequest, PromoteReplicaResponse, ReplicaConfig,
+    ReplicaRole, ReplicaStatus, ReplicatedAuthorityPartitionService,
+    SqlitePartitionedKernelService,
 };
 pub use pilot::{
     coordination_pilot_dsl, coordination_pilot_seed_history,
     COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
 pub use report::{
-    build_coordination_pilot_report, build_coordination_pilot_report_with_policy,
-    render_coordination_pilot_report_markdown, CoordinationPilotReport, ReportRow, TraceSummary,
-    TraceTupleSummary,
+    build_coordination_delta_report, build_coordination_pilot_report,
+    build_coordination_pilot_report_with_policy, render_coordination_delta_report_markdown,
+    render_coordination_pilot_report_markdown, CoordinationCut, CoordinationDeltaReport,
+    CoordinationDeltaReportRequest, CoordinationPilotReport, CoordinationTraceHandle, ReportRow,
+    ReportRowChange, ReportRowDiff, ReportSectionDelta, TraceSummary, TraceTupleSummary,
 };
 pub use sidecar::{
     ArtifactReference, GetArtifactReferenceRequest, GetArtifactReferenceResponse,
@@ -56,6 +63,10 @@ pub use sidecar::{
     SearchVectorsRequest, SearchVectorsResponse, SidecarError, SidecarFederation,
     SqliteSidecarFederation, VectorFactProjection, VectorMetric, VectorRecordMetadata,
     VectorSearchMatch,
+};
+pub use status::{
+    AuthReloadResponse, PrincipalStatusSummary, ReplicaStatusSummary, ServiceMode,
+    ServiceStatusResponse, ServiceStatusStorage,
 };
 
 pub trait KernelService {
@@ -87,6 +98,10 @@ pub trait KernelService {
         &mut self,
         request: CoordinationPilotReportRequest,
     ) -> Result<CoordinationPilotReport, ApiError>;
+    fn coordination_delta_report(
+        &mut self,
+        request: CoordinationDeltaReportRequest,
+    ) -> Result<CoordinationDeltaReport, ApiError>;
     fn register_artifact_reference(
         &mut self,
         request: RegisterArtifactReferenceRequest,
@@ -569,6 +584,13 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         request: CoordinationPilotReportRequest,
     ) -> Result<CoordinationPilotReport, ApiError> {
         build_coordination_pilot_report_with_policy(self, request.policy_context)
+    }
+
+    fn coordination_delta_report(
+        &mut self,
+        request: CoordinationDeltaReportRequest,
+    ) -> Result<CoordinationDeltaReport, ApiError> {
+        report::build_coordination_delta_report(self, request)
     }
 
     fn register_artifact_reference(

@@ -45,6 +45,13 @@ If you need a saved coordination incident/explain artifact for the pilot workloa
 double-click scripts/run-pilot-report.cmd
 ```
 
+If you need a saved “what changed between cuts?” artifact for the same pilot
+workload, run:
+
+```text
+double-click scripts/run-pilot-delta-report.cmd
+```
+
 If you need to check whether the latest build regressed against the current accepted baseline, run:
 
 ```text
@@ -99,6 +106,7 @@ Use this guide by the question you need answered:
 | “How does replay and closure work?” | Demo 01 |
 | “How do heartbeats, handoff, and fencing work?” | Demo 02 |
 | “Why was this worker authorized or fenced?” | `run-pilot-report.cmd` |
+| “What changed between two important cuts?” | `run-pilot-delta-report.cmd` or the `Delta` tab in `run-aether-ops.cmd` |
 | “Did performance drift?” | `run-performance-drift.cmd` |
 | “Is this exact pilot candidate launch-ready?” | `run-pilot-launch-validation.cmd` |
 | “Is this exact tree release-ready?” | `run-release-readiness.cmd` |
@@ -173,12 +181,15 @@ Available endpoints today:
 - `GET /health`
 - `GET /v1/history`
 - `GET /v1/audit`
+- `GET /v1/status`
+- `POST /v1/admin/auth/reload`
 - `POST /v1/append`
 - `POST /v1/state/current`
 - `POST /v1/state/as-of`
 - `POST /v1/documents/parse`
 - `POST /v1/documents/run`
 - `POST /v1/reports/pilot/coordination`
+- `POST /v1/reports/pilot/coordination-delta`
 - `POST /v1/explain/tuple`
 - `POST /v1/sidecars/artifacts/register`
 - `POST /v1/sidecars/artifacts/get`
@@ -229,6 +240,17 @@ Each run produces:
 - `latest.md`
 - `latest.json`
 
+Pilot coordination delta reports are written to the same directory:
+
+- `artifacts/pilot/reports/`
+
+Each run produces:
+
+- a timestamped markdown delta report
+- a timestamped JSON delta report
+- `latest-delta.md`
+- `latest-delta.json`
+
 Pilot launch-validation transcripts are written to:
 
 - `artifacts/pilot/launch/`
@@ -255,8 +277,38 @@ cargo test -p aether_api --test performance_stress --release -- --ignored --noca
 Use the dashboard when people want to watch the measurements arrive in real time. Use the markdown report when you need to hand someone a saved artifact afterward.
 
 Use the pilot report when someone asks, “Why is this worker authorized, or why was this reported result fenced right now?” Use the drift report when someone asks, “Did this change materially slow the pilot path down?”
+Use the pilot delta report when someone asks, “What changed between the earlier cut and now?”
 Use the launch validation pack when someone asks, “Is this exact pilot candidate ready to go?”
 Use the operations playbook when someone asks, “How do we deploy, rotate, upgrade, or roll back this pilot safely?”
+
+## Replicated Prototype
+
+The replicated authority-partition prototype is now exposed as an example
+service rather than a packaged operator bundle.
+
+Run it with:
+
+```bash
+cargo run -p aether_api --example replicated_partition_http_service --release
+```
+
+That prototype adds:
+
+- `GET /v1/partitions/status`
+- `POST /v1/partitions/append`
+- `POST /v1/partitions/promote`
+- `POST /v1/federated/history`
+- `POST /v1/federated/run`
+- `POST /v1/federated/report`
+
+Use it when you need to show:
+
+- exact local truth per authority partition
+- manual leader/follower failover with epoch fencing
+- federated imported-fact reasoning without a fake global clock
+
+Do not present it as a generalized distributed platform. It is a deliberate,
+single-host prototype for the next architectural step.
 
 ## How To Present The Output
 

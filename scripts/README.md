@@ -19,6 +19,7 @@ For documentation publishing:
 ### Pilot reports and validation
 
 - double-click `run-pilot-report.cmd`
+- double-click `run-pilot-delta-report.cmd`
 - double-click `run-pilot-launch-validation.cmd`
 - double-click `run-release-readiness.cmd`
 
@@ -42,6 +43,7 @@ For documentation publishing:
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-demo.ps1 -Demo 02`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-demo.ps1 -Demo 03`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-report.ps1`
+- run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-delta-report.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1 -BaselinePath <accepted-baseline-path>`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1`
@@ -53,6 +55,7 @@ For documentation publishing:
 - run `powershell -ExecutionPolicy Bypass -File scripts/new-pilot-token.ps1 -OutputPath <token-file>`
 - run `cargo run -p aether_api --bin aether_pilot_service --release -- --config <path-to-config>`
 - run `cargo run -p aether_api --example pilot_http_kernel_service --release`
+- run `cargo run -p aether_api --example replicated_partition_http_service --release`
 
 ### Performance and stress
 
@@ -61,6 +64,7 @@ For documentation publishing:
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-baseline.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-drift.ps1`
 - run `cargo run -p aether_api --example pilot_coordination_report --release`
+- run `cargo run -p aether_api --example pilot_coordination_delta_report --release`
 - run `cargo run -p aether_api --example capture_performance_baseline --release`
 - run `cargo run -p aether_api --example performance_drift_report --release -- artifacts/performance/baseline.json`
 - run `cargo bench -p aether_api`
@@ -88,6 +92,10 @@ They now also include:
 - `bin/aetherctl.exe`
 - `run-aether-ops.cmd`
 - `run-aether-ops.ps1`
+- `backup-pilot-state.cmd`
+- `backup-pilot-state.ps1`
+- `restore-pilot-state.cmd`
+- `restore-pilot-state.ps1`
 
 That makes the packaged bundle self-contained for both the pilot service and the
 read-only operator cockpit.

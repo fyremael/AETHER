@@ -6,7 +6,7 @@ use crate::{
 use aether_ast::{
     merge_partition_cuts, policy_allows, Atom, Datom, ExplainSpec, ExplainTarget, ExtensionalFact,
     FactProvenance, FederatedCut, PartitionCut, PartitionId, PolicyContext, PredicateRef,
-    QueryResult, QueryRow, SourceRef, TemporalView, TupleId, Value,
+    QueryResult, QueryRow, ReplicaId, SourceRef, TemporalView, TupleId, Value,
 };
 use aether_explain::{Explainer, InMemoryExplainer};
 use aether_plan::CompiledProgram;
@@ -17,6 +17,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
+    collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -33,6 +34,109 @@ pub struct SqlitePartitionedKernelService {
     partitions: RefCell<IndexMap<PartitionId, crate::SqliteKernelService>>,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct LeaderEpoch(pub u64);
+
+impl LeaderEpoch {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplicaRole {
+    #[default]
+    Leader,
+    Follower,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReplicaConfig {
+    pub replica_id: ReplicaId,
+    pub database_path: PathBuf,
+    pub role: ReplicaRole,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AuthorityPartitionConfig {
+    pub partition: PartitionId,
+    pub replicas: Vec<ReplicaConfig>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReplicaStatus {
+    pub partition: PartitionId,
+    pub replica_id: ReplicaId,
+    pub role: ReplicaRole,
+    pub leader_epoch: LeaderEpoch,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_element: Option<aether_ast::ElementId>,
+    pub replication_lag: u64,
+    pub healthy: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PartitionStatus {
+    pub partition: PartitionId,
+    pub leader_epoch: LeaderEpoch,
+    pub replicas: Vec<ReplicaStatus>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PartitionStatusResponse {
+    pub partitions: Vec<PartitionStatus>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PromoteReplicaRequest {
+    pub partition: PartitionId,
+    pub replica_id: ReplicaId,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PromoteReplicaResponse {
+    pub partition: PartitionId,
+    pub replica_id: ReplicaId,
+    pub leader_epoch: LeaderEpoch,
+}
+
+#[derive(Debug)]
+pub struct ReplicatedAuthorityPartitionService {
+    root: PathBuf,
+    partitions: RefCell<IndexMap<PartitionId, ReplicatedPartition>>,
+    cache: ReplicatedReadCache,
+}
+
+#[derive(Debug)]
+struct ReplicatedPartition {
+    metadata_path: PathBuf,
+    metadata: ReplicatedPartitionMetadata,
+    replicas: IndexMap<ReplicaId, crate::SqliteKernelService>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+struct ReplicatedPartitionMetadata {
+    partition: PartitionId,
+    leader_epoch: LeaderEpoch,
+    replicas: Vec<ReplicaConfig>,
+}
+
+#[derive(Debug, Default)]
+struct ReplicatedReadCache {
+    federated_run: Option<(String, FederatedRunDocumentResponse)>,
+    federated_report: Option<(String, FederatedExplainReport)>,
+}
+
+impl ReplicatedReadCache {
+    fn clear(&mut self) {
+        self.federated_run = None;
+        self.federated_report = None;
+    }
+}
+
 impl PartitionedInMemoryKernelService {
     pub fn new() -> Self {
         Self::default()
@@ -42,7 +146,9 @@ impl PartitionedInMemoryKernelService {
         &mut self,
         request: PartitionAppendRequest,
     ) -> Result<PartitionAppendResponse, ApiError> {
-        let PartitionAppendRequest { partition, datoms } = request;
+        let PartitionAppendRequest {
+            partition, datoms, ..
+        } = request;
         let response = self
             .partitions
             .entry(partition.clone())
@@ -50,6 +156,7 @@ impl PartitionedInMemoryKernelService {
             .append(AppendRequest { datoms })?;
         Ok(PartitionAppendResponse {
             partition,
+            leader_epoch: None,
             appended: response.appended,
         })
     }
@@ -163,7 +270,9 @@ impl SqlitePartitionedKernelService {
         &mut self,
         request: PartitionAppendRequest,
     ) -> Result<PartitionAppendResponse, ApiError> {
-        let PartitionAppendRequest { partition, datoms } = request;
+        let PartitionAppendRequest {
+            partition, datoms, ..
+        } = request;
         self.ensure_partition_open(&partition, true)?;
         let mut partitions = self.partitions.borrow_mut();
         let response = partitions
@@ -172,6 +281,7 @@ impl SqlitePartitionedKernelService {
             .append(AppendRequest { datoms })?;
         Ok(PartitionAppendResponse {
             partition,
+            leader_epoch: None,
             appended: response.appended,
         })
     }
@@ -283,6 +393,526 @@ impl SqlitePartitionedKernelService {
             encode_partition_id(partition)
         ))
     }
+}
+
+impl ReplicatedAuthorityPartitionService {
+    pub fn open(
+        root: impl AsRef<Path>,
+        configs: Vec<AuthorityPartitionConfig>,
+    ) -> Result<Self, ApiError> {
+        let root = root.as_ref().to_path_buf();
+        fs::create_dir_all(&root).map_err(|error| {
+            ApiError::Validation(format!(
+                "failed to create replication root {}: {}",
+                root.display(),
+                error
+            ))
+        })?;
+        let mut partitions = IndexMap::new();
+        for config in configs {
+            let partition = config.partition.clone();
+            let runtime = ReplicatedPartition::open(&root, config)?;
+            partitions.insert(partition, runtime);
+        }
+        Ok(Self {
+            root,
+            partitions: RefCell::new(partitions),
+            cache: ReplicatedReadCache::default(),
+        })
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn append_partition(
+        &mut self,
+        request: PartitionAppendRequest,
+    ) -> Result<PartitionAppendResponse, ApiError> {
+        self.cache.clear();
+        let mut partitions = self.partitions.borrow_mut();
+        let partition = partitions.get_mut(&request.partition).ok_or_else(|| {
+            ApiError::Validation(format!("unknown partition {}", request.partition))
+        })?;
+        partition.append(request)
+    }
+
+    pub fn partition_history(
+        &self,
+        request: PartitionHistoryRequest,
+    ) -> Result<PartitionHistoryResponse, ApiError> {
+        let mut partitions = self.partitions.borrow_mut();
+        let partition = partitions.get_mut(&request.cut.partition).ok_or_else(|| {
+            ApiError::Validation(format!("unknown partition {}", request.cut.partition))
+        })?;
+        partition_history_for(partition.leader_service_mut()?, request)
+    }
+
+    pub fn partition_state(
+        &self,
+        request: PartitionStateRequest,
+    ) -> Result<PartitionStateResponse, ApiError> {
+        let mut partitions = self.partitions.borrow_mut();
+        let partition = partitions.get_mut(&request.cut.partition).ok_or_else(|| {
+            ApiError::Validation(format!("unknown partition {}", request.cut.partition))
+        })?;
+        partition_state_for(partition.leader_service_mut()?, request)
+    }
+
+    pub fn federated_history(
+        &self,
+        request: FederatedHistoryRequest,
+    ) -> Result<FederatedHistoryResponse, ApiError> {
+        let cut = validate_federated_cut(request.cut)?;
+        let mut partitions = Vec::with_capacity(cut.cuts.len());
+        for partition_cut in cut.cuts {
+            partitions.push(self.partition_history(PartitionHistoryRequest {
+                cut: partition_cut,
+                policy_context: request.policy_context.clone(),
+            })?);
+        }
+        Ok(FederatedHistoryResponse { partitions })
+    }
+
+    pub fn import_partition_facts(
+        &mut self,
+        request: ImportedFactQueryRequest,
+        policy_context: Option<PolicyContext>,
+    ) -> Result<ImportedFactQueryResponse, ApiError> {
+        let mut partitions = self.partitions.borrow_mut();
+        let partition = partitions.get_mut(&request.cut.partition).ok_or_else(|| {
+            ApiError::Validation(format!("unknown partition {}", request.cut.partition))
+        })?;
+        import_partition_facts_from_service(
+            partition.leader_service_mut()?,
+            request,
+            policy_context,
+        )
+    }
+
+    pub fn federated_run_document(
+        &mut self,
+        request: FederatedRunDocumentRequest,
+    ) -> Result<FederatedRunDocumentResponse, ApiError> {
+        let cache_key = cache_key(&request)?;
+        if let Some((key, response)) = &self.cache.federated_run {
+            if *key == cache_key {
+                return Ok(response.clone());
+            }
+        }
+        let imports = request
+            .imports
+            .iter()
+            .cloned()
+            .map(|import| self.import_partition_facts(import, request.policy_context.clone()))
+            .collect::<Result<Vec<_>, ApiError>>()?;
+        let response = execute_federated_document_request(request, imports)?;
+        self.cache
+            .federated_run
+            .replace((cache_key, response.clone()));
+        Ok(response)
+    }
+
+    pub fn build_federated_explain_report(
+        &mut self,
+        request: FederatedRunDocumentRequest,
+    ) -> Result<FederatedExplainReport, ApiError> {
+        let cache_key = cache_key(&request)?;
+        if let Some((key, response)) = &self.cache.federated_report {
+            if *key == cache_key {
+                return Ok(response.clone());
+            }
+        }
+        let policy_context = request.policy_context.clone();
+        let response = self.federated_run_document(request)?;
+        let report = build_federated_explain_report_from_response(response, policy_context);
+        self.cache
+            .federated_report
+            .replace((cache_key, report.clone()));
+        Ok(report)
+    }
+
+    pub fn partition_status(&self) -> Result<PartitionStatusResponse, ApiError> {
+        let mut statuses = Vec::new();
+        for partition in self.partitions.borrow().values() {
+            statuses.push(partition.status()?);
+        }
+        Ok(PartitionStatusResponse {
+            partitions: statuses,
+        })
+    }
+
+    pub fn promote_replica(
+        &mut self,
+        request: PromoteReplicaRequest,
+    ) -> Result<PromoteReplicaResponse, ApiError> {
+        self.cache.clear();
+        let mut partitions = self.partitions.borrow_mut();
+        let partition = partitions.get_mut(&request.partition).ok_or_else(|| {
+            ApiError::Validation(format!("unknown partition {}", request.partition))
+        })?;
+        let leader_epoch = partition.promote(request.replica_id)?;
+        Ok(PromoteReplicaResponse {
+            partition: request.partition,
+            replica_id: request.replica_id,
+            leader_epoch,
+        })
+    }
+}
+
+impl ReplicatedPartition {
+    fn open(root: &Path, config: AuthorityPartitionConfig) -> Result<Self, ApiError> {
+        if config.replicas.is_empty() {
+            return Err(ApiError::Validation(format!(
+                "replicated partition {} must declare at least one replica",
+                config.partition
+            )));
+        }
+        let leader_count = config
+            .replicas
+            .iter()
+            .filter(|replica| replica.role == ReplicaRole::Leader)
+            .count();
+        if leader_count != 1 {
+            return Err(ApiError::Validation(format!(
+                "replicated partition {} must declare exactly one leader replica",
+                config.partition
+            )));
+        }
+        let metadata_path = root.join(format!(
+            "replication-{}.json",
+            encode_partition_id(&config.partition)
+        ));
+        let metadata = if metadata_path.exists() {
+            let contents = fs::read_to_string(&metadata_path).map_err(|error| {
+                ApiError::Validation(format!(
+                    "failed to read replication metadata {}: {}",
+                    metadata_path.display(),
+                    error
+                ))
+            })?;
+            serde_json::from_str::<ReplicatedPartitionMetadata>(&contents).map_err(|error| {
+                ApiError::Validation(format!(
+                    "failed to parse replication metadata {}: {}",
+                    metadata_path.display(),
+                    error
+                ))
+            })?
+        } else {
+            let metadata = ReplicatedPartitionMetadata {
+                partition: config.partition.clone(),
+                leader_epoch: LeaderEpoch::new(1),
+                replicas: config.replicas,
+            };
+            write_partition_metadata(&metadata_path, &metadata)?;
+            metadata
+        };
+
+        let mut seen = BTreeSet::new();
+        let leader_count = metadata
+            .replicas
+            .iter()
+            .filter(|replica| replica.role == ReplicaRole::Leader)
+            .count();
+        if leader_count != 1 {
+            return Err(ApiError::Validation(format!(
+                "replicated partition {} metadata must contain exactly one leader",
+                metadata.partition
+            )));
+        }
+
+        let mut replicas = IndexMap::new();
+        for replica in &metadata.replicas {
+            if !seen.insert(replica.replica_id) {
+                return Err(ApiError::Validation(format!(
+                    "replicated partition {} has duplicate replica {}",
+                    metadata.partition, replica.replica_id.0
+                )));
+            }
+            let database_path = if replica.database_path.is_absolute() {
+                replica.database_path.clone()
+            } else {
+                root.join(&replica.database_path)
+            };
+            replicas.insert(
+                replica.replica_id,
+                crate::SqliteKernelService::open(database_path)?,
+            );
+        }
+
+        let mut partition = Self {
+            metadata_path,
+            metadata,
+            replicas,
+        };
+        partition.replicate_followers()?;
+        Ok(partition)
+    }
+
+    fn append(
+        &mut self,
+        request: PartitionAppendRequest,
+    ) -> Result<PartitionAppendResponse, ApiError> {
+        if let Some(leader_epoch) = request.leader_epoch.as_ref() {
+            if *leader_epoch != self.metadata.leader_epoch {
+                return Err(ApiError::Validation(format!(
+                    "stale leader epoch {} for partition {}; current epoch is {}",
+                    leader_epoch.0, request.partition, self.metadata.leader_epoch.0
+                )));
+            }
+        }
+        let leader_id = self.leader_id()?;
+        self.append_via_replica(leader_id, request)
+    }
+
+    fn append_via_replica(
+        &mut self,
+        replica_id: ReplicaId,
+        request: PartitionAppendRequest,
+    ) -> Result<PartitionAppendResponse, ApiError> {
+        let config = self.replica_config(replica_id)?;
+        if config.role != ReplicaRole::Leader {
+            return Err(ApiError::Validation(format!(
+                "replica {} for partition {} is read-only follower",
+                replica_id.0, request.partition
+            )));
+        }
+        let service = self
+            .replicas
+            .get_mut(&replica_id)
+            .ok_or_else(|| ApiError::Validation(format!("unknown replica {}", replica_id.0)))?;
+        let response = service.append(AppendRequest {
+            datoms: request.datoms,
+        })?;
+        self.replicate_followers()?;
+        Ok(PartitionAppendResponse {
+            partition: request.partition,
+            leader_epoch: Some(self.metadata.leader_epoch.clone()),
+            appended: response.appended,
+        })
+    }
+
+    fn leader_service_mut(&mut self) -> Result<&mut crate::SqliteKernelService, ApiError> {
+        let leader_id = self.leader_id()?;
+        self.replicas
+            .get_mut(&leader_id)
+            .ok_or_else(|| ApiError::Validation(format!("unknown leader replica {}", leader_id.0)))
+    }
+
+    fn leader_id(&self) -> Result<ReplicaId, ApiError> {
+        self.metadata
+            .replicas
+            .iter()
+            .find(|replica| replica.role == ReplicaRole::Leader)
+            .map(|replica| replica.replica_id)
+            .ok_or_else(|| {
+                ApiError::Validation(format!(
+                    "partition {} has no leader replica",
+                    self.metadata.partition
+                ))
+            })
+    }
+
+    fn promote(&mut self, replica_id: ReplicaId) -> Result<LeaderEpoch, ApiError> {
+        if !self.replicas.contains_key(&replica_id) {
+            return Err(ApiError::Validation(format!(
+                "unknown replica {} for partition {}",
+                replica_id.0, self.metadata.partition
+            )));
+        }
+        let leader_history = {
+            let leader = self.leader_service_mut()?;
+            leader
+                .history(HistoryRequest {
+                    policy_context: None,
+                })?
+                .datoms
+        };
+        let replica = self
+            .replicas
+            .get_mut(&replica_id)
+            .ok_or_else(|| ApiError::Validation(format!("unknown replica {}", replica_id.0)))?;
+        sync_replica_history(
+            replica,
+            &leader_history,
+            &self.metadata.partition,
+            replica_id,
+        )?;
+
+        for config in &mut self.metadata.replicas {
+            config.role = if config.replica_id == replica_id {
+                ReplicaRole::Leader
+            } else {
+                ReplicaRole::Follower
+            };
+        }
+        self.metadata.leader_epoch.0 += 1;
+        write_partition_metadata(&self.metadata_path, &self.metadata)?;
+        self.replicate_followers()?;
+        Ok(self.metadata.leader_epoch.clone())
+    }
+
+    fn replicate_followers(&mut self) -> Result<(), ApiError> {
+        let leader_id = self.leader_id()?;
+        let leader_history = {
+            let leader = self
+                .replicas
+                .get_mut(&leader_id)
+                .ok_or_else(|| ApiError::Validation(format!("unknown leader {}", leader_id.0)))?;
+            leader
+                .history(HistoryRequest {
+                    policy_context: None,
+                })?
+                .datoms
+        };
+        for replica in &self.metadata.replicas {
+            if replica.replica_id == leader_id {
+                continue;
+            }
+            let follower = self.replicas.get_mut(&replica.replica_id).ok_or_else(|| {
+                ApiError::Validation(format!("unknown replica {}", replica.replica_id.0))
+            })?;
+            sync_replica_history(
+                follower,
+                &leader_history,
+                &self.metadata.partition,
+                replica.replica_id,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn status(&self) -> Result<PartitionStatus, ApiError> {
+        let leader_id = self.leader_id()?;
+        let leader_history = self
+            .replicas
+            .get(&leader_id)
+            .ok_or_else(|| ApiError::Validation(format!("unknown leader {}", leader_id.0)))?
+            .history(HistoryRequest {
+                policy_context: None,
+            })?
+            .datoms;
+        let leader_last = leader_history.last().map(|datom| datom.element);
+
+        let mut replicas = Vec::new();
+        for config in &self.metadata.replicas {
+            let service = self.replicas.get(&config.replica_id).ok_or_else(|| {
+                ApiError::Validation(format!("unknown replica {}", config.replica_id.0))
+            })?;
+            let history = service
+                .history(HistoryRequest {
+                    policy_context: None,
+                })?
+                .datoms;
+            let last = history.last().map(|datom| datom.element);
+            let mismatch = validate_replica_prefix(&history, &leader_history).err();
+            replicas.push(ReplicaStatus {
+                partition: self.metadata.partition.clone(),
+                replica_id: config.replica_id,
+                role: config.role,
+                leader_epoch: self.metadata.leader_epoch.clone(),
+                applied_element: last,
+                replication_lag: leader_last
+                    .zip(last)
+                    .map(|(leader, replica)| leader.0.saturating_sub(replica.0))
+                    .unwrap_or_else(|| leader_last.map(|leader| leader.0).unwrap_or(0)),
+                healthy: mismatch.is_none(),
+                detail: mismatch,
+            });
+        }
+
+        Ok(PartitionStatus {
+            partition: self.metadata.partition.clone(),
+            leader_epoch: self.metadata.leader_epoch.clone(),
+            replicas,
+        })
+    }
+
+    fn replica_config(&self, replica_id: ReplicaId) -> Result<&ReplicaConfig, ApiError> {
+        self.metadata
+            .replicas
+            .iter()
+            .find(|replica| replica.replica_id == replica_id)
+            .ok_or_else(|| {
+                ApiError::Validation(format!(
+                    "unknown replica {} for partition {}",
+                    replica_id.0, self.metadata.partition
+                ))
+            })
+    }
+}
+
+fn write_partition_metadata(
+    path: &Path,
+    metadata: &ReplicatedPartitionMetadata,
+) -> Result<(), ApiError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            ApiError::Validation(format!(
+                "failed to create replication metadata directory {}: {}",
+                parent.display(),
+                error
+            ))
+        })?;
+    }
+    let encoded = serde_json::to_string_pretty(metadata).map_err(|error| {
+        ApiError::Validation(format!(
+            "failed to encode replication metadata {}: {}",
+            path.display(),
+            error
+        ))
+    })?;
+    fs::write(path, encoded).map_err(|error| {
+        ApiError::Validation(format!(
+            "failed to write replication metadata {}: {}",
+            path.display(),
+            error
+        ))
+    })
+}
+
+fn sync_replica_history(
+    replica: &mut crate::SqliteKernelService,
+    leader_history: &[Datom],
+    partition: &PartitionId,
+    replica_id: ReplicaId,
+) -> Result<(), ApiError> {
+    let follower_history = replica
+        .history(HistoryRequest {
+            policy_context: None,
+        })?
+        .datoms;
+    validate_replica_prefix(&follower_history, leader_history).map_err(|detail| {
+        ApiError::Validation(format!(
+            "replica {} for partition {} diverged from leader prefix: {}",
+            replica_id.0, partition, detail
+        ))
+    })?;
+    if follower_history.len() < leader_history.len() {
+        replica.append(AppendRequest {
+            datoms: leader_history[follower_history.len()..].to_vec(),
+        })?;
+    }
+    Ok(())
+}
+
+fn validate_replica_prefix(
+    follower_history: &[Datom],
+    leader_history: &[Datom],
+) -> Result<(), String> {
+    if follower_history.len() > leader_history.len() {
+        return Err("follower history exceeds leader history".into());
+    }
+    for (index, (follower, leader)) in follower_history
+        .iter()
+        .zip(leader_history.iter())
+        .enumerate()
+    {
+        if follower != leader {
+            return Err(format!("entry {} does not match leader", index));
+        }
+    }
+    Ok(())
 }
 
 fn validate_federated_cut(cut: FederatedCut) -> Result<FederatedCut, ApiError> {
@@ -594,6 +1224,11 @@ fn encode_partition_id(partition: &PartitionId) -> String {
         .iter()
         .map(|byte| format!("{:02x}", byte))
         .collect::<String>()
+}
+
+fn cache_key<T: Serialize>(value: &T) -> Result<String, ApiError> {
+    serde_json::to_string(value)
+        .map_err(|error| ApiError::Validation(format!("failed to encode cache key: {error}")))
 }
 
 fn select_query_result<'a>(
@@ -1177,12 +1812,16 @@ fn now_millis() -> u64 {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PartitionAppendRequest {
     pub partition: PartitionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leader_epoch: Option<LeaderEpoch>,
     pub datoms: Vec<Datom>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PartitionAppendResponse {
     pub partition: PartitionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leader_epoch: Option<LeaderEpoch>,
     pub appended: usize,
 }
 
@@ -1317,10 +1956,11 @@ pub struct FederatedTraceTupleSummary {
 #[cfg(test)]
 mod tests {
     use super::{
-        render_federated_explain_report_markdown, FederatedHistoryRequest,
-        FederatedRunDocumentRequest, ImportedFactQueryRequest, PartitionAppendRequest,
-        PartitionHistoryRequest, PartitionStateRequest, PartitionedInMemoryKernelService,
-        SqlitePartitionedKernelService,
+        render_federated_explain_report_markdown, AuthorityPartitionConfig,
+        FederatedHistoryRequest, FederatedRunDocumentRequest, ImportedFactQueryRequest,
+        LeaderEpoch, PartitionAppendRequest, PartitionHistoryRequest, PartitionStateRequest,
+        PartitionedInMemoryKernelService, PromoteReplicaRequest, ReplicaConfig, ReplicaRole,
+        ReplicatedAuthorityPartitionService, SqlitePartitionedKernelService,
     };
     use aether_ast::{
         AttributeId, Datom, DatomProvenance, ElementId, EntityId, FederatedCut, OperationKind,
@@ -1343,6 +1983,7 @@ mod tests {
         service
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("tenant-a"),
+                leader_epoch: None,
                 datoms: vec![
                     sample_datom(1, 1, "tenant-a-open", 1, None),
                     sample_datom(1, 1, "tenant-a-running", 2, None),
@@ -1352,6 +1993,7 @@ mod tests {
         service
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("tenant-b"),
+                leader_epoch: None,
                 datoms: vec![sample_datom(1, 1, "tenant-b-ready", 1, None)],
             })
             .expect("append tenant-b");
@@ -1408,12 +2050,14 @@ mod tests {
         service
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("tenant-a"),
+                leader_epoch: None,
                 datoms: vec![sample_datom(1, 1, "alpha", 1, None)],
             })
             .expect("append tenant-a");
         service
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("tenant-b"),
+                leader_epoch: None,
                 datoms: vec![sample_datom(
                     1,
                     1,
@@ -1488,12 +2132,14 @@ mod tests {
         service
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("readiness"),
+                leader_epoch: None,
                 datoms: vec![sample_datom(1, 1, "ready", 1, None)],
             })
             .expect("append readiness datoms");
         service
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("authority"),
+                leader_epoch: None,
                 datoms: vec![sample_datom(1, 1, "worker-a", 3, None)],
             })
             .expect("append authority datoms");
@@ -1636,6 +2282,7 @@ mod tests {
         service
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("joined"),
+                leader_epoch: None,
                 datoms: vec![
                     sample_datom(1, 1, "ready", 1, None),
                     Datom {
@@ -1685,6 +2332,7 @@ mod tests {
         service
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("secure"),
+                leader_epoch: None,
                 datoms: vec![
                     sample_datom(1, 1, "ready", 1, None),
                     sample_datom(
@@ -1747,12 +2395,14 @@ mod tests {
             service
                 .append_partition(PartitionAppendRequest {
                     partition: PartitionId::new("readiness"),
+                    leader_epoch: None,
                     datoms: vec![sample_datom(1, 1, "ready", 1, None)],
                 })
                 .expect("append readiness datoms");
             service
                 .append_partition(PartitionAppendRequest {
                     partition: PartitionId::new("authority"),
+                    leader_epoch: None,
                     datoms: vec![sample_datom(1, 1, "worker-a", 3, None)],
                 })
                 .expect("append authority datoms");
@@ -1826,6 +2476,218 @@ mod tests {
             .expect("build report after restart");
         assert!(render_federated_explain_report_markdown(&report)
             .contains("authority@e3, readiness@e1"));
+    }
+
+    #[test]
+    fn replicated_partition_service_replays_followers_and_fences_stale_epochs() {
+        let temp = TestPartitionDir::new("replicated");
+        let mut service = ReplicatedAuthorityPartitionService::open(
+            temp.path(),
+            vec![AuthorityPartitionConfig {
+                partition: PartitionId::new("authority"),
+                replicas: vec![
+                    ReplicaConfig {
+                        replica_id: ReplicaId::new(1),
+                        database_path: PathBuf::from("authority-leader.sqlite"),
+                        role: ReplicaRole::Leader,
+                    },
+                    ReplicaConfig {
+                        replica_id: ReplicaId::new(2),
+                        database_path: PathBuf::from("authority-follower.sqlite"),
+                        role: ReplicaRole::Follower,
+                    },
+                ],
+            }],
+        )
+        .expect("open replicated partitions");
+
+        let appended = service
+            .append_partition(PartitionAppendRequest {
+                partition: PartitionId::new("authority"),
+                leader_epoch: None,
+                datoms: vec![sample_datom(1, 1, "worker-a", 1, None)],
+            })
+            .expect("append through leader");
+        assert_eq!(appended.leader_epoch.expect("leader epoch").0, 1);
+
+        let status = service.partition_status().expect("partition status");
+        let authority = &status.partitions[0];
+        assert_eq!(authority.replicas.len(), 2);
+        assert!(authority.replicas.iter().all(|replica| replica.healthy));
+        assert!(authority
+            .replicas
+            .iter()
+            .all(|replica| replica.applied_element == Some(ElementId::new(1))));
+
+        let promoted = service
+            .promote_replica(PromoteReplicaRequest {
+                partition: PartitionId::new("authority"),
+                replica_id: ReplicaId::new(2),
+            })
+            .expect("promote follower");
+        assert_eq!(promoted.leader_epoch.0, 2);
+
+        let stale = service.append_partition(PartitionAppendRequest {
+            partition: PartitionId::new("authority"),
+            leader_epoch: Some(LeaderEpoch::new(1)),
+            datoms: vec![sample_datom(1, 1, "worker-b", 2, None)],
+        });
+        assert!(matches!(
+            stale,
+            Err(crate::ApiError::Validation(message))
+                if message.contains("stale leader epoch 1 for partition authority; current epoch is 2")
+        ));
+
+        let appended = service
+            .append_partition(PartitionAppendRequest {
+                partition: PartitionId::new("authority"),
+                leader_epoch: Some(LeaderEpoch::new(2)),
+                datoms: vec![sample_datom(1, 1, "worker-b", 2, None)],
+            })
+            .expect("append after promotion");
+        assert_eq!(appended.leader_epoch.expect("leader epoch").0, 2);
+
+        let history = service
+            .partition_history(PartitionHistoryRequest {
+                cut: PartitionCut::current("authority"),
+                policy_context: None,
+            })
+            .expect("current history");
+        assert_eq!(history.datoms.len(), 2);
+
+        let status = service
+            .partition_status()
+            .expect("partition status after promotion");
+        let authority = &status.partitions[0];
+        assert!(authority.replicas.iter().any(|replica| {
+            replica.replica_id == ReplicaId::new(2)
+                && replica.role == ReplicaRole::Leader
+                && replica.leader_epoch.0 == 2
+        }));
+        assert!(authority
+            .replicas
+            .iter()
+            .all(|replica| replica.applied_element == Some(ElementId::new(2))));
+    }
+
+    #[test]
+    fn replicated_partition_service_reuses_and_invalidates_federated_reads() {
+        let temp = TestPartitionDir::new("replicated-cache");
+        let mut service = ReplicatedAuthorityPartitionService::open(
+            temp.path(),
+            vec![
+                AuthorityPartitionConfig {
+                    partition: PartitionId::new("readiness"),
+                    replicas: vec![ReplicaConfig {
+                        replica_id: ReplicaId::new(1),
+                        database_path: PathBuf::from("readiness.sqlite"),
+                        role: ReplicaRole::Leader,
+                    }],
+                },
+                AuthorityPartitionConfig {
+                    partition: PartitionId::new("authority"),
+                    replicas: vec![ReplicaConfig {
+                        replica_id: ReplicaId::new(1),
+                        database_path: PathBuf::from("authority.sqlite"),
+                        role: ReplicaRole::Leader,
+                    }],
+                },
+            ],
+        )
+        .expect("open replicated partitions");
+        service
+            .append_partition(PartitionAppendRequest {
+                partition: PartitionId::new("readiness"),
+                leader_epoch: None,
+                datoms: vec![sample_datom(1, 1, "ready", 1, None)],
+            })
+            .expect("append readiness");
+        service
+            .append_partition(PartitionAppendRequest {
+                partition: PartitionId::new("authority"),
+                leader_epoch: None,
+                datoms: vec![sample_datom(1, 1, "worker-a", 2, None)],
+            })
+            .expect("append authority");
+
+        let request = FederatedRunDocumentRequest {
+            dsl: federated_assignment_query_document(),
+            imports: vec![
+                ImportedFactQueryRequest {
+                    cut: PartitionCut::as_of("readiness", ElementId::new(1)),
+                    dsl: readiness_document(),
+                    predicate: PredicateRef {
+                        id: PredicateId::new(11),
+                        name: "imported_ready_task".into(),
+                        arity: 1,
+                    },
+                    query_name: Some("ready_now".into()),
+                },
+                ImportedFactQueryRequest {
+                    cut: PartitionCut::as_of("authority", ElementId::new(2)),
+                    dsl: authority_document(),
+                    predicate: PredicateRef {
+                        id: PredicateId::new(12),
+                        name: "imported_authorized_worker".into(),
+                        arity: 2,
+                    },
+                    query_name: Some("authorized_now".into()),
+                },
+            ],
+            policy_context: None,
+        };
+
+        let first = service
+            .federated_run_document(request.clone())
+            .expect("first federated run");
+        let second = service
+            .federated_run_document(request.clone())
+            .expect("second federated run");
+        assert_eq!(first, second);
+
+        service
+            .append_partition(PartitionAppendRequest {
+                partition: PartitionId::new("authority"),
+                leader_epoch: None,
+                datoms: vec![sample_datom(1, 1, "worker-b", 3, None)],
+            })
+            .expect("append updated authority");
+
+        let updated = service
+            .federated_run_document(FederatedRunDocumentRequest {
+                dsl: federated_assignment_query_document(),
+                imports: vec![
+                    ImportedFactQueryRequest {
+                        cut: PartitionCut::as_of("readiness", ElementId::new(1)),
+                        dsl: readiness_document(),
+                        predicate: PredicateRef {
+                            id: PredicateId::new(11),
+                            name: "imported_ready_task".into(),
+                            arity: 1,
+                        },
+                        query_name: Some("ready_now".into()),
+                    },
+                    ImportedFactQueryRequest {
+                        cut: PartitionCut::as_of("authority", ElementId::new(3)),
+                        dsl: authority_document(),
+                        predicate: PredicateRef {
+                            id: PredicateId::new(12),
+                            name: "imported_authorized_worker".into(),
+                            arity: 2,
+                        },
+                        query_name: Some("authorized_now".into()),
+                    },
+                ],
+                policy_context: None,
+            })
+            .expect("updated federated run");
+        assert_eq!(
+            updated.run.query.as_ref().expect("query result").rows[0].values,
+            vec![
+                Value::Entity(EntityId::new(1)),
+                Value::String("worker-b".into())
+            ]
+        );
     }
 
     fn schema() -> Schema {
@@ -1924,6 +2786,34 @@ query actionable_now {
 
 explain actionable_trace {
   tuple actionable_assignment(entity(1), "worker-a")
+}
+"#
+        .into()
+    }
+
+    fn federated_assignment_query_document() -> String {
+        r#"
+schema {
+}
+
+predicates {
+  imported_ready_task(Entity)
+  imported_authorized_worker(Entity, String)
+  actionable_assignment(Entity, String)
+}
+
+rules {
+  actionable_assignment(t, worker) <- imported_ready_task(t), imported_authorized_worker(t, worker)
+}
+
+materialize {
+  actionable_assignment
+}
+
+query actionable_now {
+  current
+  goal actionable_assignment(t, worker)
+  keep t, worker
 }
 "#
         .into()

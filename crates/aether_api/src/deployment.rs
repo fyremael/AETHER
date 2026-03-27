@@ -1,6 +1,7 @@
 use crate::{
     http_router_with_options, sidecar::sidecar_catalog_path_for_journal, ApiError, AuthScope,
-    HttpAccessToken, HttpAuthConfig, HttpKernelOptions, SqliteKernelService,
+    HttpAccessToken, HttpAuthConfig, HttpKernelOptions, PrincipalStatusSummary, ServiceMode,
+    ServiceStatusResponse, ServiceStatusStorage, SqliteKernelService,
 };
 use aether_ast::PolicyContext;
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,12 @@ use thiserror::Error;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PilotServiceConfig {
+    #[serde(default = "default_config_version")]
+    pub config_version: String,
+    #[serde(default = "default_schema_version")]
+    pub schema_version: String,
+    #[serde(default)]
+    pub service_mode: ServiceMode,
     pub bind_addr: String,
     pub database_path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -57,14 +64,22 @@ impl PilotServiceConfig {
             .fold(HttpAuthConfig::new(), |mut auth, token| {
                 auth.tokens.push(HttpAccessToken {
                     token: token.token.clone(),
+                    token_id: token.token_id.clone(),
                     principal: token.principal.clone(),
+                    principal_id: token.principal_id.clone(),
                     scopes: token.scopes.clone(),
                     policy_context: token.policy_context.clone(),
+                    source: token.source.clone(),
+                    revoked: token.revoked,
                 });
                 auth
             });
 
         Ok(ResolvedPilotServiceConfig {
+            config_path: config_path.to_path_buf(),
+            config_version: self.config_version,
+            schema_version: self.schema_version,
+            service_mode: self.service_mode,
             bind_addr: self.bind_addr,
             database_path,
             audit_log_path,
@@ -73,9 +88,12 @@ impl PilotServiceConfig {
                 .into_iter()
                 .map(|token| ResolvedPilotTokenSummary {
                     principal: token.principal,
+                    principal_id: token.principal_id,
+                    token_id: token.token_id,
                     scopes: token.scopes,
                     policy_context: token.policy_context,
                     source: token.source,
+                    revoked: token.revoked,
                 })
                 .collect(),
         })
@@ -85,6 +103,10 @@ impl PilotServiceConfig {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PilotAuthConfig {
     pub tokens: Vec<PilotTokenConfig>,
+    #[serde(default)]
+    pub revoked_token_ids: Vec<String>,
+    #[serde(default)]
+    pub revoked_principal_ids: Vec<String>,
 }
 
 impl PilotAuthConfig {
@@ -94,16 +116,43 @@ impl PilotAuthConfig {
                 "pilot service auth.tokens must contain at least one token".into(),
             ));
         }
-        self.tokens
+        let revoked_token_ids = self
+            .revoked_token_ids
             .iter()
-            .map(|token| token.resolve(config_dir))
-            .collect()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect::<std::collections::BTreeSet<_>>();
+        let revoked_principal_ids = self
+            .revoked_principal_ids
+            .iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect::<std::collections::BTreeSet<_>>();
+        let resolved = self
+            .tokens
+            .iter()
+            .map(|token| token.resolve(config_dir, &revoked_token_ids, &revoked_principal_ids))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut seen = std::collections::BTreeSet::new();
+        for token in &resolved {
+            if !seen.insert(token.token_id.clone()) {
+                return Err(DeploymentError::Validation(format!(
+                    "pilot auth token_id {} is duplicated",
+                    token.token_id
+                )));
+            }
+        }
+        Ok(resolved)
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PilotTokenConfig {
     pub principal: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub principal_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_id: Option<String>,
     pub scopes: Vec<AuthScope>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy_context: Option<PolicyContext>,
@@ -115,10 +164,17 @@ pub struct PilotTokenConfig {
     pub token_file: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_command: Option<Vec<String>>,
+    #[serde(default)]
+    pub revoked: bool,
 }
 
 impl PilotTokenConfig {
-    fn resolve(&self, config_dir: &Path) -> Result<ResolvedPilotToken, DeploymentError> {
+    fn resolve(
+        &self,
+        config_dir: &Path,
+        revoked_token_ids: &std::collections::BTreeSet<String>,
+        revoked_principal_ids: &std::collections::BTreeSet<String>,
+    ) -> Result<ResolvedPilotToken, DeploymentError> {
         if self.principal.trim().is_empty() {
             return Err(DeploymentError::Validation(
                 "pilot auth principal must not be empty".into(),
@@ -127,6 +183,30 @@ impl PilotTokenConfig {
         if self.scopes.is_empty() {
             return Err(DeploymentError::Validation(format!(
                 "pilot auth principal {} must declare at least one scope",
+                self.principal
+            )));
+        }
+        let principal_id = self
+            .principal_id
+            .clone()
+            .unwrap_or_else(|| format!("principal:{}", self.principal.trim()))
+            .trim()
+            .to_string();
+        if principal_id.is_empty() {
+            return Err(DeploymentError::Validation(format!(
+                "pilot auth principal {} resolved an empty principal_id",
+                self.principal
+            )));
+        }
+        let token_id = self
+            .token_id
+            .clone()
+            .unwrap_or_else(|| format!("token:{}", self.principal.trim()))
+            .trim()
+            .to_string();
+        if token_id.is_empty() {
+            return Err(DeploymentError::Validation(format!(
+                "pilot auth principal {} resolved an empty token_id",
                 self.principal
             )));
         }
@@ -200,16 +280,25 @@ impl PilotTokenConfig {
 
         Ok(ResolvedPilotToken {
             principal: self.principal.clone(),
+            principal_id: principal_id.clone(),
+            token_id: token_id.clone(),
             scopes: self.scopes.clone(),
             policy_context: normalize_policy_context(self.policy_context.clone()),
             token,
             source,
+            revoked: self.revoked
+                || revoked_token_ids.contains(&token_id)
+                || revoked_principal_ids.contains(&principal_id),
         })
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedPilotServiceConfig {
+    pub config_path: PathBuf,
+    pub config_version: String,
+    pub schema_version: String,
+    pub service_mode: ServiceMode,
     pub bind_addr: String,
     pub database_path: PathBuf,
     pub audit_log_path: PathBuf,
@@ -221,23 +310,70 @@ impl ResolvedPilotServiceConfig {
     pub fn sidecar_path(&self) -> PathBuf {
         sidecar_catalog_path_for_journal(&self.database_path)
     }
+
+    pub fn service_status(&self) -> ServiceStatusResponse {
+        ServiceStatusResponse {
+            status: "ok".into(),
+            build_version: env!("CARGO_PKG_VERSION").into(),
+            config_version: self.config_version.clone(),
+            schema_version: self.schema_version.clone(),
+            bind_addr: Some(self.bind_addr.clone()),
+            service_mode: self.service_mode.clone(),
+            storage: ServiceStatusStorage {
+                database_path: Some(self.database_path.clone()),
+                sidecar_path: Some(self.sidecar_path()),
+                audit_log_path: Some(self.audit_log_path.clone()),
+                partition_root: None,
+            },
+            principals: self
+                .token_summaries
+                .iter()
+                .map(|summary| summary.status_summary())
+                .collect(),
+            replicas: Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedPilotTokenSummary {
     pub principal: String,
+    pub principal_id: String,
+    pub token_id: String,
     pub scopes: Vec<AuthScope>,
     pub policy_context: Option<PolicyContext>,
     pub source: String,
+    pub revoked: bool,
+}
+
+impl ResolvedPilotTokenSummary {
+    pub fn status_summary(&self) -> PrincipalStatusSummary {
+        PrincipalStatusSummary {
+            principal: self.principal.clone(),
+            principal_id: self.principal_id.clone(),
+            token_id: self.token_id.clone(),
+            scopes: self
+                .scopes
+                .iter()
+                .map(|scope| format!("{scope:?}").to_lowercase())
+                .collect(),
+            policy_context: self.policy_context.clone(),
+            source: self.source.clone(),
+            revoked: self.revoked,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ResolvedPilotToken {
     principal: String,
+    principal_id: String,
+    token_id: String,
     scopes: Vec<AuthScope>,
     policy_context: Option<PolicyContext>,
     token: String,
     source: String,
+    revoked: bool,
 }
 
 #[derive(Debug, Error)]
@@ -294,9 +430,19 @@ pub async fn serve_pilot_http_service(
     let listener = tokio::net::TcpListener::bind(&resolved.bind_addr).await?;
     let options = HttpKernelOptions::new()
         .with_auth(resolved.auth.clone())
-        .with_audit_log_path(resolved.audit_log_path.clone());
+        .with_audit_log_path(resolved.audit_log_path.clone())
+        .with_service_status(resolved.service_status())
+        .with_auth_reload_config_path(resolved.config_path.clone());
     axum::serve(listener, http_router_with_options(service, options)).await?;
     Ok(())
+}
+
+fn default_config_version() -> String {
+    "pilot-v1".into()
+}
+
+fn default_schema_version() -> String {
+    "v1".into()
 }
 
 fn resolve_path(base_dir: &Path, path: &Path) -> PathBuf {
@@ -398,7 +544,7 @@ mod tests {
         default_audit_log_path, DeploymentError, PilotAuthConfig, PilotServiceConfig,
         PilotTokenConfig,
     };
-    use crate::AuthScope;
+    use crate::{AuthScope, ServiceMode};
     use aether_ast::PolicyContext;
     use std::{
         fs,
@@ -415,12 +561,19 @@ mod tests {
         fs::write(&token_path, "secret-token\n").expect("write token");
 
         let config = PilotServiceConfig {
+            config_version: "pilot-v1".into(),
+            schema_version: "v1".into(),
+            service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
             database_path: PathBuf::from("../data/coordination.sqlite"),
             audit_log_path: None,
             auth: PilotAuthConfig {
+                revoked_token_ids: Vec::new(),
+                revoked_principal_ids: Vec::new(),
                 tokens: vec![PilotTokenConfig {
                     principal: "pilot-operator".into(),
+                    principal_id: Some("principal:pilot-operator".into()),
+                    token_id: Some("token:pilot-operator".into()),
                     scopes: vec![AuthScope::Query, AuthScope::Explain],
                     policy_context: Some(PolicyContext {
                         capabilities: vec!["executor".into()],
@@ -430,6 +583,7 @@ mod tests {
                     token_env: None,
                     token_file: Some(PathBuf::from("pilot.token")),
                     token_command: None,
+                    revoked: false,
                 }],
             },
         };
@@ -457,18 +611,26 @@ mod tests {
     #[test]
     fn rejects_missing_or_ambiguous_token_sources() {
         let config = PilotServiceConfig {
+            config_version: "pilot-v1".into(),
+            schema_version: "v1".into(),
+            service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
             database_path: PathBuf::from("coordination.sqlite"),
             audit_log_path: None,
             auth: PilotAuthConfig {
+                revoked_token_ids: Vec::new(),
+                revoked_principal_ids: Vec::new(),
                 tokens: vec![PilotTokenConfig {
                     principal: "pilot-operator".into(),
+                    principal_id: Some("principal:pilot-operator".into()),
+                    token_id: Some("token:pilot-operator".into()),
                     scopes: vec![AuthScope::Query],
                     policy_context: None,
                     token: Some("inline".into()),
                     token_env: Some("AETHER_TOKEN".into()),
                     token_file: None,
                     token_command: None,
+                    revoked: false,
                 }],
             },
         };
@@ -487,18 +649,26 @@ mod tests {
     fn resolves_token_from_command() {
         let command = token_command_fixture("command-token");
         let config = PilotServiceConfig {
+            config_version: "pilot-v1".into(),
+            schema_version: "v1".into(),
+            service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
             database_path: PathBuf::from("coordination.sqlite"),
             audit_log_path: None,
             auth: PilotAuthConfig {
+                revoked_token_ids: Vec::new(),
+                revoked_principal_ids: Vec::new(),
                 tokens: vec![PilotTokenConfig {
                     principal: "pilot-operator".into(),
+                    principal_id: Some("principal:pilot-operator".into()),
+                    token_id: Some("token:pilot-operator".into()),
                     scopes: vec![AuthScope::Query],
                     policy_context: None,
                     token: None,
                     token_env: None,
                     token_file: None,
                     token_command: Some(command),
+                    revoked: false,
                 }],
             },
         };
@@ -513,18 +683,26 @@ mod tests {
     #[test]
     fn rejects_empty_token_command_output() {
         let config = PilotServiceConfig {
+            config_version: "pilot-v1".into(),
+            schema_version: "v1".into(),
+            service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
             database_path: PathBuf::from("coordination.sqlite"),
             audit_log_path: None,
             auth: PilotAuthConfig {
+                revoked_token_ids: Vec::new(),
+                revoked_principal_ids: Vec::new(),
                 tokens: vec![PilotTokenConfig {
                     principal: "pilot-operator".into(),
+                    principal_id: Some("principal:pilot-operator".into()),
+                    token_id: Some("token:pilot-operator".into()),
                     scopes: vec![AuthScope::Query],
                     policy_context: None,
                     token: None,
                     token_env: None,
                     token_file: None,
                     token_command: Some(empty_output_command_fixture()),
+                    revoked: false,
                 }],
             },
         };

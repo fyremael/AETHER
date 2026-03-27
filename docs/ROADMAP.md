@@ -37,19 +37,19 @@ If a proposed feature weakens one of those, it is the wrong next step.
 
 Focus:
 
-- stronger lifecycle and revocation ergonomics around auth
-- deployment and upgrade discipline beyond the current Windows pilot bundle
-- richer operator-facing incident and explain surfaces
-- longer-duration soak and recovery evidence
+- deepen the new status/reload/backup surfaces into broader operational discipline
+- keep deployment and upgrade discipline coherent as the operator surface grows
+- extend cut-diff and proof surfaces without widening beyond exact pilot semantics
+- add longer-duration soak and recovery evidence around the now-hardened bundle
 
 ### 2. Distributed-truth execution
 
 Focus:
 
-- replicated authority partitions
-- failover semantics
-- durable federated service boundaries
-- imported-fact widening only where provenance can remain exact
+- take the current single-host replicated authority-partition prototype toward clearer failover and recovery evidence
+- widen durable federated service boundaries only where provenance remains exact
+- keep imported-fact widening constrained to provenance-preserving shapes
+- delay generalized consensus machinery until the current exact-local-truth model is exhausted
 
 Governing docs:
 
@@ -96,3 +96,8 @@ If the team needs a practical ordering, use this one:
 3. execute replicated authority partitions
 4. widen distributed truth only where provenance remains exact
 5. improve ergonomics and optimization around the already-settled core
+
+The first pass through that order is now in motion: pilot hardening, delta
+reporting, replicated authority partitions, and federated HTTP surfaces exist.
+The next roadmap pass is to make those new surfaces calmer, more operable, and
+better evidenced rather than immediately broader.

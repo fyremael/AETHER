@@ -1,11 +1,18 @@
 {
+  "config_version": "pilot-v1",
+  "schema_version": "v1",
+  "service_mode": "single_node",
   "bind_addr": "127.0.0.1:3000",
   "database_path": "../data/coordination.sqlite",
   "audit_log_path": "../logs/audit.jsonl",
   "auth": {
+    "revoked_token_ids": [],
+    "revoked_principal_ids": [],
     "tokens": [
       {
         "principal": "pilot-operator",
+        "principal_id": "principal:pilot-operator",
+        "token_id": "token:pilot-operator",
         "scopes": [
           "append",
           "query",
@@ -18,7 +25,8 @@
           ],
           "visibilities": []
         },
-        "token_file": "pilot-operator.token"
+        "token_file": "pilot-operator.token",
+        "revoked": false
       }
     ]
   }

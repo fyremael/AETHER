@@ -45,8 +45,11 @@ Completed:
 - scheduled/manual GitHub Actions automation added for the pilot launch-validation and drift artifact pack
 - launch validation and drift promotion completed into a required mainline CI gate
 - packaged durable pilot-service bundles implemented with config-backed startup, package-local rotation tooling, restart/replay benchmark coverage, and secret-file/env/command token resolution
+- service-status, auth-reload, and config-backed token/principal identity surfaces implemented for the hardened pilot boundary
+- packaged backup and restore helpers implemented for the Windows pilot bundle, with snapshot/export of journal, sidecar catalog, audit log, config, and token files
+- scheduled/manual extended-operability workflow added for soak, package build, and launch-validation evidence beyond the standard release gate
 - first real Go operator shell implemented against the HTTP API with typed client coverage
-- pilot-focused Go operator TUI implemented as the live cockpit for health, coordination state, audit entries, history, and tuple proof traces
+- pilot-focused Go operator TUI implemented as the live cockpit for health, coordination state, audit entries, history, tuple proof traces, service status, and coordination diffs
 - broader typed Python SDK surface implemented against the HTTP API with fixture builders and live integration coverage
 - semantic compliance matrix added to map `SPEC.md` sections `1-11` to implementation and acceptance evidence for the current v1 single-node closure claim
 - partition IDs, partition-qualified cuts, and federated-cut types implemented in the semantic model
@@ -54,6 +57,10 @@ Completed:
 - imported-fact federation implemented over explicit partition cuts, including provenance-bearing extensional facts that carry source partition/cut context into derived tuples
 - federated document execution, explain traces, and markdown report generation implemented on top of the partition-aware in-memory service
 - SQLite-backed partition-aware service implemented for durable per-partition replay and restart-safe federated imported-fact / explain / report execution
+- single-host leader/follower replicated authority partitions implemented as a manual-failover prototype with leader epochs, follower replay, stale-epoch fencing, HTTP status surfaces, and federated HTTP routes
+- coordination delta reports implemented in JSON and markdown for cut-to-cut operator comparisons, including policy-aware trace-handle redaction instead of hard failure
+- federated run/report HTTP surfaces implemented for the replicated prototype, with imported-cut provenance carried into explain and report artifacts
+- lightweight exact-response reuse implemented for repeated replicated federated run/report requests, invalidated on append and promotion
 - structured release-readiness QA suite implemented with a dedicated runner, Pages preview build, package build, and uploaded workflow artifacts for manual/tagged release preparation
 - documentation portal, architecture guide, developer workflow guide, operator guide, glossary, and documentation standards now exist
 - GitHub Pages publishing pipeline added for the documentation portal and generated Rust API reference
@@ -75,10 +82,9 @@ Still open:
 The most immediate work now sits just beyond the launch-ready pilot slice and
 the now-closed v1 single-node semantic core:
 
-- add longer-duration soak coverage beyond the current launch validation window
-- decide how far to widen audit context from the current semantic cut/query/tuple fields into fuller operator intent and semantic diffs
-- continue service-operability hardening beyond the current single-node Windows bundle, with deeper lifecycle management after the new startup-time secret-manager bridge
+- extend the new single-host replicated-partition prototype toward stronger recovery drills, better status surfacing, and clearer operator presets without pretending it is a generalized cluster manager
+- add longer-duration scheduled operability evidence beyond the current release and launch gates
+- decide how far to widen audit context from the current semantic cut/query/tuple/diff fields into fuller operator intent
 - decide which post-v1 ergonomic DSL extensions matter beyond the now-implemented canonical surface
-- continue runtime optimization now that the current bounded-aggregation requirement is covered
-- continue the distributed-truth plan beyond the now-landed durable partition slice toward replicated authority partitions, federated service boundaries, and failover semantics
-- decide how far to widen imported-fact federation beyond the current single-goal provenance-preserving query shape
+- continue runtime optimization now that the current bounded-aggregation requirement is covered and the replicated federated read path has its first cache
+- decide how far to widen imported-fact federation beyond the current provenance-exact single-goal query shape

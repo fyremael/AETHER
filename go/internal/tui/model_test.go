@@ -24,8 +24,14 @@ func TestStartupLoadsOverviewData(t *testing.T) {
 	if loaded.health == nil || loaded.health.Status != "ok" {
 		t.Fatalf("expected health to load, got %#v", loaded.health)
 	}
+	if loaded.status == nil || loaded.status.ServiceMode != "single_node" {
+		t.Fatalf("expected service status to load, got %#v", loaded.status)
+	}
 	if loaded.report == nil || loaded.report.HistoryLen != 2 {
 		t.Fatalf("expected report to load, got %#v", loaded.report)
+	}
+	if loaded.delta == nil || loaded.delta.RightHistoryLen != 2 {
+		t.Fatalf("expected delta report to load, got %#v", loaded.delta)
 	}
 	if loaded.lastLiveRefresh.IsZero() {
 		t.Fatalf("expected last live refresh to be set")
@@ -41,7 +47,7 @@ func TestTabSwitchingPreservesSelectionState(t *testing.T) {
 	model.activeTab = CoordinationTab
 	model.moveSelection(1)
 
-	updated, _ := model.Update(keyRunes("3"))
+	updated, _ := model.Update(keyRunes("4"))
 	model = updated.(Model)
 	updated, _ = model.Update(keyRunes("2"))
 	model = updated.(Model)
@@ -162,27 +168,35 @@ func policy() *client.PolicyContext {
 type fakeDataSource struct {
 	healthResponses  []*client.HealthResponse
 	healthErrors     []error
+	statusResponses  []*client.ServiceStatusResponse
+	statusErrors     []error
 	historyResponses []*client.HistoryResponse
 	historyErrors    []error
 	auditResponses   []*client.AuditLogResponse
 	auditErrors      []error
 	reportResponses  []*client.CoordinationPilotReport
 	reportErrors     []error
+	deltaResponses   []*client.CoordinationDeltaReport
+	deltaErrors      []error
 	explainResponses []*client.ExplainTupleResponse
 	explainErrors    []error
 	healthCalls      int
+	statusCalls      int
 	historyCalls     int
 	auditCalls       int
 	reportCalls      int
+	deltaCalls       int
 	explainCalls     int
 }
 
 func newFakeDataSource() *fakeDataSource {
 	return &fakeDataSource{
 		healthResponses:  []*client.HealthResponse{{Status: "ok"}},
+		statusResponses:  []*client.ServiceStatusResponse{baseStatus()},
 		historyResponses: []*client.HistoryResponse{baseHistory()},
 		auditResponses:   []*client.AuditLogResponse{baseAudit()},
 		reportResponses:  []*client.CoordinationPilotReport{baseReport(1)},
+		deltaResponses:   []*client.CoordinationDeltaReport{baseDelta()},
 		explainResponses: []*client.ExplainTupleResponse{baseExplain()},
 	}
 }
@@ -194,6 +208,15 @@ func (f *fakeDataSource) Health(context.Context) (*client.HealthResponse, error)
 		return nil, err
 	}
 	return pickHealth(f.healthResponses, index), nil
+}
+
+func (f *fakeDataSource) Status(context.Context) (*client.ServiceStatusResponse, error) {
+	index := f.statusCalls
+	f.statusCalls++
+	if err := pickErr(f.statusErrors, index); err != nil {
+		return nil, err
+	}
+	return pickStatus(f.statusResponses, index), nil
 }
 
 func (f *fakeDataSource) History(context.Context) (*client.HistoryResponse, error) {
@@ -221,6 +244,15 @@ func (f *fakeDataSource) CoordinationPilotReport(context.Context, *client.Policy
 		return nil, err
 	}
 	return pickReport(f.reportResponses, index), nil
+}
+
+func (f *fakeDataSource) CoordinationDeltaReport(context.Context, client.CoordinationCut, client.CoordinationCut, *client.PolicyContext) (*client.CoordinationDeltaReport, error) {
+	index := f.deltaCalls
+	f.deltaCalls++
+	if err := pickErr(f.deltaErrors, index); err != nil {
+		return nil, err
+	}
+	return pickDelta(f.deltaResponses, index), nil
 }
 
 func (f *fakeDataSource) ExplainTupleWithPolicy(context.Context, uint64, *client.PolicyContext) (*client.ExplainTupleResponse, error) {
@@ -256,6 +288,13 @@ func pickHistory(values []*client.HistoryResponse, index int) *client.HistoryRes
 	return values[index]
 }
 
+func pickStatus(values []*client.ServiceStatusResponse, index int) *client.ServiceStatusResponse {
+	if index >= len(values) {
+		return values[len(values)-1]
+	}
+	return values[index]
+}
+
 func pickAudit(values []*client.AuditLogResponse, index int) *client.AuditLogResponse {
 	if index >= len(values) {
 		return values[len(values)-1]
@@ -264,6 +303,13 @@ func pickAudit(values []*client.AuditLogResponse, index int) *client.AuditLogRes
 }
 
 func pickReport(values []*client.CoordinationPilotReport, index int) *client.CoordinationPilotReport {
+	if index >= len(values) {
+		return values[len(values)-1]
+	}
+	return values[index]
+}
+
+func pickDelta(values []*client.CoordinationDeltaReport, index int) *client.CoordinationDeltaReport {
 	if index >= len(values) {
 		return values[len(values)-1]
 	}
@@ -293,6 +339,24 @@ func baseHistory() *client.HistoryResponse {
 				Value:     client.Value{Kind: "String", String: "leased"},
 				Op:        "LeaseOpen",
 				Element:   2,
+			},
+		},
+	}
+}
+
+func baseStatus() *client.ServiceStatusResponse {
+	return &client.ServiceStatusResponse{
+		Status:        "ok",
+		BuildVersion:  "0.1.0",
+		ConfigVersion: "pilot-v1",
+		SchemaVersion: "v1",
+		ServiceMode:   "single_node",
+		Principals: []client.PrincipalStatusSummary{
+			{
+				Principal:   "pilot-operator",
+				PrincipalID: "principal:pilot-operator",
+				TokenID:     "token:pilot-operator",
+				Scopes:      []string{"append", "query", "explain", "ops"},
 			},
 		},
 	}
@@ -384,6 +448,36 @@ func baseReport(currentCount int) *client.CoordinationPilotReport {
 					Iteration:      1,
 					SourceDatomIDs: []client.ElementID{1, 2},
 					ParentTupleIDs: []client.TupleID{3},
+				},
+			},
+		},
+	}
+}
+
+func baseDelta() *client.CoordinationDeltaReport {
+	return &client.CoordinationDeltaReport{
+		GeneratedAtMS:    1000,
+		Left:             client.AsOfCut(9),
+		Right:            client.CurrentCut(),
+		LeftHistoryLen:   2,
+		RightHistoryLen:  2,
+		CurrentAuthorized: client.ReportSectionDelta{
+			Changed: []client.ReportRowChange{
+				{
+					Before: client.ReportRow{
+						TupleID: ptrUint64(7),
+						Values: []client.Value{
+							{Kind: "Entity", Entity: 1},
+							{Kind: "String", String: "worker-a"},
+						},
+					},
+					After: client.ReportRow{
+						TupleID: ptrUint64(8),
+						Values: []client.Value{
+							{Kind: "Entity", Entity: 1},
+							{Kind: "String", String: "worker-b"},
+						},
+					},
 				},
 			},
 		},

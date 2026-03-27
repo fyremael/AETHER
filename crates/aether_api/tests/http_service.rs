@@ -1,16 +1,22 @@
 use aether_api::{
     coordination_pilot_dsl, coordination_pilot_seed_history, http_router, http_router_with_options,
-    AppendRequest, AuditEntry, AuditLogResponse, AuthScope, CoordinationPilotReport,
-    CoordinationPilotReportRequest, ExplainTupleRequest, GetArtifactReferenceRequest,
-    HealthResponse, HistoryResponse, HttpAuthConfig, HttpKernelOptions, InMemoryKernelService,
-    KernelService, ParseDocumentRequest, ParseDocumentResponse, RegisterArtifactReferenceRequest,
-    RegisterVectorRecordRequest, RunDocumentRequest, RunDocumentResponse, SearchVectorsRequest,
-    SearchVectorsResponse, SqliteKernelService, VectorFactProjection, VectorMetric,
+    http_router_with_partitioned_options, AppendRequest, AuditEntry, AuditLogResponse, AuthScope,
+    AuthorityPartitionConfig, CoordinationCut, CoordinationDeltaReport,
+    CoordinationDeltaReportRequest, CoordinationPilotReport, CoordinationPilotReportRequest,
+    ExplainTupleRequest, FederatedExplainReport, FederatedRunDocumentRequest,
+    GetArtifactReferenceRequest, HealthResponse, HistoryResponse, HttpAuthConfig,
+    HttpKernelOptions, ImportedFactQueryRequest, InMemoryKernelService, KernelService,
+    ParseDocumentRequest, ParseDocumentResponse, PartitionAppendRequest, PartitionStatusResponse,
+    PilotAuthConfig, PilotServiceConfig, PilotTokenConfig, PromoteReplicaRequest,
+    RegisterArtifactReferenceRequest, RegisterVectorRecordRequest, ReplicaConfig, ReplicaRole,
+    ReplicatedAuthorityPartitionService, RunDocumentRequest, RunDocumentResponse,
+    SearchVectorsRequest, SearchVectorsResponse, ServiceMode, ServiceStatusResponse,
+    SqliteKernelService, VectorFactProjection, VectorMetric,
     COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
 use aether_ast::{
-    AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PolicyContext,
-    PolicyEnvelope, PredicateId, PredicateRef, ReplicaId, Value,
+    AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PartitionCut,
+    PartitionId, PolicyContext, PolicyEnvelope, PredicateId, PredicateRef, ReplicaId, Value,
 };
 use reqwest::Client;
 use std::collections::BTreeMap;
@@ -689,6 +695,489 @@ async fn coordination_report_endpoint_matches_query_auth_behavior() {
 }
 
 #[tokio::test]
+async fn http_service_exposes_status_and_supports_auth_reload() {
+    let temp = TestTempDir::new("status-reload");
+    let database_path = temp.path().join("pilot.sqlite");
+    let audit_path = temp.path().join("audit.jsonl");
+    let config_path = temp.path().join("pilot-service.json");
+
+    let mut config = PilotServiceConfig {
+        config_version: "test-config-v1".into(),
+        schema_version: "test-schema-v1".into(),
+        service_mode: ServiceMode::SingleNode,
+        bind_addr: "127.0.0.1:0".into(),
+        database_path: database_path.clone(),
+        audit_log_path: Some(audit_path.clone()),
+        auth: PilotAuthConfig {
+            tokens: vec![
+                PilotTokenConfig {
+                    principal: "pilot-operator".into(),
+                    principal_id: Some("principal:pilot-operator".into()),
+                    token_id: Some("token:pilot-operator".into()),
+                    scopes: vec![
+                        AuthScope::Append,
+                        AuthScope::Query,
+                        AuthScope::Explain,
+                        AuthScope::Ops,
+                    ],
+                    policy_context: Some(PolicyContext {
+                        capabilities: vec!["executor".into()],
+                        visibilities: Vec::new(),
+                    }),
+                    token: Some("pilot-operator-token".into()),
+                    token_env: None,
+                    token_file: None,
+                    token_command: None,
+                    revoked: false,
+                },
+                PilotTokenConfig {
+                    principal: "query-client".into(),
+                    principal_id: Some("principal:query-client".into()),
+                    token_id: Some("token:query-client".into()),
+                    scopes: vec![AuthScope::Query],
+                    policy_context: None,
+                    token: Some("pilot-query-token".into()),
+                    token_env: None,
+                    token_file: None,
+                    token_command: None,
+                    revoked: false,
+                },
+            ],
+            revoked_token_ids: Vec::new(),
+            revoked_principal_ids: Vec::new(),
+        },
+    };
+    std::fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&config).expect("encode config"),
+    )
+    .expect("write config");
+    let resolved = config
+        .clone()
+        .resolve(&config_path)
+        .expect("resolve pilot config");
+    let options = HttpKernelOptions::new()
+        .with_auth(resolved.auth.clone())
+        .with_audit_log_path(resolved.audit_log_path.clone())
+        .with_service_status(resolved.service_status())
+        .with_auth_reload_config_path(config_path.clone());
+    let (base_url, server) = spawn_server_with_options(InMemoryKernelService::new(), options).await;
+    let client = Client::new();
+
+    let status = client
+        .get(format!("{base_url}/v1/status"))
+        .bearer_auth("pilot-operator-token")
+        .send()
+        .await
+        .expect("status request");
+    assert!(status.status().is_success());
+    let status = status
+        .json::<ServiceStatusResponse>()
+        .await
+        .expect("status response");
+    assert_eq!(status.service_mode, ServiceMode::SingleNode);
+    assert_eq!(status.config_version, "test-config-v1");
+    assert_eq!(status.schema_version, "test-schema-v1");
+    assert_eq!(status.principals.len(), 2);
+    assert!(status
+        .principals
+        .iter()
+        .any(|principal| principal.token_id == "token:query-client" && !principal.revoked));
+
+    config.config_version = "test-config-v2".into();
+    config.auth.revoked_token_ids = vec!["token:query-client".into()];
+    std::fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&config).expect("encode updated config"),
+    )
+    .expect("write updated config");
+
+    let reload = client
+        .post(format!("{base_url}/v1/admin/auth/reload"))
+        .bearer_auth("pilot-operator-token")
+        .send()
+        .await
+        .expect("reload request");
+    assert!(reload.status().is_success());
+
+    let status = client
+        .get(format!("{base_url}/v1/status"))
+        .bearer_auth("pilot-operator-token")
+        .send()
+        .await
+        .expect("status after reload");
+    assert!(status.status().is_success());
+    let status = status
+        .json::<ServiceStatusResponse>()
+        .await
+        .expect("status response");
+    assert_eq!(status.config_version, "test-config-v2");
+    assert!(status
+        .principals
+        .iter()
+        .any(|principal| principal.token_id == "token:query-client" && principal.revoked));
+
+    let revoked = client
+        .get(format!("{base_url}/v1/history"))
+        .bearer_auth("pilot-query-token")
+        .send()
+        .await
+        .expect("revoked token request");
+    assert_eq!(revoked.status(), reqwest::StatusCode::FORBIDDEN);
+
+    stop_server(server).await;
+}
+
+#[tokio::test]
+async fn coordination_delta_report_endpoint_is_policy_aware() {
+    let audit = TestAuditPath::new("coordination-delta-audit");
+    let options = HttpKernelOptions::new()
+        .with_auth(pilot_auth())
+        .with_audit_log_path(audit.path().to_path_buf());
+    let (base_url, server) = spawn_server_with_options(InMemoryKernelService::new(), options).await;
+    let client = Client::new();
+
+    let mut datoms = coordination_pilot_seed_history();
+    for datom in &mut datoms {
+        if datom.element.0 >= 6 {
+            datom.policy = Some(PolicyEnvelope {
+                capabilities: vec!["executor".into()],
+                visibilities: Vec::new(),
+            });
+        }
+    }
+
+    let append = client
+        .post(format!("{base_url}/v1/append"))
+        .bearer_auth("pilot-operator-token")
+        .json(&AppendRequest { datoms })
+        .send()
+        .await
+        .expect("append coordination history");
+    assert!(append.status().is_success());
+
+    let request = CoordinationDeltaReportRequest {
+        left: CoordinationCut::AsOf {
+            element: ElementId::new(COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT),
+        },
+        right: CoordinationCut::Current,
+        policy_context: None,
+    };
+
+    let operator = client
+        .post(format!("{base_url}/v1/reports/pilot/coordination-delta"))
+        .bearer_auth("pilot-operator-token")
+        .json(&request)
+        .send()
+        .await
+        .expect("operator delta request");
+    assert!(operator.status().is_success());
+    let operator = operator
+        .json::<CoordinationDeltaReport>()
+        .await
+        .expect("operator delta response");
+    assert_eq!(operator.right_history_len, 25);
+    let operator_diff_count = operator.current_authorized.added.len()
+        + operator.current_authorized.removed.len()
+        + operator.current_authorized.changed.len()
+        + operator.claimable.added.len()
+        + operator.claimable.removed.len()
+        + operator.claimable.changed.len()
+        + operator.live_heartbeats.added.len()
+        + operator.live_heartbeats.removed.len()
+        + operator.live_heartbeats.changed.len()
+        + operator.accepted_outcomes.added.len()
+        + operator.accepted_outcomes.removed.len()
+        + operator.accepted_outcomes.changed.len()
+        + operator.rejected_outcomes.added.len()
+        + operator.rejected_outcomes.removed.len()
+        + operator.rejected_outcomes.changed.len();
+    assert!(operator_diff_count > 0);
+    let operator_has_trace = operator
+        .current_authorized
+        .added
+        .iter()
+        .chain(operator.current_authorized.removed.iter())
+        .chain(operator.claimable.added.iter())
+        .chain(operator.claimable.removed.iter())
+        .chain(operator.live_heartbeats.added.iter())
+        .chain(operator.live_heartbeats.removed.iter())
+        .chain(operator.accepted_outcomes.added.iter())
+        .chain(operator.accepted_outcomes.removed.iter())
+        .chain(operator.rejected_outcomes.added.iter())
+        .chain(operator.rejected_outcomes.removed.iter())
+        .map(|row| row.trace.as_ref())
+        .chain(
+            operator
+                .current_authorized
+                .changed
+                .iter()
+                .chain(operator.claimable.changed.iter())
+                .chain(operator.live_heartbeats.changed.iter())
+                .chain(operator.accepted_outcomes.changed.iter())
+                .chain(operator.rejected_outcomes.changed.iter())
+                .flat_map(|row| [row.before_trace.as_ref(), row.after_trace.as_ref()]),
+        )
+        .any(|trace| trace.is_some());
+    assert!(operator_has_trace);
+
+    let public = client
+        .post(format!("{base_url}/v1/reports/pilot/coordination-delta"))
+        .bearer_auth("pilot-query-token")
+        .json(&request)
+        .send()
+        .await
+        .expect("public delta request");
+    assert!(public.status().is_success());
+    let public = public
+        .json::<CoordinationDeltaReport>()
+        .await
+        .expect("public delta response");
+    assert_eq!(public.right_history_len, 5);
+    assert!(public.current_authorized.added.is_empty());
+    assert!(public.live_heartbeats.added.is_empty());
+    assert!(public.accepted_outcomes.added.is_empty());
+
+    let persisted = read_audit_entries(audit.path());
+    assert!(persisted.iter().any(|entry| {
+        entry.path == "/v1/reports/pilot/coordination-delta"
+            && entry.principal == "pilot-operator"
+            && entry.context.temporal_view.as_deref() == Some("coordination_delta_report")
+            && entry.context.datom_count == Some(25)
+            && entry.context.policy_decision.as_deref() == Some("token_default")
+    }));
+    assert!(persisted.iter().any(|entry| {
+        entry.path == "/v1/reports/pilot/coordination-delta"
+            && entry.principal == "query-client"
+            && entry.context.datom_count == Some(5)
+            && entry.context.policy_decision.as_deref() == Some("public")
+    }));
+
+    stop_server(server).await;
+}
+
+#[tokio::test]
+async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
+    let temp = TestTempDir::new("partitioned-http");
+    let partitioned = replicated_partition_service(temp.path());
+    let options = HttpKernelOptions::new()
+        .with_auth(pilot_auth())
+        .with_service_status(ServiceStatusResponse {
+            status: "ok".into(),
+            build_version: env!("CARGO_PKG_VERSION").into(),
+            config_version: "replicated-prototype".into(),
+            schema_version: "v1".into(),
+            bind_addr: None,
+            service_mode: ServiceMode::Partitioned,
+            storage: aether_api::ServiceStatusStorage {
+                database_path: None,
+                sidecar_path: None,
+                audit_log_path: None,
+                partition_root: Some(temp.path().to_path_buf()),
+            },
+            principals: Vec::new(),
+            replicas: Vec::new(),
+        });
+    let (base_url, server) =
+        spawn_partitioned_server_with_options(InMemoryKernelService::new(), partitioned, options)
+            .await;
+    let client = Client::new();
+
+    for (partition, datoms) in [
+        ("readiness", vec![policy_status_datom(1, "ready", 1, None)]),
+        (
+            "authority",
+            vec![partition_owner_datom(1, "worker-a", 3, None)],
+        ),
+    ] {
+        let append = client
+            .post(format!("{base_url}/v1/partitions/append"))
+            .bearer_auth("pilot-operator-token")
+            .json(&PartitionAppendRequest {
+                partition: PartitionId::new(partition),
+                leader_epoch: None,
+                datoms,
+            })
+            .send()
+            .await
+            .expect("partition append request");
+        assert!(append.status().is_success());
+    }
+
+    let status = client
+        .get(format!("{base_url}/v1/status"))
+        .bearer_auth("pilot-operator-token")
+        .send()
+        .await
+        .expect("status request");
+    assert!(status.status().is_success());
+    let status = status
+        .json::<ServiceStatusResponse>()
+        .await
+        .expect("status response");
+    assert_eq!(status.service_mode, ServiceMode::Partitioned);
+    assert_eq!(status.replicas.len(), 4);
+
+    let partition_status = client
+        .get(format!("{base_url}/v1/partitions/status"))
+        .bearer_auth("pilot-operator-token")
+        .send()
+        .await
+        .expect("partition status request");
+    assert!(partition_status.status().is_success());
+    let partition_status = partition_status
+        .json::<PartitionStatusResponse>()
+        .await
+        .expect("partition status response");
+    assert_eq!(partition_status.partitions.len(), 2);
+    assert!(partition_status
+        .partitions
+        .iter()
+        .all(|partition| partition.replicas.len() == 2));
+
+    let federated_request = FederatedRunDocumentRequest {
+        dsl: federated_assignment_document(),
+        imports: vec![
+            ImportedFactQueryRequest {
+                cut: PartitionCut::as_of("readiness", ElementId::new(1)),
+                dsl: readiness_document(),
+                predicate: PredicateRef {
+                    id: PredicateId::new(11),
+                    name: "imported_ready_task".into(),
+                    arity: 1,
+                },
+                query_name: Some("ready_now".into()),
+            },
+            ImportedFactQueryRequest {
+                cut: PartitionCut::as_of("authority", ElementId::new(3)),
+                dsl: authority_document(),
+                predicate: PredicateRef {
+                    id: PredicateId::new(12),
+                    name: "imported_authorized_worker".into(),
+                    arity: 2,
+                },
+                query_name: Some("authorized_now".into()),
+            },
+        ],
+        policy_context: None,
+    };
+
+    let federated = client
+        .post(format!("{base_url}/v1/federated/run"))
+        .bearer_auth("pilot-operator-token")
+        .json(&federated_request)
+        .send()
+        .await
+        .expect("federated run request");
+    assert!(federated.status().is_success());
+    let federated = federated
+        .json::<aether_api::FederatedRunDocumentResponse>()
+        .await
+        .expect("federated run response");
+    assert_eq!(federated.imports.len(), 2);
+    assert_eq!(
+        federated.run.query.as_ref().expect("primary query").rows[0].values,
+        vec![
+            Value::Entity(EntityId::new(1)),
+            Value::String("worker-a".into())
+        ]
+    );
+
+    let report = client
+        .post(format!("{base_url}/v1/federated/report"))
+        .bearer_auth("pilot-operator-token")
+        .json(&federated_request)
+        .send()
+        .await
+        .expect("federated report request");
+    assert!(report.status().is_success());
+    let report = report
+        .json::<FederatedExplainReport>()
+        .await
+        .expect("federated report response");
+    assert_eq!(report.primary_query.len(), 1);
+    assert_eq!(
+        report.traces[0]
+            .imported_cuts
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        vec!["authority@e3".to_string(), "readiness@e1".to_string()]
+    );
+
+    let joined_import = client
+        .post(format!("{base_url}/v1/federated/run"))
+        .bearer_auth("pilot-operator-token")
+        .json(&FederatedRunDocumentRequest {
+            dsl: federated_assignment_document(),
+            imports: vec![ImportedFactQueryRequest {
+                cut: PartitionCut::as_of("authority", ElementId::new(3)),
+                dsl: joined_import_document(),
+                predicate: PredicateRef {
+                    id: PredicateId::new(99),
+                    name: "bad_import".into(),
+                    arity: 2,
+                },
+                query_name: Some("joined_now".into()),
+            }],
+            policy_context: None,
+        })
+        .send()
+        .await
+        .expect("joined import request");
+    assert_eq!(joined_import.status(), reqwest::StatusCode::BAD_REQUEST);
+
+    let promote = client
+        .post(format!("{base_url}/v1/partitions/promote"))
+        .bearer_auth("pilot-operator-token")
+        .json(&PromoteReplicaRequest {
+            partition: PartitionId::new("authority"),
+            replica_id: ReplicaId::new(2),
+        })
+        .send()
+        .await
+        .expect("promote request");
+    assert!(promote.status().is_success());
+
+    let stale_append = client
+        .post(format!("{base_url}/v1/partitions/append"))
+        .bearer_auth("pilot-operator-token")
+        .json(&PartitionAppendRequest {
+            partition: PartitionId::new("authority"),
+            leader_epoch: Some(aether_api::LeaderEpoch::new(1)),
+            datoms: vec![partition_owner_datom(1, "worker-b", 4, None)],
+        })
+        .send()
+        .await
+        .expect("stale append request");
+    assert_eq!(stale_append.status(), reqwest::StatusCode::BAD_REQUEST);
+
+    let partition_status = client
+        .get(format!("{base_url}/v1/partitions/status"))
+        .bearer_auth("pilot-operator-token")
+        .send()
+        .await
+        .expect("partition status after promote");
+    let partition_status = partition_status
+        .json::<PartitionStatusResponse>()
+        .await
+        .expect("partition status response");
+    let authority = partition_status
+        .partitions
+        .iter()
+        .find(|partition| partition.partition == PartitionId::new("authority"))
+        .expect("authority partition");
+    assert_eq!(authority.leader_epoch.0, 2);
+    assert!(authority
+        .replicas
+        .iter()
+        .any(|replica| replica.replica_id == ReplicaId::new(2)
+            && replica.role == ReplicaRole::Leader));
+
+    stop_server(server).await;
+}
+
+#[tokio::test]
 async fn authenticated_http_service_audits_query_goal_for_find_alias() {
     let audit = TestAuditPath::new("find-audit");
     let options = HttpKernelOptions::new()
@@ -1127,6 +1616,25 @@ fn anchor_datom(element: u64) -> Datom {
     }
 }
 
+fn partition_owner_datom(
+    entity: u64,
+    owner: &str,
+    element: u64,
+    policy: Option<PolicyEnvelope>,
+) -> Datom {
+    Datom {
+        entity: EntityId::new(entity),
+        attribute: AttributeId::new(1),
+        value: Value::String(owner.into()),
+        op: OperationKind::Assert,
+        element: ElementId::new(element),
+        replica: ReplicaId::new(1),
+        causal_context: Default::default(),
+        provenance: DatomProvenance::default(),
+        policy,
+    }
+}
+
 fn policy_status_datom(
     entity: u64,
     status: &str,
@@ -1176,6 +1684,124 @@ query current_cut {
   current
   goal visible_task(t)
   keep t
+}
+"#
+    .into()
+}
+
+fn readiness_document() -> String {
+    r#"
+schema {
+  attr task.status: ScalarLWW<String>
+}
+
+predicates {
+  task_status(Entity, String)
+  ready_task(Entity)
+}
+
+rules {
+  ready_task(t) <- task_status(t, "ready")
+}
+
+materialize {
+  ready_task
+}
+
+query ready_now {
+  current
+  goal ready_task(t)
+  keep t
+}
+"#
+    .into()
+}
+
+fn authority_document() -> String {
+    r#"
+schema {
+  attr task.owner: ScalarLWW<String>
+}
+
+predicates {
+  task_owner(Entity, String)
+  authorized_worker(Entity, String)
+}
+
+rules {
+  authorized_worker(t, worker) <- task_owner(t, worker)
+}
+
+materialize {
+  authorized_worker
+}
+
+query authorized_now {
+  current
+  goal authorized_worker(t, worker)
+  keep t, worker
+}
+"#
+    .into()
+}
+
+fn federated_assignment_document() -> String {
+    r#"
+schema {
+}
+
+predicates {
+  imported_ready_task(Entity)
+  imported_authorized_worker(Entity, String)
+  actionable_assignment(Entity, String)
+}
+
+rules {
+  actionable_assignment(t, worker) <- imported_ready_task(t), imported_authorized_worker(t, worker)
+}
+
+materialize {
+  actionable_assignment
+}
+
+query actionable_now {
+  current
+  goal actionable_assignment(t, worker)
+  keep t, worker
+}
+
+explain actionable_trace {
+  tuple actionable_assignment(entity(1), "worker-a")
+}
+"#
+    .into()
+}
+
+fn joined_import_document() -> String {
+    r#"
+schema {
+  attr task.status: ScalarLWW<String>
+  attr task.owner: ScalarLWW<String>
+}
+
+predicates {
+  task_status(Entity, String)
+  task_owner(Entity, String)
+  joined_now(Entity, String)
+}
+
+rules {
+  joined_now(t, worker) <- task_status(t, "ready"), task_owner(t, worker)
+}
+
+materialize {
+  joined_now
+}
+
+query joined_now {
+  current
+  goal joined_now(t, worker)
+  keep t, worker
 }
 "#
     .into()
@@ -1249,9 +1875,56 @@ async fn spawn_server_with_options(
     (format!("http://{address}"), server)
 }
 
+async fn spawn_partitioned_server_with_options(
+    service: impl KernelService + Send + 'static,
+    partitioned: ReplicatedAuthorityPartitionService,
+    options: HttpKernelOptions,
+) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind partitioned test listener");
+    let address = listener.local_addr().expect("listener address");
+    let server = tokio::spawn(async move {
+        let router = http_router_with_partitioned_options(service, partitioned, options);
+        axum::serve(listener, router)
+            .await
+            .expect("serve partitioned http kernel");
+    });
+
+    (format!("http://{address}"), server)
+}
+
 async fn stop_server(server: tokio::task::JoinHandle<()>) {
     server.abort();
     let _ = server.await;
+}
+
+struct TestTempDir {
+    path: PathBuf,
+}
+
+impl TestTempDir {
+    fn new(name: &str) -> Self {
+        let unique = NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let mut path = std::env::temp_dir();
+        path.push(format!("aether-http-dir-{name}-{nanos}-{unique}"));
+        std::fs::create_dir_all(&path).expect("create temp dir");
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TestTempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
 }
 
 struct TestDbPath {
@@ -1339,4 +2012,43 @@ fn read_audit_entries(path: &Path) -> Vec<AuditEntry> {
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).expect("parse audit entry"))
         .collect()
+}
+
+fn replicated_partition_service(root: &Path) -> ReplicatedAuthorityPartitionService {
+    ReplicatedAuthorityPartitionService::open(
+        root,
+        vec![
+            AuthorityPartitionConfig {
+                partition: PartitionId::new("readiness"),
+                replicas: vec![
+                    ReplicaConfig {
+                        replica_id: ReplicaId::new(1),
+                        database_path: PathBuf::from("readiness-leader.sqlite"),
+                        role: ReplicaRole::Leader,
+                    },
+                    ReplicaConfig {
+                        replica_id: ReplicaId::new(2),
+                        database_path: PathBuf::from("readiness-follower.sqlite"),
+                        role: ReplicaRole::Follower,
+                    },
+                ],
+            },
+            AuthorityPartitionConfig {
+                partition: PartitionId::new("authority"),
+                replicas: vec![
+                    ReplicaConfig {
+                        replica_id: ReplicaId::new(1),
+                        database_path: PathBuf::from("authority-leader.sqlite"),
+                        role: ReplicaRole::Leader,
+                    },
+                    ReplicaConfig {
+                        replica_id: ReplicaId::new(2),
+                        database_path: PathBuf::from("authority-follower.sqlite"),
+                        role: ReplicaRole::Follower,
+                    },
+                ],
+            },
+        ],
+    )
+    .expect("open replicated partition service")
 }

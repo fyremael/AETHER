@@ -60,6 +60,18 @@ func runWithArgs(
 			return err
 		}
 		return printJSON(response)
+	case "status":
+		response, err := api.Status(ctx)
+		if err != nil {
+			return err
+		}
+		return printJSON(response)
+	case "reload-auth":
+		response, err := api.ReloadAuth(ctx)
+		if err != nil {
+			return err
+		}
+		return printJSON(response)
 	case "history":
 		response, err := api.History(ctx)
 		if err != nil {
@@ -108,6 +120,42 @@ func runWithArgs(
 			*tupleID,
 			buildPolicyContext(*capabilities, *visibilities),
 		)
+		if err != nil {
+			return err
+		}
+		return printJSON(response)
+	case "coordination-report":
+		command := flag.NewFlagSet("coordination-report", flag.ContinueOnError)
+		command.SetOutput(ioDiscard{})
+		capabilities := command.String("capabilities", "", "Comma-separated capabilities")
+		visibilities := command.String("visibilities", "", "Comma-separated visibilities")
+		if err := command.Parse(commandArgs); err != nil {
+			return err
+		}
+		response, err := api.CoordinationPilotReport(ctx, buildPolicyContext(*capabilities, *visibilities))
+		if err != nil {
+			return err
+		}
+		return printJSON(response)
+	case "coordination-diff":
+		command := flag.NewFlagSet("coordination-diff", flag.ContinueOnError)
+		command.SetOutput(ioDiscard{})
+		leftFlag := command.String("left", "as-of:9", "Cut selector: current or as-of:<element>")
+		rightFlag := command.String("right", "current", "Cut selector: current or as-of:<element>")
+		capabilities := command.String("capabilities", "", "Comma-separated capabilities")
+		visibilities := command.String("visibilities", "", "Comma-separated visibilities")
+		if err := command.Parse(commandArgs); err != nil {
+			return err
+		}
+		left, err := parseCoordinationCut(*leftFlag)
+		if err != nil {
+			return err
+		}
+		right, err := parseCoordinationCut(*rightFlag)
+		if err != nil {
+			return err
+		}
+		response, err := api.CoordinationDeltaReport(ctx, left, right, buildPolicyContext(*capabilities, *visibilities))
 		if err != nil {
 			return err
 		}
@@ -190,8 +238,32 @@ func printJSON(value any) error {
 	return encoder.Encode(value)
 }
 
+func parseCoordinationCut(raw string) (client.CoordinationCut, error) {
+	value := strings.TrimSpace(strings.ToLower(raw))
+	if value == "" || value == "current" {
+		return client.CurrentCut(), nil
+	}
+	if strings.HasPrefix(value, "as-of:") {
+		element, err := parseUint(strings.TrimPrefix(value, "as-of:"))
+		if err != nil {
+			return client.CoordinationCut{}, fmt.Errorf("invalid cut %q: %w", raw, err)
+		}
+		return client.AsOfCut(element), nil
+	}
+	return client.CoordinationCut{}, fmt.Errorf("unsupported cut %q; use current or as-of:<element>", raw)
+}
+
+func parseUint(raw string) (uint64, error) {
+	var value uint64
+	_, err := fmt.Sscanf(strings.TrimSpace(raw), "%d", &value)
+	if err != nil {
+		return 0, err
+	}
+	return value, nil
+}
+
 func usageError(message string) error {
-	return fmt.Errorf("%s\nusage: aetherctl [-base-url URL] [-token TOKEN | -token-file PATH] <health|history|run|explain|tui> [flags]", message)
+	return fmt.Errorf("%s\nusage: aetherctl [-base-url URL] [-token TOKEN | -token-file PATH] <health|status|reload-auth|history|run|explain|coordination-report|coordination-diff|tui> [flags]", message)
 }
 
 type ioDiscard struct{}

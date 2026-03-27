@@ -33,6 +33,10 @@ $opsPs1Path = Join-Path $packageRoot "run-aether-ops.ps1"
 $opsCmdPath = Join-Path $packageRoot "run-aether-ops.cmd"
 $rotatePs1Path = Join-Path $packageRoot "rotate-pilot-token.ps1"
 $rotateCmdPath = Join-Path $packageRoot "rotate-pilot-token.cmd"
+$backupPs1Path = Join-Path $packageRoot "backup-pilot-state.ps1"
+$backupCmdPath = Join-Path $packageRoot "backup-pilot-state.cmd"
+$restorePs1Path = Join-Path $packageRoot "restore-pilot-state.ps1"
+$restoreCmdPath = Join-Path $packageRoot "restore-pilot-state.cmd"
 
 function New-SecureToken {
     $bytes = New-Object byte[] 48
@@ -168,6 +172,152 @@ Write-Host "Restart the pilot service to load the new token."
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0rotate-pilot-token.ps1" %*
 '@ | Set-Content -Path $rotateCmdPath
 
+@'
+param(
+    [string]$SnapshotDir
+)
+
+$ErrorActionPreference = "Stop"
+
+function Resolve-ConfigPath([string]$BaseDir, [string]$PathValue) {
+    $path = [System.IO.Path]::IsPathRooted($PathValue) ? $PathValue : (Join-Path $BaseDir $PathValue)
+    $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
+}
+
+$configPath = Join-Path $PSScriptRoot "config\pilot-service.json"
+$config = Get-Content -Path $configPath -Raw | ConvertFrom-Json
+$configDir = Split-Path -Parent $configPath
+$databasePath = Resolve-ConfigPath $configDir $config.database_path
+$sidecarPath = "$databasePath.sidecars.sqlite"
+$auditPath = Resolve-ConfigPath $configDir $config.audit_log_path
+
+if (-not $SnapshotDir) {
+    $SnapshotDir = Join-Path $PSScriptRoot ("snapshots\pilot-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+}
+
+$snapshotDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SnapshotDir)
+$snapshotConfigDir = Join-Path $snapshotDir "config"
+$snapshotDataDir = Join-Path $snapshotDir "data"
+$snapshotLogsDir = Join-Path $snapshotDir "logs"
+New-Item -ItemType Directory -Force -Path $snapshotConfigDir, $snapshotDataDir, $snapshotLogsDir | Out-Null
+
+Copy-Item -Path $configPath -Destination (Join-Path $snapshotConfigDir "pilot-service.json")
+
+$tokenFiles = @()
+foreach ($token in $config.auth.tokens) {
+    if ($token.token_file) {
+        $source = Resolve-ConfigPath $configDir $token.token_file
+        if (Test-Path $source) {
+            $leaf = Split-Path -Leaf $source
+            Copy-Item -Path $source -Destination (Join-Path $snapshotConfigDir $leaf)
+            $tokenFiles += [pscustomobject]@{
+                source = $source
+                leaf = $leaf
+            }
+        }
+    }
+}
+
+if (Test-Path $databasePath) {
+    Copy-Item -Path $databasePath -Destination (Join-Path $snapshotDataDir (Split-Path -Leaf $databasePath))
+}
+if (Test-Path $sidecarPath) {
+    Copy-Item -Path $sidecarPath -Destination (Join-Path $snapshotDataDir (Split-Path -Leaf $sidecarPath))
+}
+if (Test-Path $auditPath) {
+    Copy-Item -Path $auditPath -Destination (Join-Path $snapshotLogsDir (Split-Path -Leaf $auditPath))
+}
+
+$manifest = [pscustomobject]@{
+    generated_at = (Get-Date).ToString("o")
+    config_path = $configPath
+    database_path = $databasePath
+    sidecar_path = $sidecarPath
+    audit_log_path = $auditPath
+    token_files = $tokenFiles
+}
+$manifest | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $snapshotDir "manifest.json")
+Write-Host "Pilot snapshot exported to $snapshotDir"
+'@ | Set-Content -Path $backupPs1Path
+
+@'
+@echo off
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0backup-pilot-state.ps1" %*
+'@ | Set-Content -Path $backupCmdPath
+
+@'
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$SnapshotDir,
+    [switch]$BackupExisting = $true
+)
+
+$ErrorActionPreference = "Stop"
+
+function Resolve-ConfigPath([string]$BaseDir, [string]$PathValue) {
+    $path = [System.IO.Path]::IsPathRooted($PathValue) ? $PathValue : (Join-Path $BaseDir $PathValue)
+    $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
+}
+
+$snapshotDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SnapshotDir)
+$manifestPath = Join-Path $snapshotDir "manifest.json"
+if (-not (Test-Path $manifestPath)) {
+    throw "Snapshot manifest not found at $manifestPath"
+}
+
+$configPath = Join-Path $PSScriptRoot "config\pilot-service.json"
+$config = Get-Content -Path $configPath -Raw | ConvertFrom-Json
+$configDir = Split-Path -Parent $configPath
+$databasePath = Resolve-ConfigPath $configDir $config.database_path
+$sidecarPath = "$databasePath.sidecars.sqlite"
+$auditPath = Resolve-ConfigPath $configDir $config.audit_log_path
+
+if ($BackupExisting) {
+    $backupDir = Join-Path $PSScriptRoot ("restore-backup-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+    $backupConfigDir = Join-Path $backupDir "config"
+    $backupDataDir = Join-Path $backupDir "data"
+    $backupLogsDir = Join-Path $backupDir "logs"
+    New-Item -ItemType Directory -Force -Path $backupConfigDir, $backupDataDir, $backupLogsDir | Out-Null
+    foreach ($path in @($configPath, $databasePath, $sidecarPath, $auditPath)) {
+        if (Test-Path $path) {
+            $destination = switch -Wildcard ($path) {
+                "$configDir*" { $backupConfigDir }
+                "$auditPath" { $backupLogsDir }
+                default { $backupDataDir }
+            }
+            Copy-Item -Path $path -Destination (Join-Path $destination (Split-Path -Leaf $path))
+        }
+    }
+    Write-Host "Backed up current pilot state to $backupDir"
+}
+
+Copy-Item -Path (Join-Path $snapshotDir "config\pilot-service.json") -Destination $configPath -Force
+Get-ChildItem -Path (Join-Path $snapshotDir "config") -Filter *.token -File -ErrorAction SilentlyContinue | ForEach-Object {
+    Copy-Item -Path $_.FullName -Destination (Join-Path (Split-Path -Parent $configPath) $_.Name) -Force
+}
+
+$snapshotDb = Join-Path $snapshotDir ("data\" + (Split-Path -Leaf $databasePath))
+$snapshotSidecars = Join-Path $snapshotDir ("data\" + (Split-Path -Leaf $sidecarPath))
+$snapshotAudit = Join-Path $snapshotDir ("logs\" + (Split-Path -Leaf $auditPath))
+
+if (Test-Path $snapshotDb) {
+    Copy-Item -Path $snapshotDb -Destination $databasePath -Force
+}
+if (Test-Path $snapshotSidecars) {
+    Copy-Item -Path $snapshotSidecars -Destination $sidecarPath -Force
+}
+if (Test-Path $snapshotAudit) {
+    Copy-Item -Path $snapshotAudit -Destination $auditPath -Force
+}
+
+Write-Host "Pilot snapshot restored from $snapshotDir"
+'@ | Set-Content -Path $restorePs1Path
+
+@'
+@echo off
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0restore-pilot-state.ps1" %*
+'@ | Set-Content -Path $restoreCmdPath
+
 if (Test-Path $zipPath) {
     Remove-Item -Force $zipPath
 }
@@ -182,3 +332,5 @@ Write-Host "Token file:   $tokenPath"
 Write-Host "Launch with:  $runCmdPath"
 Write-Host "Operate with: $opsCmdPath"
 Write-Host "Rotate with:  $rotateCmdPath"
+Write-Host "Backup with:  $backupCmdPath"
+Write-Host "Restore with: $restoreCmdPath"

@@ -1,6 +1,7 @@
 use aether_api::{
     default_audit_log_path, http_router_with_options, serve_pilot_http_service, AuthScope,
-    HttpKernelOptions, PilotAuthConfig, PilotServiceConfig, PilotTokenConfig, SqliteKernelService,
+    HttpKernelOptions, PilotAuthConfig, PilotServiceConfig, PilotTokenConfig, ServiceMode,
+    SqliteKernelService,
 };
 use aether_ast::PolicyContext;
 use std::path::PathBuf;
@@ -25,12 +26,19 @@ fn developer_config() -> Result<PilotServiceConfig, Box<dyn std::error::Error>> 
     }
 
     Ok(PilotServiceConfig {
+        config_version: "pilot-v1".into(),
+        schema_version: "v1".into(),
+        service_mode: ServiceMode::SingleNode,
         bind_addr,
         database_path: database_path.clone(),
         audit_log_path: Some(default_audit_log_path(&database_path)),
         auth: PilotAuthConfig {
+            revoked_token_ids: Vec::new(),
+            revoked_principal_ids: Vec::new(),
             tokens: vec![PilotTokenConfig {
                 principal: "pilot-operator".into(),
+                principal_id: Some("principal:pilot-operator".into()),
+                token_id: Some("token:pilot-operator".into()),
                 scopes: vec![
                     AuthScope::Append,
                     AuthScope::Query,
@@ -45,6 +53,7 @@ fn developer_config() -> Result<PilotServiceConfig, Box<dyn std::error::Error>> 
                 token_env: Some(token_env),
                 token_file: None,
                 token_command: None,
+                revoked: false,
             }],
         },
     })
@@ -78,7 +87,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("    - {} via {}", token.principal, token.source);
     }
     println!("  GET  /health");
+    println!("  GET  /v1/status");
     println!("  GET  /v1/audit");
+    println!("  POST /v1/admin/auth/reload");
     println!("  GET  /v1/history");
     println!("  POST /v1/append");
     println!("  POST /v1/state/current");
@@ -86,6 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  POST /v1/documents/parse");
     println!("  POST /v1/documents/run");
     println!("  POST /v1/reports/pilot/coordination");
+    println!("  POST /v1/reports/pilot/coordination-delta");
     println!("  POST /v1/explain/tuple");
     println!("  POST /v1/sidecars/artifacts/register");
     println!("  POST /v1/sidecars/artifacts/get");
@@ -94,7 +106,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let options = HttpKernelOptions::new()
         .with_auth(resolved.auth.clone())
-        .with_audit_log_path(resolved.audit_log_path);
+        .with_audit_log_path(resolved.audit_log_path.clone())
+        .with_service_status(resolved.service_status())
+        .with_auth_reload_config_path(resolved.config_path.clone());
     axum::serve(listener, http_router_with_options(service, options)).await?;
     Ok(())
 }
