@@ -76,6 +76,14 @@ Focus:
 - stronger release promotion evidence
 - eventually signed artifacts and provenance
 
+### 5. Product legibility and design-partner packaging
+
+Focus:
+
+- keep the front door anchored in operator questions and practical utility before kernel jargon
+- package the governed incident blackboard exemplar across docs, demo, and Pages surfaces
+- make adjacent-next agentic stories concrete without widening beyond current proof
+
 ## What Is Deliberately Not The Immediate Roadmap
 
 Not every desirable capability should be pulled forward.

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("01", "02", "03")]
+    [ValidateSet("01", "02", "03", "04")]
     [string]$Demo = "01",
     [switch]$PauseOnExit
 )
@@ -42,6 +42,18 @@ $demoMap = @{
             "claim windows, active leases, and stale fencing"
             "multiple semantic snapshots over one append-only journal"
             "service-backed proof traces for the current answer"
+        )
+    }
+    "04" = @{
+        Title = "Governed Incident Blackboard"
+        Crate = "aether_api"
+        Example = "demo_04_governed_incident_blackboard"
+        Narrative = Join-Path $repoRoot "examples\demo-04-governed-incident-blackboard.md"
+        Highlights = @(
+            "shared governed workspace for agents and operators"
+            "active observations plus published remediation actions"
+            "ready-action derivation, authority handoff, and stale fencing"
+            "Current, AsOf, and proof traces in one customer-facing walkthrough"
         )
     }
 }

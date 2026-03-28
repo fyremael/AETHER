@@ -20,3 +20,8 @@ Use zero-padded ascending numbers:
 The first formal ADR in this repository is:
 
 - `docs/ADR/0001-authority-partitions-and-federated-cuts.md`
+
+The current numbered ADR set is:
+
+- `docs/ADR/0001-authority-partitions-and-federated-cuts.md`
+- `docs/ADR/0002-governed-incident-blackboard-is-demo-packaging.md`

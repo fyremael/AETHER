@@ -18,11 +18,12 @@ Read these in order:
 
 1. `docs/COMMERCIALIZATION/EXECUTIVE_BRIEF.md`
 2. `docs/COMMERCIALIZATION/EXECUTIVE_SUMMARY.md`
-3. `docs/COMMERCIALIZATION/VISION.md`
-4. `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md`
-5. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
-6. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
-7. `docs/PILOT_COORDINATION.md`
+3. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
+4. `docs/COMMERCIALIZATION/VISION.md`
+5. `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md`
+6. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
+7. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
+8. `docs/PILOT_COORDINATION.md`
 
 That path answers what AETHER is for, why it matters, where it can go, and what
 the current pilot already proves.
@@ -32,14 +33,15 @@ the current pilot already proves.
 Read these in order:
 
 1. `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md`
-2. `docs/COMMERCIALIZATION/CUSTOMER_DECK.md`
-3. `docs/COMMERCIALIZATION/SEED_INVESTOR_PITCH.md`
-4. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
-5. `docs/COMMERCIALIZATION/MESSAGING_ARCHITECTURE.md`
-6. `docs/COMMERCIALIZATION/CONCEPT_TRANSLATION.md`
-7. `docs/COMMERCIALIZATION/TUPLESPACE_OVER_AETHER.md`
-8. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
-9. `docs/COMMERCIALIZATION/PITCH_DECK_OUTLINE.md`
+2. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
+3. `docs/COMMERCIALIZATION/CUSTOMER_DECK.md`
+4. `docs/COMMERCIALIZATION/SEED_INVESTOR_PITCH.md`
+5. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
+6. `docs/COMMERCIALIZATION/MESSAGING_ARCHITECTURE.md`
+7. `docs/COMMERCIALIZATION/CONCEPT_TRANSLATION.md`
+8. `docs/COMMERCIALIZATION/TUPLESPACE_OVER_AETHER.md`
+9. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
+10. `docs/COMMERCIALIZATION/PITCH_DECK_OUTLINE.md`
 
 That path gives you the narrative, language discipline, buyer map, and
 presentation structure.
@@ -67,10 +69,11 @@ Read these in order:
 
 1. `docs/COMMERCIALIZATION/VISUAL_DIRECTION.md`
 2. `docs/COMMERCIALIZATION/MESSAGING_ARCHITECTURE.md`
-3. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
-4. `docs/COMMERCIALIZATION/CONCEPT_TRANSLATION.md`
-5. `site/showcase.html`
-6. `site/index.html`
+3. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
+4. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
+5. `docs/COMMERCIALIZATION/CONCEPT_TRANSLATION.md`
+6. `site/showcase.html`
+7. `site/index.html`
 
 That path keeps the visual system, copy system, and public front door aligned.
 
@@ -79,6 +82,7 @@ That path keeps the visual system, copy system, and public front door aligned.
 | Document | Purpose |
 | --- | --- |
 | `docs/COMMERCIALIZATION/VISION.md` | Long-range product vision and category ambition |
+| `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md` | Canonical adjacent-next exemplar for presenting AETHER as a governed shared workspace for agents and operators |
 | `docs/COMMERCIALIZATION/EXECUTIVE_SUMMARY.md` | CEO- and board-grade strategic summary for early company framing |
 | `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md` | Main commercial story: what problem AETHER solves and how to explain it |
 | `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md` | Canonical ladder of increasing use-case complexity and scale for external storytelling |

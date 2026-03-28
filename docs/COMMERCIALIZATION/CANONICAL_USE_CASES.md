@@ -31,6 +31,12 @@ website copy.
 | 6 | Semantic blackboard / governed tuple workspace | explainable shared workspace for agents, tools, and operators | Reference pattern |
 | 7 | Autonomous operations control plane | enterprise-scale operational memory, authority, and proof fabric | Platform horizon |
 
+The recommended adjacent-next packaging for rung 6 is the
+`governed incident blackboard` exemplar in
+`docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`. That gives the
+reference pattern a concrete design-partner story without turning TupleSpace
+language into the top-level product identity.
+
 ## Rung 1: Dependency Readiness
 
 ### The question
@@ -255,6 +261,11 @@ for broader coordination patterns.
 
 Reference pattern today. Use the TupleSpace/blackboard note to discuss it, but
 do not present it as the core product identity.
+
+The preferred design-partner packaging for this rung is the governed incident
+blackboard demo pack: the client-facing story is a shared governed workspace,
+while the technical appendix can still reference Linda-style or TupleSpace-style
+coordination.
 
 ## Rung 7: Autonomous Operations Control Plane
 

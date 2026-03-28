@@ -9,6 +9,11 @@ In plain terms: AETHER can now journal facts, replay exact cuts, derive
 recursive truths, explain them, and serve them through authenticated boundaries
 without asking the user to imagine the kernel into existence.
 
+The repository now also carries a governed incident blackboard demo pack that
+repackages those existing proof surfaces in plain product language for
+design-partner conversations. That packaging layer is documentation and demo
+work, not a new kernel-semantic claim.
+
 Completed:
 
 - Rust workspace root created
@@ -70,6 +75,7 @@ Completed:
 - `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test` verified on Windows and WSL
 - GitHub CI added for Ubuntu and Windows
 - repository front-door docs, contribution guidance, and worked examples now exist
+- a governed incident blackboard commercialization document, runnable demo, and front-door docs/site packaging now exist as the canonical adjacent-next design-partner exemplar over the current pilot proof
 
 Still open:
 

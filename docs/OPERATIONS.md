@@ -19,13 +19,24 @@ with the packaged operator token.
 
 If you only need one showcase rather than a live service cockpit, run Demo 03.
 
+If you need the clearest product-facing walkthrough for design partners, run
+Demo 04.
+
 On Windows, the simplest path is:
+
+```text
+double-click scripts/run-demo-04.cmd
+```
+
+That is the current customer-facing exemplar.
+
+If you need the strongest operator-proof showcase, run:
 
 ```text
 double-click scripts/run-demo-03.cmd
 ```
 
-That is the current flagship demonstration.
+That remains the strongest current kernel-proof demonstration.
 
 If you need fresh performance numbers for operations, run the performance report:
 
@@ -102,6 +113,7 @@ Use this guide by the question you need answered:
 | If you need to know... | Use |
 | --- | --- |
 | “What is happening in the live pilot service right now?” | `run-aether-ops.cmd` inside the package |
+| “What is the clearest design-partner walkthrough?” | Demo 04 |
 | “What is the clearest single showcase?” | Demo 03 |
 | “How does replay and closure work?” | Demo 01 |
 | “How do heartbeats, handoff, and fencing work?” | Demo 02 |
@@ -119,6 +131,7 @@ Use this guide by the question you need answered:
 | Demo 01 | Temporal replay and recursive closure | Introduce the semantic substrate and `AsOf` model |
 | Demo 02 | Multi-worker lease handoff | Show heartbeat-backed authority and outcome fencing through the service path |
 | Demo 03 | Coordination situation room | Present the strongest current end-to-end story in one run |
+| Demo 04 | Governed incident blackboard | Explain AETHER as a shared governed workspace for agents and operators |
 
 ## Which Demo To Use
 
@@ -140,6 +153,12 @@ Use this guide by the question you need answered:
 - you need one run that shows replay, recursion, claim windows, leases, heartbeat-backed authority, fencing, and proof traces together
 - you want the strongest current demo for review, strategy, or external presentation
 
+### Use Demo 04 when
+
+- the audience needs product utility before kernel vocabulary
+- you want a design-partner-ready story about a shared incident board for agents and operators
+- you want to show observations, candidate actions, governed authority, replay, and proof in a 5-10 minute screen share
+
 ## Running Demos
 
 ### Windows operator path
@@ -149,6 +168,7 @@ Double-click one of these:
 - `scripts/run-demo-01.cmd`
 - `scripts/run-demo-02.cmd`
 - `scripts/run-demo-03.cmd`
+- `scripts/run-demo-04.cmd`
 
 Each launcher calls the shared PowerShell runner and pauses before closing so the output remains visible.
 
@@ -160,6 +180,7 @@ You can also run the examples directly:
 cargo run -p aether_explain --example demo_01_temporal_dependency_horizon
 cargo run -p aether_api --example demo_02_multi_worker_lease_handoff
 cargo run -p aether_api --example demo_03_coordination_situation_room
+cargo run -p aether_api --example demo_04_governed_incident_blackboard
 cargo run -p aether_api --example http_kernel_service
 ```
 
@@ -203,6 +224,7 @@ Demo reports are written to:
 - `artifacts/demos/demo-01/`
 - `artifacts/demos/demo-02/`
 - `artifacts/demos/demo-03/`
+- `artifacts/demos/demo-04/`
 
 Each run produces:
 

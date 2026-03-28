@@ -18,6 +18,13 @@ Use the docs by question, not by sheer volume.
 The set is written in layers on purpose: plain orientation first, current-state
 truth second, operating detail third.
 
+If you need the quickest product-facing answer before the wider handbook, start
+with:
+
+1. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
+2. `examples/demo-04-governed-incident-blackboard.md`
+3. `docs/PILOT_COORDINATION.md`
+
 ## Reading Paths
 
 ### If you are new to AETHER
@@ -26,13 +33,27 @@ Read these in order:
 
 1. `README.md`
 2. `docs/EDUCATION/README.md`
-3. `examples/demo-03-coordination-situation-room.md`
-4. `docs/ARCHITECTURE.md`
-5. `docs/STATUS.md`
-6. `docs/SEMANTIC_COMPLIANCE_MATRIX.md`
-7. `docs/KNOWN_LIMITATIONS.md`
+3. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
+4. `examples/demo-04-governed-incident-blackboard.md`
+5. `examples/demo-03-coordination-situation-room.md`
+6. `docs/ARCHITECTURE.md`
+7. `docs/STATUS.md`
+8. `docs/SEMANTIC_COMPLIANCE_MATRIX.md`
+9. `docs/KNOWN_LIMITATIONS.md`
 
 That path gets you from thesis to running system to current boundary.
+
+### If you need the product-facing design-partner story
+
+Read:
+
+1. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
+2. `examples/demo-04-governed-incident-blackboard.md`
+3. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
+4. `docs/PILOT_COORDINATION.md`
+
+That path explains the utility first, then shows the adjacent-next exemplar,
+then anchors it back to the live pilot proof and broader use-case ladder.
 
 ### If you need the beginner-friendly explanation set
 
@@ -73,12 +94,13 @@ Start here:
 Read:
 
 1. `docs/COMMERCIALIZATION/README.md`
-2. `docs/COMMERCIALIZATION/EXECUTIVE_SUMMARY.md`
-3. `docs/COMMERCIALIZATION/VISION.md`
-4. `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md`
-5. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
-6. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
-7. `docs/PILOT_COORDINATION.md`
+2. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
+3. `docs/COMMERCIALIZATION/EXECUTIVE_SUMMARY.md`
+4. `docs/COMMERCIALIZATION/VISION.md`
+5. `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md`
+6. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
+7. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
+8. `docs/PILOT_COORDINATION.md`
 
 That path moves from category ambition to buyer story to the actual pilot proof.
 
@@ -201,6 +223,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 | `docs/PERFORMANCE.md` | Performance workloads, runner commands, benchmark harness, and interpretation guidance |
 | `docs/QA.md` | Structured QA and regression suite, release-readiness runner, and artifact contract |
 | `docs/COMMERCIALIZATION/README.md` | Hub for commercialization, product framing, buyer narrative, and messaging |
+| `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md` | Canonical product-facing exemplar for a governed shared workspace over the current pilot proof |
 | `docs/COMMERCIALIZATION/BENCHMARK_BRIEF.md` | Stakeholder-ready benchmark summary with release-style charts and interpretation |
 | `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md` | Distributed truth and consensus strategy for partitioned AETHER scale |
 | `docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md` | Concrete build plan for authority partitions, federated cuts, and imported facts |

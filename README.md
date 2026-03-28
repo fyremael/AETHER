@@ -8,6 +8,18 @@
 AETHER is a full-v1 single-node semantic kernel with a launch-ready
 design-partner pilot for agentic coordination.
 
+The easiest way to understand it is as the fabric underneath a governed shared
+workspace for agents and operators. Observations, candidate actions,
+authorizations, handoffs, and stale attempts all live in one replayable
+history, so the system can answer five practical questions: what is active now,
+which action is actually ready, who may act, what changed since the last
+handoff, and why the answer is true.
+
+If you want the fastest product-facing path first, start with
+[`docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`](./docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md)
+and then walk through
+[`examples/demo-04-governed-incident-blackboard.md`](./examples/demo-04-governed-incident-blackboard.md).
+
 Its long-range claim is simple, but not modest: the right center of gravity for agent coordination is not a queue, not a graph-walking convenience layer, not a pile of ad hoc service contracts, and not a host-language DSL masquerading as semantics. The right center of gravity is an authoritative semantic kernel: an append-only causal journal, a deterministic resolver, and a recursive rule engine that can state, derive, replay, and explain what a system believes.
 
 This repository is the beginning of that kernel.
@@ -23,8 +35,11 @@ covers, and proof snapshots generated from the same presentation system.
 If you are joining the project fresh, read [`docs/README.md`](./docs/README.md)
 and [`CONTRIBUTING.md`](./CONTRIBUTING.md) after this file and then walk
 through
-[`examples/demo-03-coordination-situation-room.md`](./examples/demo-03-coordination-situation-room.md).
-That is the fastest path from architectural stance to executable behavior.
+[`examples/demo-04-governed-incident-blackboard.md`](./examples/demo-04-governed-incident-blackboard.md).
+Follow with
+[`examples/demo-03-coordination-situation-room.md`](./examples/demo-03-coordination-situation-room.md)
+for the raw kernel-proof showcase. That is the fastest path from practical
+utility to executable behavior.
 
 If you need the exact claim we can defend against the governing thesis, read
 [`docs/SEMANTIC_COMPLIANCE_MATRIX.md`](./docs/SEMANTIC_COMPLIANCE_MATRIX.md).
@@ -42,7 +57,9 @@ after this file. That pack explains the long-range vision, buyer story,
 messaging discipline, and commercialization wedge while staying anchored to the
 current pilot proof. It also now includes a reference-pattern note for
 TupleSpace-style or semantic-blackboard coordination on top of AETHER, plus a
-canonical use-case ladder from pilot proof to platform horizon, an executive
+governed incident blackboard exemplar that packages that pattern in client
+language,
+a canonical use-case ladder from pilot proof to platform horizon, an executive
 summary, a seed investor pitch for early market placement, and a technical
 scaling plan for advisor and diligence review.
 

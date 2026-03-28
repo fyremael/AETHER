@@ -8,6 +8,7 @@ Start here:
 
 | Example | Best use | What it teaches |
 | --- | --- | --- |
+| `demo-04-governed-incident-blackboard.md` | Design-partner and sponsor walkthrough | A governed shared workspace for agents and operators, ready-action derivation, authority handoff, replay, and proof in plain language |
 | `demo-03-coordination-situation-room.md` | Executive, operator, or partner showcase | Recursive closure, temporal replay, claim windows, lease handoff, stale fencing, and proof traces in one run |
 | `demo-01-temporal-dependency-horizon.md` | First semantic introduction | Temporal replay, recursive closure, and explainable proof traces |
 | `demo-02-multi-worker-lease-handoff.md` | Coordination-focused walkthrough | Heartbeat-backed authority, accepted versus fenced outcomes, claimable work, and service-backed explanation |
@@ -23,5 +24,6 @@ For non-technical Windows operators:
 - double-click `scripts/run-demo-01.cmd`
 - double-click `scripts/run-demo-02.cmd`
 - double-click `scripts/run-demo-03.cmd`
+- double-click `scripts/run-demo-04.cmd`
 
 The DSL parser is now real for the core authoring path. Some examples still use the Rust AST surface where that is the clearest way to isolate a semantic behavior under test.

@@ -15,6 +15,7 @@ For documentation publishing:
 - double-click `run-demo-01.cmd`
 - double-click `run-demo-02.cmd`
 - double-click `run-demo-03.cmd`
+- double-click `run-demo-04.cmd`
 
 ### Pilot reports and validation
 
@@ -43,6 +44,7 @@ For documentation publishing:
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-demo.ps1 -Demo 01`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-demo.ps1 -Demo 02`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-demo.ps1 -Demo 03`
+- run `powershell -ExecutionPolicy Bypass -File scripts/run-demo.ps1 -Demo 04`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-report.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-delta-report.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1`
