@@ -12,7 +12,8 @@ Use the docs by question, not by sheer volume.
 
 - If you need the thesis, start at the repository root.
 - If you need current truth, read `docs/STATUS.md`,
-  `docs/SEMANTIC_COMPLIANCE_MATRIX.md`, and `docs/KNOWN_LIMITATIONS.md`.
+  `docs/SEMANTIC_COMPLIANCE_MATRIX.md`, `docs/V1_CLOSEOUT.md`, and
+  `docs/KNOWN_LIMITATIONS.md`.
 - If you need to act, use the operator, workflow, deployment, or QA guides.
 
 The set is written in layers on purpose: plain orientation first, current-state
@@ -39,7 +40,8 @@ Read these in order:
 6. `docs/ARCHITECTURE.md`
 7. `docs/STATUS.md`
 8. `docs/SEMANTIC_COMPLIANCE_MATRIX.md`
-9. `docs/KNOWN_LIMITATIONS.md`
+9. `docs/V1_CLOSEOUT.md`
+10. `docs/KNOWN_LIMITATIONS.md`
 
 That path gets you from thesis to running system to current boundary.
 
@@ -166,9 +168,10 @@ That path explains the operator-facing report, baseline capture, drift compariso
 Read:
 
 1. `docs/QA.md`
-2. `docs/PILOT_LAUNCH.md`
-3. `docs/PILOT_DEPLOYMENT.md`
-4. `scripts/README.md`
+2. `docs/V1_CLOSEOUT.md`
+3. `docs/PILOT_LAUNCH.md`
+4. `docs/PILOT_DEPLOYMENT.md`
+5. `scripts/README.md`
 
 That path covers the structured release-readiness suite, its evidence pack, and the packaged pilot-bundle handoff.
 
@@ -188,8 +191,9 @@ Read:
 
 1. `docs/STATUS.md`
 2. `docs/SEMANTIC_COMPLIANCE_MATRIX.md`
-3. `docs/ROADMAP.md`
-4. `docs/KNOWN_LIMITATIONS.md`
+3. `docs/V1_CLOSEOUT.md`
+4. `docs/ROADMAP.md`
+5. `docs/KNOWN_LIMITATIONS.md`
 
 That set answers “what exists now, what does not yet exist, and what comes next.”
 
@@ -213,6 +217,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 | --- | --- |
 | `docs/ARCHITECTURE.md` | How the current kernel is shaped and how data moves through it |
 | `docs/SEMANTIC_COMPLIANCE_MATRIX.md` | Defensible mapping from `SPEC.md` sections `1-11` to implemented v1 single-node semantics |
+| `docs/V1_CLOSEOUT.md` | Formal closeout record for the v1 single-node semantic thesis and pilot release posture |
 | `docs/EDUCATION/README.md` | Plain-language education hub for new users, evaluators, and non-specialists |
 | `docs/DEVELOPER_WORKFLOW.md` | Day-to-day engineering loop, verification contract, and definition of done |
 | `docs/OPERATIONS.md` | Operator-facing guidance for demos, reports, and presentations |

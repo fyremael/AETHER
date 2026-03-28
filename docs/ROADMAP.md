@@ -7,7 +7,8 @@ next without disturbing the semantic center.”
 
 ## Milestone Spine
 
-The original v1 milestone spine is now substantially closed.
+The original v1 milestone spine is now substantially closed and formally
+recorded in `docs/V1_CLOSEOUT.md`.
 
 | Milestone | Status | Meaning now |
 | --- | --- | --- |

@@ -14,6 +14,10 @@ repackages those existing proof surfaces in plain product language for
 design-partner conversations. That packaging layer is documentation and demo
 work, not a new kernel-semantic claim.
 
+The v1 single-node semantic thesis is now also formally closed in
+`docs/V1_CLOSEOUT.md`, which ties the semantic compliance matrix, QA contract,
+launch gate, and architectural ADR set into one explicit release posture.
+
 Completed:
 
 - Rust workspace root created
@@ -59,6 +63,7 @@ Completed:
 - pilot-focused Go operator TUI implemented as the live cockpit for health, coordination state, audit entries, history, tuple proof traces, service status, and coordination diffs
 - broader typed Python SDK surface implemented against the HTTP API with fixture builders and live integration coverage
 - semantic compliance matrix added to map `SPEC.md` sections `1-11` to implementation and acceptance evidence for the current v1 single-node closure claim
+- formal v1 closeout record added to anchor the semantic closure claim to the numbered ADR set, QA gate, and launch/release evidence posture
 - partition IDs, partition-qualified cuts, and federated-cut types implemented in the semantic model
 - single-process partition-aware in-memory service implemented for exact per-partition append/history/state reads plus explicit federated-history reads
 - imported-fact federation implemented over explicit partition cuts, including provenance-bearing extensional facts that carry source partition/cut context into derived tuples
@@ -88,7 +93,7 @@ Still open:
 ## Immediate focus
 
 The most immediate work now sits just beyond the launch-ready pilot slice and
-the now-closed v1 single-node semantic core:
+the formally closed v1 single-node semantic core:
 
 - extend the new single-host replicated-partition prototype toward stronger recovery drills, better status surfacing, and clearer operator presets without pretending it is a generalized cluster manager
 - add longer-duration scheduled operability evidence beyond the current release and launch gates

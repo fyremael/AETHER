@@ -46,6 +46,9 @@ If you need the exact claim we can defend against the governing thesis, read
 That document maps `SPEC.md` sections `1-11` to implementation and test
 evidence for the current single-node semantic closure pass.
 
+If you need the explicit release-position statement for that claim, read
+[`docs/V1_CLOSEOUT.md`](./docs/V1_CLOSEOUT.md).
+
 If you want the gentler, plain-language on-ramp first, start with
 [`docs/EDUCATION/README.md`](./docs/EDUCATION/README.md). That set explains the
 system with analogies, figures, and worked examples before it asks readers to

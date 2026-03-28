@@ -1,7 +1,8 @@
 # KNOWN_LIMITATIONS
 
-The v1 **single-node semantic thesis** is now closed. The limitations below are
-the remaining post-v1, platform-breadth, or operability gaps around that core.
+The v1 **single-node semantic thesis** is now closed. The formal closeout
+record is `docs/V1_CLOSEOUT.md`. The limitations below are the remaining
+post-v1, platform-breadth, or operability gaps around that core.
 
 These are real boundaries, not hidden footnotes. They mark the edge of the
 implemented system.
