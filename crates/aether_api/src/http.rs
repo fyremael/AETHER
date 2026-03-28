@@ -141,8 +141,8 @@ impl HttpKernelState {
             let mut auth = self.auth.lock().map_err(|_| HttpError::LockPoisoned)?;
             *auth = HttpAuth::from_config(resolved.auth.clone());
         }
-        status.config_version = resolved.config_version.clone();
-        status.schema_version = resolved.schema_version.clone();
+        status.config_version.clone_from(&resolved.config_version);
+        status.schema_version.clone_from(&resolved.schema_version);
         status.principals = resolved
             .token_summaries
             .iter()
@@ -248,7 +248,7 @@ impl HttpKernelState {
             }
         };
 
-        let result = {
+        {
             let mut service = self.partitioned_service()?;
             let mut context = context;
             let result = operation(&mut service, &principal, &mut context);
@@ -265,9 +265,7 @@ impl HttpKernelState {
                 context,
             ));
             result
-        };
-
-        result
+        }
     }
 
     fn audit_entries(&self, headers: &HeaderMap) -> Result<AuditLogResponse, HttpError> {

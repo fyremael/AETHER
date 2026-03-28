@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut bundles = Vec::new();
     for path in bundle_paths {
-        let bundle: PerfRunBundle = serde_json::from_str(&fs::read_to_string(&path)?)?;
+        let bundle: PerfRunBundle = serde_json::from_str(&fs::read_to_string(path)?)?;
         bundles.push(bundle);
     }
 

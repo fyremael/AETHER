@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
     collections::BTreeSet,
+    fmt::Write as _,
     fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -584,7 +585,7 @@ impl ReplicatedPartition {
             encode_partition_id(&config.partition)
         ));
         let metadata = if metadata_path.exists() {
-            let contents = fs::read_to_string(&metadata_path).map_err(|error| {
+            let contents = fs::read_to_string(metadata_path.clone()).map_err(|error| {
                 ApiError::Validation(format!(
                     "failed to read replication metadata {}: {}",
                     metadata_path.display(),
@@ -1218,12 +1219,11 @@ fn build_federated_explain_report_from_response(
 }
 
 fn encode_partition_id(partition: &PartitionId) -> String {
-    partition
-        .as_str()
-        .as_bytes()
-        .iter()
-        .map(|byte| format!("{:02x}", byte))
-        .collect::<String>()
+    let mut encoded = String::with_capacity(partition.as_str().len() * 2);
+    for byte in partition.as_str().as_bytes() {
+        let _ = write!(&mut encoded, "{byte:02x}");
+    }
+    encoded
 }
 
 fn cache_key<T: Serialize>(value: &T) -> Result<String, ApiError> {

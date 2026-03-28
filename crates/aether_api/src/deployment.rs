@@ -253,7 +253,7 @@ impl PilotTokenConfig {
             (token, format!("env:{token_env}"))
         } else if let Some(token_file_path) = &self.token_file {
             let token_file = resolve_path(config_dir, token_file_path);
-            let token = fs::read_to_string(&token_file).map_err(|source| {
+            let token = fs::read_to_string(token_file.clone()).map_err(|source| {
                 DeploymentError::ReadTokenFile {
                     path: token_file.clone(),
                     source,

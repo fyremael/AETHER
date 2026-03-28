@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let baseline: PerfBaseline = serde_json::from_str(&fs::read_to_string(&baseline_path)?)?;
+    let baseline: PerfBaseline = serde_json::from_str(&fs::read_to_string(baseline_path)?)?;
     let current = performance_bundle_for_suite(
         suite,
         aether_api::perf::DEFAULT_REPORT_SAMPLES,
