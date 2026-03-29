@@ -54,6 +54,9 @@ If you want the gentler, plain-language on-ramp first, start with
 system with analogies, figures, and worked examples before it asks readers to
 care about compiler stages or runtime strata.
 
+If you want the interactive version of that onboarding path, start with
+[`python/notebooks/README.md`](./python/notebooks/README.md).
+
 If you are evaluating AETHER as a product category or design-partner platform,
 start with [`docs/COMMERCIALIZATION/README.md`](./docs/COMMERCIALIZATION/README.md)
 after this file. That pack explains the long-range vision, buyer story,

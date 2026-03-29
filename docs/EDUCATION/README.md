@@ -32,6 +32,20 @@ Read these in order:
 That sequence moves from the simplest question, "What sort of thing is this?",
 to the larger question, "How does a fabric of exact local truths scale?"
 
+## Interactive Notebook Path
+
+If you want runnable onboarding instead of prose-first onboarding, use:
+
+1. `python/notebooks/README.md`
+2. `python/notebooks/01_aether_onramp.ipynb`
+3. `python/notebooks/02_time_cuts_and_memory.ipynb`
+4. `python/notebooks/03_recursive_closure_and_explain.ipynb`
+5. `python/notebooks/04_governed_incident_blackboard.ipynb`
+6. `python/notebooks/05_policy_and_sidecars.ipynb`
+
+That path stays inside the current Python boundary and HTTP example service,
+so readers can touch the real v1 surfaces while they learn.
+
 ## What This Set Is For
 
 Use this set when you need to explain AETHER to:

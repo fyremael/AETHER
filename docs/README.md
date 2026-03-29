@@ -71,6 +71,20 @@ Read:
 That path is the plain-language curriculum: figures, analogies, examples, and
 the formal names only after the intuition is already clear.
 
+### If you want interactive notebook onboarding
+
+Read and run:
+
+1. `python/notebooks/README.md`
+2. `python/notebooks/01_aether_onramp.ipynb`
+3. `python/notebooks/02_time_cuts_and_memory.ipynb`
+4. `python/notebooks/03_recursive_closure_and_explain.ipynb`
+5. `python/notebooks/04_governed_incident_blackboard.ipynb`
+6. `python/notebooks/05_policy_and_sidecars.ipynb`
+
+That path uses the Python SDK and the real HTTP example service so new users
+can learn by running the current boundary instead of only reading about it.
+
 ### If you are implementing features
 
 Read these in order:
