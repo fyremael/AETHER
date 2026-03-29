@@ -1,8 +1,14 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Security policy
+    url: https://github.com/fyremael/AETHER/blob/main/SECURITY.md
+    about: Use the responsible-disclosure guidance for vulnerabilities, secrets, auth bypasses, or policy leaks.
   - name: Read the spec first
     url: https://github.com/fyremael/AETHER/blob/main/SPEC.md
     about: Start with the system specification before opening a broad architectural issue.
   - name: Contribution guide
     url: https://github.com/fyremael/AETHER/blob/main/CONTRIBUTING.md
     about: Review contributor expectations and local verification steps before submitting changes.
+  - name: QA hardening program
+    url: https://github.com/fyremael/AETHER/blob/main/docs/QA_HARDENING_PROGRAM.md
+    about: Review the persona matrix, severity rubric, and artifact expectations before opening a hardening report.

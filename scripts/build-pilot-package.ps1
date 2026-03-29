@@ -188,7 +188,11 @@ $configPath = Join-Path $PSScriptRoot "config\pilot-service.json"
 $config = Get-Content -Path $configPath -Raw | ConvertFrom-Json
 $configDir = Split-Path -Parent $configPath
 $databasePath = Resolve-ConfigPath $configDir $config.database_path
+$databaseWalPath = "$databasePath-wal"
+$databaseShmPath = "$databasePath-shm"
 $sidecarPath = "$databasePath.sidecars.sqlite"
+$sidecarWalPath = "$sidecarPath-wal"
+$sidecarShmPath = "$sidecarPath-shm"
 $auditPath = Resolve-ConfigPath $configDir $config.audit_log_path
 
 if (-not $SnapshotDir) {
@@ -221,8 +225,20 @@ foreach ($token in $config.auth.tokens) {
 if (Test-Path $databasePath) {
     Copy-Item -Path $databasePath -Destination (Join-Path $snapshotDataDir (Split-Path -Leaf $databasePath))
 }
+if (Test-Path $databaseWalPath) {
+    Copy-Item -Path $databaseWalPath -Destination (Join-Path $snapshotDataDir (Split-Path -Leaf $databaseWalPath))
+}
+if (Test-Path $databaseShmPath) {
+    Copy-Item -Path $databaseShmPath -Destination (Join-Path $snapshotDataDir (Split-Path -Leaf $databaseShmPath))
+}
 if (Test-Path $sidecarPath) {
     Copy-Item -Path $sidecarPath -Destination (Join-Path $snapshotDataDir (Split-Path -Leaf $sidecarPath))
+}
+if (Test-Path $sidecarWalPath) {
+    Copy-Item -Path $sidecarWalPath -Destination (Join-Path $snapshotDataDir (Split-Path -Leaf $sidecarWalPath))
+}
+if (Test-Path $sidecarShmPath) {
+    Copy-Item -Path $sidecarShmPath -Destination (Join-Path $snapshotDataDir (Split-Path -Leaf $sidecarShmPath))
 }
 if (Test-Path $auditPath) {
     Copy-Item -Path $auditPath -Destination (Join-Path $snapshotLogsDir (Split-Path -Leaf $auditPath))
@@ -232,7 +248,11 @@ $manifest = [pscustomobject]@{
     generated_at = (Get-Date).ToString("o")
     config_path = $configPath
     database_path = $databasePath
+    database_wal_path = $databaseWalPath
+    database_shm_path = $databaseShmPath
     sidecar_path = $sidecarPath
+    sidecar_wal_path = $sidecarWalPath
+    sidecar_shm_path = $sidecarShmPath
     audit_log_path = $auditPath
     token_files = $tokenFiles
 }
@@ -269,8 +289,30 @@ $configPath = Join-Path $PSScriptRoot "config\pilot-service.json"
 $config = Get-Content -Path $configPath -Raw | ConvertFrom-Json
 $configDir = Split-Path -Parent $configPath
 $databasePath = Resolve-ConfigPath $configDir $config.database_path
+$databaseWalPath = "$databasePath-wal"
+$databaseShmPath = "$databasePath-shm"
 $sidecarPath = "$databasePath.sidecars.sqlite"
+$sidecarWalPath = "$sidecarPath-wal"
+$sidecarShmPath = "$sidecarPath-shm"
 $auditPath = Resolve-ConfigPath $configDir $config.audit_log_path
+
+function Restore-OptionalFile([string]$SnapshotPath, [string]$DestinationPath) {
+    for ($attempt = 1; $attempt -le 40; $attempt++) {
+        try {
+            if (Test-Path $SnapshotPath) {
+                Copy-Item -Path $SnapshotPath -Destination $DestinationPath -Force
+            } elseif (Test-Path $DestinationPath) {
+                Remove-Item -Force $DestinationPath
+            }
+            return
+        } catch {
+            if ($attempt -eq 40) {
+                throw
+            }
+            Start-Sleep -Milliseconds 250
+        }
+    }
+}
 
 if ($BackupExisting) {
     $backupDir = Join-Path $PSScriptRoot ("restore-backup-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
@@ -278,7 +320,7 @@ if ($BackupExisting) {
     $backupDataDir = Join-Path $backupDir "data"
     $backupLogsDir = Join-Path $backupDir "logs"
     New-Item -ItemType Directory -Force -Path $backupConfigDir, $backupDataDir, $backupLogsDir | Out-Null
-    foreach ($path in @($configPath, $databasePath, $sidecarPath, $auditPath)) {
+    foreach ($path in @($configPath, $databasePath, $databaseWalPath, $databaseShmPath, $sidecarPath, $sidecarWalPath, $sidecarShmPath, $auditPath)) {
         if (Test-Path $path) {
             $destination = switch -Wildcard ($path) {
                 "$configDir*" { $backupConfigDir }
@@ -297,15 +339,23 @@ Get-ChildItem -Path (Join-Path $snapshotDir "config") -Filter *.token -File -Err
 }
 
 $snapshotDb = Join-Path $snapshotDir ("data\" + (Split-Path -Leaf $databasePath))
+$snapshotDbWal = Join-Path $snapshotDir ("data\" + (Split-Path -Leaf $databaseWalPath))
+$snapshotDbShm = Join-Path $snapshotDir ("data\" + (Split-Path -Leaf $databaseShmPath))
 $snapshotSidecars = Join-Path $snapshotDir ("data\" + (Split-Path -Leaf $sidecarPath))
+$snapshotSidecarWal = Join-Path $snapshotDir ("data\" + (Split-Path -Leaf $sidecarWalPath))
+$snapshotSidecarShm = Join-Path $snapshotDir ("data\" + (Split-Path -Leaf $sidecarShmPath))
 $snapshotAudit = Join-Path $snapshotDir ("logs\" + (Split-Path -Leaf $auditPath))
 
 if (Test-Path $snapshotDb) {
     Copy-Item -Path $snapshotDb -Destination $databasePath -Force
 }
+Restore-OptionalFile $snapshotDbWal $databaseWalPath
+Restore-OptionalFile $snapshotDbShm $databaseShmPath
 if (Test-Path $snapshotSidecars) {
     Copy-Item -Path $snapshotSidecars -Destination $sidecarPath -Force
 }
+Restore-OptionalFile $snapshotSidecarWal $sidecarWalPath
+Restore-OptionalFile $snapshotSidecarShm $sidecarShmPath
 if (Test-Path $snapshotAudit) {
     Copy-Item -Path $snapshotAudit -Destination $auditPath -Force
 }

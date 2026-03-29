@@ -1,0 +1,107 @@
+name: QA Hardening
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 15 * * 1"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-hardening:
+    name: Admin + Operator Hardening (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Run Windows hardening sweep
+        shell: pwsh
+        continue-on-error: true
+        run: ./scripts/run-hardening-sweep.ps1 -Packs admin,operator
+
+      - name: Upload Windows hardening artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-hardening-windows
+          path: |
+            artifacts/qa/hardening
+            artifacts/pilot/reports
+            artifacts/pilot/packages
+          if-no-files-found: warn
+
+      - name: Publish Windows summary
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path artifacts/qa/hardening/latest.md) {
+            Get-Content artifacts/qa/hardening/latest.md | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          } else {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Windows hardening summary was not generated."
+          }
+
+  ubuntu-hardening:
+    name: User + Exec Hardening (Ubuntu)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Run Ubuntu hardening sweep
+        shell: pwsh
+        continue-on-error: true
+        run: ./scripts/run-hardening-sweep.ps1 -Packs user,exec
+
+      - name: Upload Ubuntu hardening artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-hardening-ubuntu
+          path: |
+            artifacts/qa/hardening
+            artifacts/pages-preview-hardening
+          if-no-files-found: warn
+
+      - name: Publish Ubuntu summary
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path artifacts/qa/hardening/latest.md) {
+            Get-Content artifacts/qa/hardening/latest.md | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          } else {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Ubuntu hardening summary was not generated."
+          }

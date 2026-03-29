@@ -34,7 +34,20 @@ If a proposed feature weakens one of those, it is the wrong next step.
 
 ## Active Tracks
 
-### 1. Post-pilot service hardening
+### 1. Post-v1 QA hardening and defect intake
+
+Focus:
+
+- run persona-based sweeps across admin, operator, user, and exec perspectives
+- keep the first pass internal-first and diagnostic before making it blocking
+- mature the bug/spec-gap/usability-gap/security intake posture
+- promote only the most stable hardening checks into `CI` and release-readiness
+
+Non-goal:
+
+- do not launch a paid public bug bounty before the private disclosure path, evidence discipline, and promotion rules are calm enough to support it
+
+### 2. Post-pilot service hardening
 
 Focus:
 
@@ -43,7 +56,7 @@ Focus:
 - extend cut-diff and proof surfaces without widening beyond exact pilot semantics
 - add longer-duration soak and recovery evidence around the now-hardened bundle
 
-### 2. Distributed-truth execution
+### 3. Distributed-truth execution
 
 Focus:
 
@@ -57,7 +70,7 @@ Governing docs:
 - `docs/ADR/0001-authority-partitions-and-federated-cuts.md`
 - `docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md`
 
-### 3. Post-v1 language and runtime ergonomics
+### 4. Post-v1 language and runtime ergonomics
 
 Focus:
 
@@ -69,7 +82,7 @@ Non-goal:
 
 - do not reopen the v1 semantic closure claim unless a real semantic defect is found
 
-### 4. Operational evidence and release discipline
+### 5. Operational evidence and release discipline
 
 Focus:
 
@@ -77,7 +90,7 @@ Focus:
 - stronger release promotion evidence
 - eventually signed artifacts and provenance
 
-### 5. Product legibility and design-partner packaging
+### 6. Product legibility and design-partner packaging
 
 Focus:
 
@@ -101,12 +114,14 @@ Deliberately not the near-term center:
 If the team needs a practical ordering, use this one:
 
 1. harden the current pilot boundary
-2. deepen operator-facing proof and reporting
-3. execute replicated authority partitions
-4. widen distributed truth only where provenance remains exact
-5. improve ergonomics and optimization around the already-settled core
+2. promote the most stable hardening checks into the mainline gates
+3. deepen operator-facing proof and reporting
+4. execute replicated authority partitions
+5. widen distributed truth only where provenance remains exact
+6. improve ergonomics and optimization around the already-settled core
 
 The first pass through that order is now in motion: pilot hardening, delta
-reporting, replicated authority partitions, and federated HTTP surfaces exist.
-The next roadmap pass is to make those new surfaces calmer, more operable, and
-better evidenced rather than immediately broader.
+reporting, replicated authority partitions, federated HTTP surfaces, and the
+new hardening program now exist. The next roadmap pass is to make those
+surfaces calmer, more operable, and better evidenced rather than immediately
+broader.

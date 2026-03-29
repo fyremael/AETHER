@@ -1602,6 +1602,148 @@ async fn http_service_registers_and_searches_sidecar_records() {
     server.abort();
 }
 
+#[tokio::test]
+async fn http_service_sidecar_search_respects_as_of_visibility() {
+    let (base_url, server) = spawn_server(InMemoryKernelService::new()).await;
+    let client = Client::new();
+
+    let append = client
+        .post(format!("{base_url}/v1/append"))
+        .json(&AppendRequest {
+            datoms: vec![anchor_datom(1)],
+        })
+        .send()
+        .await
+        .expect("append artifact anchor request");
+    assert!(append.status().is_success());
+
+    let artifact = client
+        .post(format!("{base_url}/v1/sidecars/artifacts/register"))
+        .json(&RegisterArtifactReferenceRequest {
+            reference: aether_api::ArtifactReference {
+                sidecar_id: "semantic-memory".into(),
+                artifact_id: "doc-1".into(),
+                entity: EntityId::new(31),
+                uri: "s3://aether/docs/doc-1.md".into(),
+                media_type: "text/markdown".into(),
+                byte_length: 256,
+                digest: Some("sha256:doc-1".into()),
+                metadata: BTreeMap::new(),
+                provenance: DatomProvenance::default(),
+                policy: None,
+                registered_at: ElementId::new(1),
+            },
+        })
+        .send()
+        .await
+        .expect("register artifact request");
+    assert!(artifact.status().is_success());
+
+    let append = client
+        .post(format!("{base_url}/v1/append"))
+        .json(&AppendRequest {
+            datoms: vec![anchor_datom(2)],
+        })
+        .send()
+        .await
+        .expect("append vector anchor request");
+    assert!(append.status().is_success());
+
+    let vector = client
+        .post(format!("{base_url}/v1/sidecars/vectors/register"))
+        .json(&RegisterVectorRecordRequest {
+            record: aether_api::VectorRecordMetadata {
+                sidecar_id: "semantic-memory".into(),
+                vector_id: "vec-1".into(),
+                entity: EntityId::new(31),
+                source_artifact_id: Some("doc-1".into()),
+                embedding_ref: "s3://aether/vectors/vec-1.bin".into(),
+                dimensions: 3,
+                metric: VectorMetric::Cosine,
+                metadata: BTreeMap::new(),
+                provenance: DatomProvenance::default(),
+                policy: None,
+                registered_at: ElementId::new(2),
+            },
+            embedding: vec![0.9, 0.1, 0.0],
+        })
+        .send()
+        .await
+        .expect("register vector request");
+    assert!(vector.status().is_success());
+
+    let search = client
+        .post(format!("{base_url}/v1/sidecars/vectors/search"))
+        .json(&SearchVectorsRequest {
+            sidecar_id: "semantic-memory".into(),
+            query_embedding: vec![1.0, 0.0, 0.0],
+            top_k: 1,
+            metric: VectorMetric::Cosine,
+            as_of: Some(ElementId::new(1)),
+            projection: Some(VectorFactProjection {
+                predicate: PredicateRef {
+                    id: PredicateId::new(81),
+                    name: "semantic_neighbor".into(),
+                    arity: 3,
+                },
+                query_entity: EntityId::new(999),
+            }),
+            policy_context: None,
+        })
+        .send()
+        .await
+        .expect("search vectors request");
+    assert!(search.status().is_success());
+    let search = search
+        .json::<SearchVectorsResponse>()
+        .await
+        .expect("search vectors response");
+    assert!(search.matches.is_empty());
+    assert!(search.facts.is_empty());
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn http_service_rejects_sidecar_registration_beyond_journal_tail() {
+    let (base_url, server) = spawn_server(InMemoryKernelService::new()).await;
+    let client = Client::new();
+
+    let append = client
+        .post(format!("{base_url}/v1/append"))
+        .json(&AppendRequest {
+            datoms: vec![anchor_datom(1)],
+        })
+        .send()
+        .await
+        .expect("append anchor request");
+    assert!(append.status().is_success());
+
+    let artifact = client
+        .post(format!("{base_url}/v1/sidecars/artifacts/register"))
+        .json(&RegisterArtifactReferenceRequest {
+            reference: aether_api::ArtifactReference {
+                sidecar_id: "semantic-memory".into(),
+                artifact_id: "doc-2".into(),
+                entity: EntityId::new(32),
+                uri: "s3://aether/docs/doc-2.md".into(),
+                media_type: "text/markdown".into(),
+                byte_length: 128,
+                digest: None,
+                metadata: BTreeMap::new(),
+                provenance: DatomProvenance::default(),
+                policy: None,
+                registered_at: ElementId::new(2),
+            },
+        })
+        .send()
+        .await
+        .expect("register artifact request");
+    assert_eq!(artifact.status(), reqwest::StatusCode::BAD_REQUEST);
+
+    server.abort();
+}
+
 fn anchor_datom(element: u64) -> Datom {
     Datom {
         entity: EntityId::new(1),

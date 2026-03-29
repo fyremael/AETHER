@@ -4,9 +4,13 @@ This document defines the AETHER quality bar beyond everyday development checks.
 
 It exists for one reason: a structured release needs a repeatable evidence pack, not just confidence that "CI is green."
 
+For the post-v1, internal-first defect-hunting program that runs across admin,
+operator, user, and exec perspectives, see `docs/QA_HARDENING_PROGRAM.md`.
+That program is complementary to this release gate, not a replacement for it.
+
 ## QA Layers
 
-AETHER now verifies itself in six layers.
+AETHER now verifies itself in seven layers.
 
 1. **Core semantic unit tests**
    Rust crate tests cover the substrate, resolver, rules, runtime, explainability, storage, and API seams.
@@ -14,11 +18,13 @@ AETHER now verifies itself in six layers.
    The semantic-closure pack proves replay, recursion, stratified negation, bounded aggregation, policy-aware derivation, coordination fencing, sidecar projection, and explanation in one path.
 3. **Boundary-client tests**
    Python and Go exercise the stable HTTP seam so the non-Rust boundaries do not silently drift.
-4. **Pilot launch validation**
+4. **Persona hardening sweeps**
+   The hardening runner exercises admin, operator, user, and exec workflows and writes triage artifacts without yet blocking release in phase one.
+5. **Pilot launch validation**
    The Windows launch pack generates the operator report, performance report, drift comparison, release-mode API tests, soak suite, and stress suite.
-5. **Packaging and documentation checks**
+6. **Packaging and documentation checks**
    The release-readiness suite builds the packaged pilot bundle and a GitHub Pages preview bundle from the same tree.
-6. **Release-readiness orchestration**
+7. **Release-readiness orchestration**
    A single runner now executes the full structured-release contract and writes a saved transcript and summary.
 
 ## Standing Development Gate
@@ -38,6 +44,35 @@ That gate is necessary, but it is not the release gate.
 Use it when the question is, “Did this change break the repository?”
 Use the full release suite when the question is, “Can we defend this exact tree
 as a release candidate?”
+
+Use the hardening suite when the question is, “Where are the next admin,
+operator, boundary, and clarity failures hiding?”
+
+## Hardening Sweep
+
+For post-v1 hardening and multi-perspective defect discovery, run:
+
+```text
+double-click scripts/run-hardening-sweep.cmd
+```
+
+or:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/run-hardening-sweep.ps1
+```
+
+That suite writes:
+
+- `artifacts/qa/hardening/latest.md`
+- `artifacts/qa/hardening/latest.json`
+- timestamped siblings under `artifacts/qa/hardening/`
+
+Phase-one policy:
+
+- the hardening workflow is non-blocking
+- findings are triage artifacts first, blockers second
+- promotion into `CI` or release-readiness requires the criteria in `docs/QA_HARDENING_PROGRAM.md`
 
 ## Structured Release Gate
 
@@ -94,10 +129,12 @@ Those files answer four different release questions:
 
 ## CI Automation
 
-The repository now has three quality-automation paths:
+The repository now has four quality-automation paths:
 
 - `CI`
   The mainline gate for Rust, Go, Python, pilot launch validation, and pilot package build.
+- `QA Hardening`
+  The scheduled/manual multi-perspective hardening workflow with admin, operator, user, and exec artifact packs. It is diagnostic-only in phase one.
 - `Pilot Validation`
   The scheduled/manual operator validation pack with uploaded pilot artifacts.
 - `Release Readiness`
@@ -122,6 +159,8 @@ The suite is comprehensive for the current single-node pilot release shape, but 
 
 Still open:
 
+- promotion of stable hardening subchecks into blocking CI
+- public bug-bounty launch posture
 - signed artifacts
 - multi-platform packaged bundles beyond the current Windows pilot package
 - historical benchmark trend storage beyond workflow artifacts

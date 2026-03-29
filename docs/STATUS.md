@@ -14,6 +14,12 @@ repackages those existing proof surfaces in plain product language for
 design-partner conversations. That packaging layer is documentation and demo
 work, not a new kernel-semantic claim.
 
+Post-v1 hardening work is now also underway as an internal-first QA program:
+persona-based sweeps, disclosure guidance, stronger defect intake, and
+scheduled non-blocking hardening automation now exist to hunt admin,
+operator, boundary, and front-door failures before they are promoted into
+blocking release gates.
+
 The v1 single-node semantic thesis is now also formally closed in
 `docs/V1_CLOSEOUT.md`, which ties the semantic compliance matrix, QA contract,
 launch gate, and architectural ADR set into one explicit release posture.
@@ -81,6 +87,7 @@ Completed:
 - GitHub CI added for Ubuntu and Windows
 - repository front-door docs, contribution guidance, and worked examples now exist
 - a governed incident blackboard commercialization document, runnable demo, and front-door docs/site packaging now exist as the canonical adjacent-next design-partner exemplar over the current pilot proof
+- a post-v1 QA hardening program now exists with a governing rubric, responsible-disclosure policy, stronger issue templates, a repeatable persona sweep runner, and a scheduled/manual non-blocking hardening workflow
 
 Still open:
 
@@ -95,6 +102,7 @@ Still open:
 The most immediate work now sits just beyond the launch-ready pilot slice and
 the formally closed v1 single-node semantic core:
 
+- run the new hardening program long enough to promote the most stable admin and operator checks into the main release gate
 - extend the new single-host replicated-partition prototype toward stronger recovery drills, better status surfacing, and clearer operator presets without pretending it is a generalized cluster manager
 - add longer-duration scheduled operability evidence beyond the current release and launch gates
 - decide how far to widen audit context from the current semantic cut/query/tuple/diff fields into fuller operator intent

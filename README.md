@@ -348,6 +348,11 @@ GitHub Actions now runs the same format, lint, and test gates on both Ubuntu and
 
 For structured release preparation, use the dedicated QA runner described in [`docs/QA.md`](./docs/QA.md). It produces a saved transcript and summary, builds the Pages preview bundle, executes the pilot launch pack, and builds the packaged Windows pilot bundle from the same candidate tree.
 
+For post-v1, multi-perspective defect hunting, use the hardening lane described
+in [`docs/QA_HARDENING_PROGRAM.md`](./docs/QA_HARDENING_PROGRAM.md). That path
+adds persona sweeps, disclosure guidance, and non-blocking hardening
+automation without changing the stable kernel or release semantics.
+
 ## Development Posture
 
 The intended implementation sequence is disciplined.
@@ -423,6 +428,7 @@ That clarity is part of the implementation.
 - `docs/PILOT_DEPLOYMENT.md` explains the hardened packaged deployment path for the pilot service.
 - `docs/PILOT_OPERATIONS_PLAYBOOK.md` explains deployment, rotation, upgrade, rollback, and restart/replay operations for the pilot service.
 - `docs/PERFORMANCE.md` explains the benchmark harness, stress tests, and performance-report path.
+- `docs/QA_HARDENING_PROGRAM.md` defines the internal-first hardening rubric, persona sweeps, and phased promotion policy for new QA checks.
 - `docs/PILOT_LAUNCH.md` defines the current launch-readiness contract and validation pack for the design-partner pilot.
 - `docs/GLOSSARY.md` defines canonical project vocabulary.
 - `docs/DOCUMENTATION_STANDARD.md` defines the documentation quality bar and update rules.

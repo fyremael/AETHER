@@ -16,6 +16,7 @@ PYTHON_ROOT = REPO_ROOT / "python"
 sys.path.insert(0, str(PYTHON_ROOT))
 
 from aether_sdk import (  # noqa: E402
+    AetherApiError,
     AetherClient,
     make_artifact_reference,
     make_datom,
@@ -255,6 +256,16 @@ query current_cut {
             search["facts"][0]["provenance"]["source_datom_ids"],
             [4, 3],
         )
+
+    def test_client_surfaces_structured_errors_for_malformed_documents(self) -> None:
+        client = AetherClient(self._base_url)
+
+        with self.assertRaises(AetherApiError) as error_context:
+            client.run_document("schema { attr task.status: ScalarLWW<String> } query {")
+
+        self.assertEqual(error_context.exception.status_code, 400)
+        self.assertIn("invalid section header", error_context.exception.message.lower())
+        self.assertIsNotNone(error_context.exception.payload)
 
     @staticmethod
     def _free_port() -> int:

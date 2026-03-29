@@ -32,6 +32,43 @@ func TestHealthSendsBearerToken(t *testing.T) {
 	}
 }
 
+func TestStructuredErrorsPreserveMessageAndPayload(t *testing.T) {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error":  "policy denied for explain",
+			"reason": "visibility mismatch",
+		})
+	}))
+	defer server.Close()
+
+	api := New(server.URL, "pilot-token")
+	_, err := api.Health(context.Background())
+	if err == nil {
+		t.Fatalf("expected health request to fail")
+	}
+
+	apiErr, ok := err.(*Error)
+	if !ok {
+		t.Fatalf("expected *Error, got %T", err)
+	}
+	if apiErr.StatusCode != http.StatusForbidden {
+		t.Fatalf("unexpected status code %d", apiErr.StatusCode)
+	}
+	if apiErr.Message != "policy denied for explain" {
+		t.Fatalf("unexpected message %q", apiErr.Message)
+	}
+	payload, ok := apiErr.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("expected structured payload, got %#v", apiErr.Payload)
+	}
+	if payload["reason"] != "visibility mismatch" {
+		t.Fatalf("unexpected structured payload %#v", payload)
+	}
+}
+
 func TestRunDocumentCarriesPolicyContext(t *testing.T) {
 	t.Helper()
 

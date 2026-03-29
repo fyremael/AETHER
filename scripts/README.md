@@ -21,6 +21,7 @@ For documentation publishing:
 
 - double-click `run-pilot-report.cmd`
 - double-click `run-pilot-delta-report.cmd`
+- double-click `run-hardening-sweep.cmd`
 - double-click `run-pilot-launch-validation.cmd`
 - double-click `run-release-readiness.cmd`
 
@@ -47,6 +48,7 @@ For documentation publishing:
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-demo.ps1 -Demo 04`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-report.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-delta-report.ps1`
+- run `powershell -ExecutionPolicy Bypass -File scripts/run-hardening-sweep.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1 -BaselinePath <accepted-baseline-path>`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1`
@@ -87,6 +89,8 @@ Pilot reports are written to `artifacts/pilot/reports/`.
 Pilot launch-validation transcripts are written to `artifacts/pilot/launch/`.
 
 Structured release-readiness transcripts and summaries are written to `artifacts/qa/release-readiness/`.
+
+Structured hardening summaries and JSON triage artifacts are written to `artifacts/qa/hardening/`.
 
 Packaged pilot-service bundles are written to `artifacts/pilot/packages/`.
 

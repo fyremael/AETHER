@@ -717,6 +717,87 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn rejects_missing_token_file_path() {
+        let root = unique_temp_dir("pilot-missing-token");
+        let config_dir = root.join("config");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+
+        let config = PilotServiceConfig {
+            config_version: "pilot-v1".into(),
+            schema_version: "v1".into(),
+            service_mode: ServiceMode::SingleNode,
+            bind_addr: "127.0.0.1:3000".into(),
+            database_path: PathBuf::from("coordination.sqlite"),
+            audit_log_path: None,
+            auth: PilotAuthConfig {
+                revoked_token_ids: Vec::new(),
+                revoked_principal_ids: Vec::new(),
+                tokens: vec![PilotTokenConfig {
+                    principal: "pilot-operator".into(),
+                    principal_id: Some("principal:pilot-operator".into()),
+                    token_id: Some("token:pilot-operator".into()),
+                    scopes: vec![AuthScope::Query],
+                    policy_context: None,
+                    token: None,
+                    token_env: None,
+                    token_file: Some(PathBuf::from("missing.token")),
+                    token_command: None,
+                    revoked: false,
+                }],
+            },
+        };
+
+        let error = config
+            .resolve(config_dir.join("pilot-service.json"))
+            .expect_err("missing token file should fail");
+        assert!(matches!(
+            error,
+            DeploymentError::ReadTokenFile { path, .. }
+                if path.ends_with("missing.token")
+        ));
+    }
+
+    #[test]
+    fn rejects_failed_token_command() {
+        let config = PilotServiceConfig {
+            config_version: "pilot-v1".into(),
+            schema_version: "v1".into(),
+            service_mode: ServiceMode::SingleNode,
+            bind_addr: "127.0.0.1:3000".into(),
+            database_path: PathBuf::from("coordination.sqlite"),
+            audit_log_path: None,
+            auth: PilotAuthConfig {
+                revoked_token_ids: Vec::new(),
+                revoked_principal_ids: Vec::new(),
+                tokens: vec![PilotTokenConfig {
+                    principal: "pilot-operator".into(),
+                    principal_id: Some("principal:pilot-operator".into()),
+                    token_id: Some("token:pilot-operator".into()),
+                    scopes: vec![AuthScope::Query],
+                    policy_context: None,
+                    token: None,
+                    token_env: None,
+                    token_file: None,
+                    token_command: Some(failing_command_fixture()),
+                    revoked: false,
+                }],
+            },
+        };
+
+        let error = config
+            .resolve(PathBuf::from("pilot-service.json"))
+            .expect_err("failed token command should fail");
+        assert!(matches!(
+            error,
+            DeploymentError::TokenCommandFailed {
+                principal,
+                stderr,
+                ..
+            } if principal == "pilot-operator" && stderr.contains("hard failure")
+        ));
+    }
+
     fn token_command_fixture(token: &str) -> Vec<String> {
         if cfg!(windows) {
             vec![
@@ -744,6 +825,23 @@ mod tests {
             ]
         } else {
             vec!["sh".into(), "-c".into(), "printf ''".into()]
+        }
+    }
+
+    fn failing_command_fixture() -> Vec<String> {
+        if cfg!(windows) {
+            vec![
+                "powershell".into(),
+                "-NoProfile".into(),
+                "-Command".into(),
+                "Write-Error 'hard failure'; exit 9".into(),
+            ]
+        } else {
+            vec![
+                "sh".into(),
+                "-c".into(),
+                "printf '%s\\n' 'hard failure' >&2; exit 9".into(),
+            ]
         }
     }
 

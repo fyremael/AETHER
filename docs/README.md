@@ -15,6 +15,8 @@ Use the docs by question, not by sheer volume.
   `docs/SEMANTIC_COMPLIANCE_MATRIX.md`, `docs/V1_CLOSEOUT.md`, and
   `docs/KNOWN_LIMITATIONS.md`.
 - If you need to act, use the operator, workflow, deployment, or QA guides.
+- If you need the new post-v1 hardening lane, use `docs/QA_HARDENING_PROGRAM.md`
+  together with `docs/QA.md`.
 
 The set is written in layers on purpose: plain orientation first, current-state
 truth second, operating detail third.
@@ -182,12 +184,23 @@ That path explains the operator-facing report, baseline capture, drift compariso
 Read:
 
 1. `docs/QA.md`
-2. `docs/V1_CLOSEOUT.md`
-3. `docs/PILOT_LAUNCH.md`
-4. `docs/PILOT_DEPLOYMENT.md`
-5. `scripts/README.md`
+2. `docs/QA_HARDENING_PROGRAM.md`
+3. `docs/V1_CLOSEOUT.md`
+4. `docs/PILOT_LAUNCH.md`
+5. `docs/PILOT_DEPLOYMENT.md`
+6. `scripts/README.md`
 
 That path covers the structured release-readiness suite, its evidence pack, and the packaged pilot-bundle handoff.
+
+### If you are triaging bugs, gaps, or security issues
+
+Read:
+
+1. `docs/QA_HARDENING_PROGRAM.md`
+2. `docs/QA.md`
+3. `SECURITY.md`
+4. `.github/ISSUE_TEMPLATE/bug_report.md`
+5. `.github/ISSUE_TEMPLATE/semantics_discussion.md`
 
 ### If you need the boundary-client path
 
@@ -241,6 +254,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 | `docs/PILOT_OPERATIONS_PLAYBOOK.md` | Deployment, rotation, upgrade, rollback, and restart/replay playbooks for the pilot service |
 | `docs/PERFORMANCE.md` | Performance workloads, runner commands, benchmark harness, and interpretation guidance |
 | `docs/QA.md` | Structured QA and regression suite, release-readiness runner, and artifact contract |
+| `docs/QA_HARDENING_PROGRAM.md` | Persona-based hardening rubric, severity model, and phased promotion policy |
 | `docs/COMMERCIALIZATION/README.md` | Hub for commercialization, product framing, buyer narrative, and messaging |
 | `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md` | Canonical product-facing exemplar for a governed shared workspace over the current pilot proof |
 | `docs/COMMERCIALIZATION/BENCHMARK_BRIEF.md` | Stakeholder-ready benchmark summary with release-style charts and interpretation |
