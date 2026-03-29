@@ -35,6 +35,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.26.1"
+          cache-dependency-path: go/go.sum
 
       - name: Install stable toolchain
         run: |
@@ -123,6 +124,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.26.1"
+          cache-dependency-path: go/go.sum
 
       - name: Install stable toolchain
         run: |
