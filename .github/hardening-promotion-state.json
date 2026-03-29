@@ -1,0 +1,54 @@
+{
+  "minimum_consecutive_scheduled_green_runs": 3,
+  "workflow_file": "qa-hardening.yml",
+  "base_branch": "main",
+  "tracker_issue_title": "QA hardening promotion tracker",
+  "promotion_order": [
+    "admin",
+    "operator",
+    "user",
+    "exec"
+  ],
+  "groups": {
+    "admin": {
+      "label": "Admin package boot, auth reload, backup/restore, and restart/replay",
+      "workflow_target": "CI",
+      "blocking": false,
+      "manual_validation": {
+        "confirmed": true,
+        "confirmed_at": "2026-03-29",
+        "evidence": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/run-hardening-sweep.ps1 -Packs admin"
+      }
+    },
+    "operator": {
+      "label": "Operator report, delta, explain, and redaction checks",
+      "workflow_target": "CI",
+      "blocking": false,
+      "manual_validation": {
+        "confirmed": true,
+        "confirmed_at": "2026-03-29",
+        "evidence": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/run-hardening-sweep.ps1 -Packs operator"
+      }
+    },
+    "user": {
+      "label": "User SDK, HTTP, notebook, and onboarding checks",
+      "workflow_target": "CI",
+      "blocking": false,
+      "manual_validation": {
+        "confirmed": true,
+        "confirmed_at": "2026-03-29",
+        "evidence": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/run-hardening-sweep.ps1 -Packs user"
+      }
+    },
+    "exec": {
+      "label": "Exec demo and Pages narrative consistency checks",
+      "workflow_target": "CI",
+      "blocking": false,
+      "manual_validation": {
+        "confirmed": true,
+        "confirmed_at": "2026-03-29",
+        "evidence": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/run-hardening-sweep.ps1 -Packs exec"
+      }
+    }
+  }
+}

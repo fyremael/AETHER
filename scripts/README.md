@@ -92,6 +92,8 @@ Structured release-readiness transcripts and summaries are written to `artifacts
 
 Structured hardening summaries and JSON triage artifacts are written to `artifacts/qa/hardening/`.
 
+Hardening promotion metrics and tracker artifacts are written to `artifacts/qa/hardening/promotion/`.
+
 Packaged pilot-service bundles are written to `artifacts/pilot/packages/`.
 
 Those bundles now include a package-local `rotate-pilot-token.cmd` helper plus both `PILOT_DEPLOYMENT.md` and `PILOT_OPERATIONS_PLAYBOOK.md` so deployment, rotation, and upgrade guidance can travel with the binary.

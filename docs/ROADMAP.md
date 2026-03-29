@@ -42,6 +42,7 @@ Focus:
 - keep the first pass internal-first and diagnostic before making it blocking
 - mature the bug/spec-gap/usability-gap/security intake posture
 - promote only the most stable hardening checks into `CI` and release-readiness
+- use GitHub workflow artifacts, tracker issues, and promotion PRs to make that promotion path explicit rather than memory-based
 
 Non-goal:
 

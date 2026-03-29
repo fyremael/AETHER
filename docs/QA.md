@@ -66,6 +66,8 @@ That suite writes:
 
 - `artifacts/qa/hardening/latest.md`
 - `artifacts/qa/hardening/latest.json`
+- `artifacts/qa/hardening/promotion/promotion-run.json`
+- `artifacts/qa/hardening/promotion/promotion-tracker.json`
 - timestamped siblings under `artifacts/qa/hardening/`
 
 Phase-one policy:
@@ -73,6 +75,7 @@ Phase-one policy:
 - the hardening workflow is non-blocking
 - findings are triage artifacts first, blockers second
 - promotion into `CI` or release-readiness requires the criteria in `docs/QA_HARDENING_PROGRAM.md`
+- the scheduled workflow now updates a standing tracker issue and opens a promotion PR automatically once the next pack satisfies the documented threshold
 
 ## Structured Release Gate
 
@@ -134,7 +137,7 @@ The repository now has four quality-automation paths:
 - `CI`
   The mainline gate for Rust, Go, Python, pilot launch validation, and pilot package build.
 - `QA Hardening`
-  The scheduled/manual multi-perspective hardening workflow with admin, operator, user, and exec artifact packs. It is diagnostic-only in phase one.
+  The scheduled/manual multi-perspective hardening workflow with admin, operator, user, and exec artifact packs. It stays diagnostic-only until the tracker proves a pack is ready for promotion.
 - `Pilot Validation`
   The scheduled/manual operator validation pack with uploaded pilot artifacts.
 - `Release Readiness`

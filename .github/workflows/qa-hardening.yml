@@ -5,6 +5,12 @@ on:
   schedule:
     - cron: "0 15 * * 1"
 
+permissions:
+  actions: read
+  contents: write
+  issues: write
+  pull-requests: write
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -12,6 +18,9 @@ jobs:
   windows-hardening:
     name: Admin + Operator Hardening (Windows)
     runs-on: windows-latest
+    outputs:
+      admin_status: ${{ steps.pack-status.outputs.admin_status }}
+      operator_status: ${{ steps.pack-status.outputs.operator_status }}
 
     steps:
       - name: Checkout
@@ -33,9 +42,45 @@ jobs:
           rustup default stable
 
       - name: Run Windows hardening sweep
+        id: hardening
         shell: pwsh
         continue-on-error: true
-        run: ./scripts/run-hardening-sweep.ps1 -Packs admin,operator
+        run: |
+          ./scripts/run-hardening-sweep.ps1 -Packs admin,operator
+          $exitCode = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }
+          "exit_code=$exitCode" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          exit $exitCode
+
+      - name: Summarize Windows pack status
+        id: pack-status
+        if: always()
+        shell: pwsh
+        run: |
+          function Get-PackStatus([object[]]$Results, [string]$Persona) {
+            $matches = @($Results | Where-Object { $_.persona -eq $Persona })
+            if ($matches.Count -eq 0) {
+              return "failed"
+            }
+            if (@($matches | Where-Object { $_.status -eq "failed" }).Count -gt 0) {
+              return "failed"
+            }
+            if (@($matches | Where-Object { $_.status -eq "passed" }).Count -gt 0) {
+              return "passed"
+            }
+            return "skipped"
+          }
+
+          $jsonPath = "artifacts/qa/hardening/latest.json"
+          if (-not (Test-Path $jsonPath)) {
+            "admin_status=failed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "operator_status=failed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            exit 0
+          }
+
+          $payload = Get-Content -Path $jsonPath -Raw | ConvertFrom-Json -Depth 32
+          $results = @($payload.results)
+          "admin_status=$(Get-PackStatus -Results $results -Persona 'admin')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "operator_status=$(Get-PackStatus -Results $results -Persona 'operator')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Upload Windows hardening artifacts
         if: always()
@@ -61,6 +106,9 @@ jobs:
   ubuntu-hardening:
     name: User + Exec Hardening (Ubuntu)
     runs-on: ubuntu-latest
+    outputs:
+      user_status: ${{ steps.pack-status.outputs.user_status }}
+      exec_status: ${{ steps.pack-status.outputs.exec_status }}
 
     steps:
       - name: Checkout
@@ -82,9 +130,45 @@ jobs:
           rustup default stable
 
       - name: Run Ubuntu hardening sweep
+        id: hardening
         shell: pwsh
         continue-on-error: true
-        run: ./scripts/run-hardening-sweep.ps1 -Packs user,exec
+        run: |
+          ./scripts/run-hardening-sweep.ps1 -Packs user,exec
+          $exitCode = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }
+          "exit_code=$exitCode" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          exit $exitCode
+
+      - name: Summarize Ubuntu pack status
+        id: pack-status
+        if: always()
+        shell: pwsh
+        run: |
+          function Get-PackStatus([object[]]$Results, [string]$Persona) {
+            $matches = @($Results | Where-Object { $_.persona -eq $Persona })
+            if ($matches.Count -eq 0) {
+              return "failed"
+            }
+            if (@($matches | Where-Object { $_.status -eq "failed" }).Count -gt 0) {
+              return "failed"
+            }
+            if (@($matches | Where-Object { $_.status -eq "passed" }).Count -gt 0) {
+              return "passed"
+            }
+            return "skipped"
+          }
+
+          $jsonPath = "artifacts/qa/hardening/latest.json"
+          if (-not (Test-Path $jsonPath)) {
+            "user_status=failed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "exec_status=failed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            exit 0
+          }
+
+          $payload = Get-Content -Path $jsonPath -Raw | ConvertFrom-Json -Depth 32
+          $results = @($payload.results)
+          "user_status=$(Get-PackStatus -Results $results -Persona 'user')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "exec_status=$(Get-PackStatus -Results $results -Persona 'exec')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Upload Ubuntu hardening artifacts
         if: always()
@@ -105,3 +189,189 @@ jobs:
           } else {
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Ubuntu hardening summary was not generated."
           }
+
+  promotion-monitor:
+    name: Hardening Promotion Tracker
+    if: always()
+    needs:
+      - windows-hardening
+      - ubuntu-hardening
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Write current promotion metrics
+        run: |
+          python scripts/hardening_promotion.py write-run-metrics \
+            --config .github/hardening-promotion-state.json \
+            --out-json artifacts/qa/hardening/promotion/promotion-run.json \
+            --out-md artifacts/qa/hardening/promotion/promotion-run.md \
+            --run-id "${{ github.run_id }}" \
+            --run-attempt "${{ github.run_attempt }}" \
+            --event-name "${{ github.event_name }}" \
+            --ref-name "${{ github.ref_name }}" \
+            --sha "${{ github.sha }}" \
+            --pack-status admin=${{ needs.windows-hardening.outputs.admin_status || 'failed' }} \
+            --pack-status operator=${{ needs.windows-hardening.outputs.operator_status || 'failed' }} \
+            --pack-status user=${{ needs.ubuntu-hardening.outputs.user_status || 'failed' }} \
+            --pack-status exec=${{ needs.ubuntu-hardening.outputs.exec_status || 'failed' }}
+
+      - name: Evaluate streaks
+        id: evaluate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/hardening_promotion.py evaluate-streaks \
+            --config .github/hardening-promotion-state.json \
+            --repo "${{ github.repository }}" \
+            --current-metrics artifacts/qa/hardening/promotion/promotion-run.json \
+            --out-json artifacts/qa/hardening/promotion/promotion-tracker.json \
+            --out-md artifacts/qa/hardening/promotion/promotion-tracker.md \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Upload promotion tracker artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-hardening-metrics
+          path: |
+            artifacts/qa/hardening/promotion
+          if-no-files-found: error
+
+      - name: Publish promotion tracker summary
+        if: always()
+        run: |
+          if [ -f artifacts/qa/hardening/promotion/promotion-tracker.md ]; then
+            cat artifacts/qa/hardening/promotion/promotion-tracker.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Promotion tracker summary was not generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upsert tracker issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRACKER_TITLE: ${{ steps.evaluate.outputs.tracker_issue_title }}
+        run: |
+          gh issue list --repo "${{ github.repository }}" --state open --limit 200 --json number,title > artifacts/qa/hardening/promotion/open-issues.json
+          issue_number="$(python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          issues = json.loads(Path("artifacts/qa/hardening/promotion/open-issues.json").read_text(encoding="utf-8"))
+          title = os.environ["TRACKER_TITLE"]
+          match = next((str(item["number"]) for item in issues if item["title"] == title), "")
+          print(match)
+          PY
+          )"
+          if [ -z "$issue_number" ]; then
+            gh issue create \
+              --repo "${{ github.repository }}" \
+              --title "$TRACKER_TITLE" \
+              --body-file artifacts/qa/hardening/promotion/promotion-tracker.md
+          else
+            gh issue edit \
+              --repo "${{ github.repository }}" \
+              "$issue_number" \
+              --title "$TRACKER_TITLE" \
+              --body-file artifacts/qa/hardening/promotion/promotion-tracker.md
+          fi
+
+      - name: Open promotion issue
+        if: steps.evaluate.outputs.should_open_promotion_issue == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROMOTION_TITLE: ${{ steps.evaluate.outputs.promotion_issue_title }}
+        run: |
+          gh issue list --repo "${{ github.repository }}" --state open --limit 200 --json title > artifacts/qa/hardening/promotion/open-promotion-issues.json
+          if python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+          issues = json.loads(Path("artifacts/qa/hardening/promotion/open-promotion-issues.json").read_text(encoding="utf-8"))
+          title = os.environ["PROMOTION_TITLE"]
+          sys.exit(0 if any(item["title"] == title for item in issues) else 1)
+          PY
+          then
+            echo "Promotion issue already exists for $PROMOTION_TITLE"
+            exit 0
+          fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path("artifacts/qa/hardening/promotion/promotion-tracker.json").read_text(encoding="utf-8"))
+          Path("artifacts/qa/hardening/promotion/promotion-issue.md").write_text(
+              payload["promotion_issue_body"],
+              encoding="utf-8",
+          )
+          PY
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "$PROMOTION_TITLE" \
+            --body-file artifacts/qa/hardening/promotion/promotion-issue.md
+
+      - name: Open promotion PR
+        if: steps.evaluate.outputs.should_open_promotion_issue == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEXT_GROUP: ${{ steps.evaluate.outputs.next_eligible_group }}
+          PROMOTION_TITLE: ${{ steps.evaluate.outputs.promotion_issue_title }}
+        run: |
+          gh pr list --repo "${{ github.repository }}" --state open --limit 200 --json title > artifacts/qa/hardening/promotion/open-prs.json
+          if python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+          prs = json.loads(Path("artifacts/qa/hardening/promotion/open-prs.json").read_text(encoding="utf-8"))
+          title = os.environ["PROMOTION_TITLE"]
+          sys.exit(0 if any(item["title"] == title for item in prs) else 1)
+          PY
+          then
+            echo "Promotion PR already exists for $PROMOTION_TITLE"
+            exit 0
+          fi
+
+          branch="codex/promote-hardening-${NEXT_GROUP}-${{ github.run_id }}"
+          python scripts/hardening_promotion.py apply-promotion \
+            --config .github/hardening-promotion-state.json \
+            --group "$NEXT_GROUP"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path("artifacts/qa/hardening/promotion/promotion-tracker.json").read_text(encoding="utf-8"))
+          group = payload["next_eligible_group"]
+          body = payload["promotion_issue_body"] + "\n\nThis PR was opened automatically from the scheduled hardening tracker."
+          Path("artifacts/qa/hardening/promotion/promotion-pr.md").write_text(body, encoding="utf-8")
+          Path("artifacts/qa/hardening/promotion/promotion-pr-title.txt").write_text(
+              f"Promote {group} hardening checks into blocking CI",
+              encoding="utf-8",
+          )
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add .github/hardening-promotion-state.json
+          git commit -m "$(cat artifacts/qa/hardening/promotion/promotion-pr-title.txt)"
+          git push origin "$branch"
+          gh pr create \
+            --repo "${{ github.repository }}" \
+            --base main \
+            --head "$branch" \
+            --title "$(cat artifacts/qa/hardening/promotion/promotion-pr-title.txt)" \
+            --body-file artifacts/qa/hardening/promotion/promotion-pr.md
+          gh workflow run \
+            --repo "${{ github.repository }}" \
+            ci.yml \
+            --ref "$branch"

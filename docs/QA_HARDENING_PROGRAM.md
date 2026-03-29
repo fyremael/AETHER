@@ -160,6 +160,8 @@ The hardening sweep writes:
 
 - `artifacts/qa/hardening/latest.md`
 - `artifacts/qa/hardening/latest.json`
+- `artifacts/qa/hardening/promotion/promotion-run.json`
+- `artifacts/qa/hardening/promotion/promotion-tracker.json`
 - timestamped siblings under `artifacts/qa/hardening/`
 
 The JSON contract is internal and triage-oriented.
@@ -249,6 +251,32 @@ Promotion order:
 
 Once a subcheck is promoted, move it into the main `CI` or release-readiness
 path instead of leaving it buried in one large catch-all workflow.
+
+## GitHub Automation Loop
+
+The repository now uses GitHub Actions and issues to keep this promotion path
+honest.
+
+- `QA Hardening` continues to run on a weekly schedule plus manual dispatch.
+- Each run now uploads machine-readable promotion metrics for `admin`,
+  `operator`, `user`, and `exec`.
+- The final tracker job computes consecutive scheduled green streaks from prior
+  workflow artifacts, updates the standing tracker issue, and records the next
+  eligible pack.
+- When the next pack in the documented order reaches the threshold and manual
+  validation is already confirmed, automation opens both:
+  - a promotion issue describing the evidence
+  - a promotion PR that flips the pack into blocking `CI`
+- Because that PR is created by GitHub automation, the tracker also dispatches
+  `CI` explicitly on the promotion branch so the new blocking job is evidenced
+  immediately.
+
+Promotion state lives in `.github/hardening-promotion-state.json`.
+That file is the single source of truth for:
+
+- which packs are already blocking
+- the required streak threshold
+- the recorded manual/local validation evidence
 
 ## Public Disclosure Posture
 

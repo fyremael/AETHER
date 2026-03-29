@@ -88,6 +88,7 @@ Completed:
 - repository front-door docs, contribution guidance, and worked examples now exist
 - a governed incident blackboard commercialization document, runnable demo, and front-door docs/site packaging now exist as the canonical adjacent-next design-partner exemplar over the current pilot proof
 - a post-v1 QA hardening program now exists with a governing rubric, responsible-disclosure policy, stronger issue templates, a repeatable persona sweep runner, and a scheduled/manual non-blocking hardening workflow
+- the scheduled hardening workflow now also publishes promotion metrics, updates a standing GitHub tracker issue, and can open a promotion PR when the next pack satisfies the documented streak threshold
 
 Still open:
 
@@ -102,7 +103,7 @@ Still open:
 The most immediate work now sits just beyond the launch-ready pilot slice and
 the formally closed v1 single-node semantic core:
 
-- run the new hardening program long enough to promote the most stable admin and operator checks into the main release gate
+- let the new hardening tracker accumulate enough scheduled green evidence to promote admin first, then operator, user, and exec checks into blocking CI in order
 - extend the new single-host replicated-partition prototype toward stronger recovery drills, better status surfacing, and clearer operator presets without pretending it is a generalized cluster manager
 - add longer-duration scheduled operability evidence beyond the current release and launch gates
 - decide how far to widen audit context from the current semantic cut/query/tuple/diff fields into fuller operator intent

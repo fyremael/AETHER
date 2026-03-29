@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -12,6 +13,26 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  hardening-promotion-state:
+    name: Hardening promotion state
+    runs-on: ubuntu-latest
+    outputs:
+      admin_blocking: ${{ steps.state.outputs.admin_blocking }}
+      operator_blocking: ${{ steps.state.outputs.operator_blocking }}
+      user_blocking: ${{ steps.state.outputs.user_blocking }}
+      exec_blocking: ${{ steps.state.outputs.exec_blocking }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read hardening promotion state
+        id: state
+        run: |
+          python scripts/hardening_promotion.py ci-outputs \
+            --config .github/hardening-promotion-state.json \
+            --github-output "$GITHUB_OUTPUT"
+
   rust:
     name: Rust (${{ matrix.os }}, ${{ matrix.toolchain }})
     runs-on: ${{ matrix.os }}
@@ -113,6 +134,7 @@ jobs:
     name: Pilot package
     runs-on: windows-latest
     needs:
+      - hardening-promotion-state
       - rust
       - go-shell
       - python-sdk
@@ -144,3 +166,123 @@ jobs:
             artifacts/pilot/packages/aether-pilot-service-windows-x86_64
             artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip
           if-no-files-found: error
+
+  hardening-admin:
+    name: Hardening admin (blocking)
+    if: needs.hardening-promotion-state.outputs.admin_blocking == 'true'
+    runs-on: windows-latest
+    needs:
+      - hardening-promotion-state
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Run blocking admin hardening pack
+        shell: pwsh
+        run: ./scripts/run-hardening-sweep.ps1 -Packs admin
+
+  hardening-operator:
+    name: Hardening operator (blocking)
+    if: needs.hardening-promotion-state.outputs.operator_blocking == 'true'
+    runs-on: windows-latest
+    needs:
+      - hardening-promotion-state
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Run blocking operator hardening pack
+        shell: pwsh
+        run: ./scripts/run-hardening-sweep.ps1 -Packs operator
+
+  hardening-user:
+    name: Hardening user (blocking)
+    if: needs.hardening-promotion-state.outputs.user_blocking == 'true'
+    runs-on: ubuntu-latest
+    needs:
+      - hardening-promotion-state
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Run blocking user hardening pack
+        shell: pwsh
+        run: ./scripts/run-hardening-sweep.ps1 -Packs user
+
+  hardening-exec:
+    name: Hardening exec (blocking)
+    if: needs.hardening-promotion-state.outputs.exec_blocking == 'true'
+    runs-on: ubuntu-latest
+    needs:
+      - hardening-promotion-state
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Run blocking exec hardening pack
+        shell: pwsh
+        run: ./scripts/run-hardening-sweep.ps1 -Packs exec
