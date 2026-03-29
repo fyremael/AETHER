@@ -859,6 +859,11 @@ function Invoke-ExecPack {
         -ReproCommand "python scripts/build_pages.py --out-dir artifacts/pages-preview-hardening" `
         -FailureSeverity "medium" `
         -Action {
+            $docs = Invoke-CapturedCommand `
+                -PackName "exec" `
+                -Label "cargo-docs-for-pages-preview" `
+                -Command $cargoPath `
+                -Arguments @("doc", "--workspace", "--no-deps")
             $pages = Invoke-CapturedCommand `
                 -PackName "exec" `
                 -Label "pages-preview-hardening" `
@@ -880,7 +885,7 @@ function Invoke-ExecPack {
 
             [pscustomobject]@{
                 ArtifactPath = $indexPath
-                Notes = "rebuilt Pages and verified the front door still leads with the flagship use-case story"
+                Notes = "rebuilt Rust docs plus Pages and verified the front door still leads with the flagship use-case story"
             }
         }
 }
