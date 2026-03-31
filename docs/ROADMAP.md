@@ -41,6 +41,7 @@ Focus:
 - run persona-based sweeps across admin, operator, user, and exec perspectives
 - keep the first pass internal-first and diagnostic before making it blocking
 - mature the bug/spec-gap/usability-gap/security intake posture
+- run measured perturbation and capacity sweeps so scaling discussions stay tied to host evidence rather than intuition
 - promote only the most stable hardening checks into `CI` and release-readiness
 - use GitHub workflow artifacts, tracker issues, and promotion PRs to make that promotion path explicit rather than memory-based
 
@@ -88,6 +89,8 @@ Non-goal:
 Focus:
 
 - historical benchmark trend storage
+- repeated perturbation/capacity evidence across hosts and time
+- mature the new capacity tracker until node-class, ceiling, and envelope drift are visible without manual artifact archaeology
 - stronger release promotion evidence
 - eventually signed artifacts and provenance
 

@@ -41,6 +41,17 @@ use sysinfo::System;
 use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 use tower::util::ServiceExt;
 
+mod capacity;
+pub use capacity::{
+    build_capacity_input_bundle, build_capacity_report, load_capacity_input_bundle,
+    load_capacity_report, load_perturbation_summary, render_markdown_capacity_input_bundle,
+    render_markdown_capacity_report, write_capacity_report, CapacityConfidenceLevel,
+    CapacityHardwareClass, CapacityLimitingFactor, CapacityNodeClass, PerfCapacityArtifactPaths,
+    PerfCapacityClassEnvelope, PerfCapacityConcurrencyPack, PerfCapacityConcurrencyPoint,
+    PerfCapacityCurve, PerfCapacityCurvePoint, PerfCapacityInputBundle, PerfCapacityReport,
+    PerfCapacityStoragePoint, PerfPerturbationSummary,
+};
+
 pub const DEFAULT_REPORT_SAMPLES: usize = 5;
 pub const DEFAULT_HOST_MANIFEST_PATH: &str =
     "fixtures/performance/hosts/dev-chad-windows-native.json";
@@ -505,6 +516,7 @@ pub struct DurableServiceReplayFixture {
     pub request: RunDocumentRequest,
     pub expected_row_count: usize,
     pub task_count: usize,
+    pub datom_count: usize,
 }
 
 struct HttpFixture {
@@ -981,8 +993,9 @@ pub fn build_durable_coordination_replay_fixture(
     })?;
     let database_path = data_dir.join("coordination.sqlite");
     let mut service = SqliteKernelService::open(&database_path)?;
+    let datoms = coordination_datoms(task_count);
     service.append(AppendRequest {
-        datoms: coordination_datoms(task_count),
+        datoms: datoms.clone(),
     })?;
 
     Ok(DurableServiceReplayFixture {
@@ -994,6 +1007,7 @@ pub fn build_durable_coordination_replay_fixture(
         },
         expected_row_count: coordination_claimability_rows(task_count),
         task_count,
+        datom_count: datoms.len(),
     })
 }
 

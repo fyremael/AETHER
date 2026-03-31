@@ -16,7 +16,7 @@ whole system. Instead we record:
 
 ## What Exists Today
 
-The performance program now has seven aligned layers:
+The performance program now has nine aligned layers:
 
 1. a live console dashboard in `crates/aether_api/examples/performance_dashboard.rs`
 2. a host-aware release-mode report example in `crates/aether_api/examples/performance_report.rs`
@@ -24,7 +24,9 @@ The performance program now has seven aligned layers:
 4. a host-aware drift comparison example in `crates/aether_api/examples/performance_drift_report.rs`
 5. a host snapshot example in `crates/aether_api/examples/performance_host_snapshot.rs`
 6. a matrix summary example in `crates/aether_api/examples/performance_matrix_report.rs`
-7. Criterion benchmarks in `crates/aether_api/benches/kernel_perf.rs`
+7. a capacity-curve example in `crates/aether_api/examples/performance_capacity_curves.rs`
+8. a capacity-report example in `crates/aether_api/examples/performance_capacity_report.rs`
+9. Criterion benchmarks in `crates/aether_api/benches/kernel_perf.rs`
 
 All of them share the same fixture builders, suite taxonomy, drift logic, and
 run-catalog types in `crates/aether_api/src/perf.rs`.
@@ -142,6 +144,13 @@ The latest matrix surfaces live under:
 
 - `artifacts/performance/matrix/latest.json`
 - `artifacts/performance/matrix/latest.md`
+
+The latest perturbation and capacity surfaces now also live under:
+
+- `artifacts/performance/perturbation/latest.json`
+- `artifacts/performance/perturbation/latest.md`
+- `artifacts/performance/capacity/latest.json`
+- `artifacts/performance/capacity/latest.md`
 
 The local convenience copies still exist too:
 
@@ -263,6 +272,50 @@ cargo run -p aether_api --example performance_matrix_report --release -- \
   --output-report artifacts/performance/matrix/latest.md \
   <bundle-path-1> <bundle-path-2> ...
 ```
+
+### Run the perturbation sweep
+
+Windows operator path:
+
+```text
+double-click scripts/run-perturbation-sweep.cmd
+```
+
+Technical path:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/run-perturbation-sweep.ps1 -SkipHardening
+```
+
+That sweep now refreshes:
+
+- a fresh full-stack benchmark bundle
+- accepted drift reports for `core_kernel` and `service_in_process`
+- the ignored release-mode stress ladder
+- the measured capacity-curve bundle used by the planner
+
+### Build the capacity report
+
+Windows operator path:
+
+```text
+double-click scripts/run-capacity-planner.cmd
+```
+
+Technical path:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/run-capacity-planner.ps1 -SkipHardening
+```
+
+That runner ensures perturbation and matrix prerequisites exist, then writes:
+
+- `artifacts/performance/capacity/latest.json`
+- `artifacts/performance/capacity/latest.md`
+- timestamped siblings under `artifacts/performance/capacity/runs/`
+
+The capacity layer is internal planning guidance for node classes, single-node
+envelopes, and partition/federation triggers. It is not a public SLA surface.
 
 ## Launch And Release Gates
 

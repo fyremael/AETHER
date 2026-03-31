@@ -1,0 +1,241 @@
+name: Capacity Planning
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 13 * * 3"
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-perturbation:
+    name: Perturbation Sweep (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Run perturbation sweep
+        shell: pwsh
+        run: |
+          ./scripts/run-perturbation-sweep.ps1 -HostManifestPath fixtures/performance/hosts/github-windows-latest.json -SkipHardening
+
+      - name: Upload perturbation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: capacity-perturbation-windows
+          path: |
+            artifacts/performance/perturbation
+          if-no-files-found: error
+
+  ubuntu-performance:
+    name: Host-Aware Perf Run (Ubuntu)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Run full-stack performance report
+        shell: pwsh
+        run: |
+          ./scripts/run-performance-report.ps1 -Suite full_stack -HostManifestPath fixtures/performance/hosts/github-ubuntu-latest.json
+
+      - name: Upload Ubuntu perf artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: capacity-perf-ubuntu
+          path: |
+            artifacts/performance/runs
+            artifacts/performance/latest.json
+            artifacts/performance/latest.md
+          if-no-files-found: error
+
+  summarize-matrix:
+    name: Matrix Summary
+    runs-on: ubuntu-latest
+    needs:
+      - windows-perturbation
+      - ubuntu-performance
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Download perturbation artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: capacity-perturbation-windows
+          path: artifacts/performance
+
+      - name: Download Ubuntu perf artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: capacity-perf-ubuntu
+          path: artifacts/performance
+
+      - name: Build matrix report
+        shell: pwsh
+        run: |
+          $bundles = Get-ChildItem -Path artifacts/performance -Recurse -Include bundle.json,performance-bundle.json | Select-Object -ExpandProperty FullName
+          if (-not $bundles) {
+            throw "No performance bundles were downloaded for matrix summarization."
+          }
+          $arguments = @(
+            "run", "-p", "aether_api", "--example", "performance_matrix_report", "--release", "--",
+            "--output-json", "artifacts/performance/matrix/latest.json",
+            "--output-report", "artifacts/performance/matrix/latest.md"
+          ) + $bundles
+          & cargo @arguments
+
+      - name: Upload matrix summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: capacity-matrix-summary
+          path: |
+            artifacts/performance/matrix
+          if-no-files-found: error
+
+  capacity-report:
+    name: Capacity Report
+    runs-on: ubuntu-latest
+    needs:
+      - windows-perturbation
+      - summarize-matrix
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Download perturbation artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: capacity-perturbation-windows
+          path: artifacts/performance
+
+      - name: Download matrix summary
+        uses: actions/download-artifact@v4
+        with:
+          name: capacity-matrix-summary
+          path: artifacts/performance
+
+      - name: Build capacity report
+        shell: pwsh
+        run: |
+          $perturbationJson = Resolve-Path artifacts/performance/perturbation/latest.json
+          $matrixJson = Resolve-Path artifacts/performance/matrix/latest.json
+          $perturbation = Get-Content $perturbationJson -Raw | ConvertFrom-Json -Depth 64
+          $capacityInputs = Resolve-Path $perturbation.capacity_inputs.json_path
+          $arguments = @(
+            "run", "-p", "aether_api", "--example", "performance_capacity_report", "--release", "--",
+            "--perturbation-json", $perturbationJson.Path,
+            "--matrix-json", $matrixJson.Path,
+            "--capacity-inputs-json", $capacityInputs.Path,
+            "--output-json", "artifacts/performance/capacity/latest.json",
+            "--output-report", "artifacts/performance/capacity/latest.md"
+          )
+          & cargo @arguments
+
+      - name: Upload capacity report
+        uses: actions/upload-artifact@v4
+        with:
+          name: capacity-report
+          path: |
+            artifacts/performance/capacity
+          if-no-files-found: error
+
+      - name: Publish workflow summary
+        shell: pwsh
+        run: |
+          if (Test-Path artifacts/performance/capacity/latest.md) {
+            Get-Content artifacts/performance/capacity/latest.md | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+          }
+
+  tracker:
+    name: Capacity Tracker
+    runs-on: ubuntu-latest
+    needs:
+      - capacity-report
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download capacity report
+        uses: actions/download-artifact@v4
+        with:
+          name: capacity-report
+          path: artifacts/performance
+
+      - name: Write capacity summary
+        run: |
+          python scripts/capacity_tracker.py write-summary \
+            --config .github/capacity-tracking.json \
+            --capacity-json artifacts/performance/capacity/latest.json \
+            --out-json artifacts/performance/capacity/tracker/capacity-summary.json \
+            --out-md artifacts/performance/capacity/tracker/capacity-summary.md \
+            --run-id "${{ github.run_id }}" \
+            --run-attempt "${{ github.run_attempt }}" \
+            --event-name "${{ github.event_name }}" \
+            --ref-name "${{ github.ref_name }}" \
+            --sha "${{ github.sha }}"
+
+      - name: Sync tracker issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/capacity_tracker.py sync-issue \
+            --config .github/capacity-tracking.json \
+            --summary-json artifacts/performance/capacity/tracker/capacity-summary.json \
+            --summary-md artifacts/performance/capacity/tracker/capacity-tracker.md \
+            --repo "${{ github.repository }}" \
+            --github-token "$GITHUB_TOKEN" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Upload tracker artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: capacity-tracking
+          path: |
+            artifacts/performance/capacity/tracker
+          if-no-files-found: error
+
+      - name: Publish tracker summary
+        run: |
+          if [ -f artifacts/performance/capacity/tracker/capacity-tracker.md ]; then
+            cat artifacts/performance/capacity/tracker/capacity-tracker.md >> "$GITHUB_STEP_SUMMARY"
+          fi

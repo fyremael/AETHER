@@ -17,6 +17,8 @@ Use the docs by question, not by sheer volume.
 - If you need to act, use the operator, workflow, deployment, or QA guides.
 - If you need the new post-v1 hardening lane, use `docs/QA_HARDENING_PROGRAM.md`
   together with `docs/QA.md`.
+- If you need the new live sizing lane, use `docs/CAPACITY_PLANNING.md`
+  together with `docs/PERFORMANCE.md`.
 
 The set is written in layers on purpose: plain orientation first, current-state
 truth second, operating detail third.
@@ -127,15 +129,16 @@ That path moves from category ambition to buyer story to the actual pilot proof.
 Read:
 
 1. `docs/COMMERCIALIZATION/SCALING_PLAN.md`
-2. `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md`
-3. `docs/ADR/0001-authority-partitions-and-federated-cuts.md`
-4. `docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md`
-5. `docs/ARCHITECTURE.md`
-6. `docs/SEMANTIC_COMPLIANCE_MATRIX.md`
-7. `docs/COMMERCIALIZATION/BENCHMARK_BRIEF.md`
-8. `docs/PERFORMANCE.md`
-9. `docs/KNOWN_LIMITATIONS.md`
-10. `docs/PILOT_LAUNCH.md`
+2. `docs/CAPACITY_PLANNING.md`
+3. `docs/COMMERCIALIZATION/DISTRIBUTED_TRUTH.md`
+4. `docs/ADR/0001-authority-partitions-and-federated-cuts.md`
+5. `docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md`
+6. `docs/ARCHITECTURE.md`
+7. `docs/SEMANTIC_COMPLIANCE_MATRIX.md`
+8. `docs/COMMERCIALIZATION/BENCHMARK_BRIEF.md`
+9. `docs/PERFORMANCE.md`
+10. `docs/KNOWN_LIMITATIONS.md`
+11. `docs/PILOT_LAUNCH.md`
 
 That path shows how the current kernel is shaped, how it is being measured, and
 how we intend to scale it without dissolving the semantic center.
@@ -173,9 +176,10 @@ They now also describe the scheduled/manual CI launch-validation path and the cu
 Read:
 
 1. `docs/COMMERCIALIZATION/BENCHMARK_BRIEF.md`
-2. `docs/PERFORMANCE.md`
-3. `scripts/README.md`
-4. `TESTPLAN.md`
+2. `docs/CAPACITY_PLANNING.md`
+3. `docs/PERFORMANCE.md`
+4. `scripts/README.md`
+5. `TESTPLAN.md`
 
 That path explains the operator-facing report, baseline capture, drift comparison, the benchmark harness, the stress workloads, and the target interpretation.
 
@@ -253,6 +257,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 | `docs/PILOT_DEPLOYMENT.md` | Packaged single-node deployment path, config model, and secret handling for the pilot service |
 | `docs/PILOT_OPERATIONS_PLAYBOOK.md` | Deployment, rotation, upgrade, rollback, and restart/replay playbooks for the pilot service |
 | `docs/PERFORMANCE.md` | Performance workloads, runner commands, benchmark harness, and interpretation guidance |
+| `docs/CAPACITY_PLANNING.md` | Internal node classes, measured single-node envelopes, scale-out triggers, and capacity workflow guidance |
 | `docs/QA.md` | Structured QA and regression suite, release-readiness runner, and artifact contract |
 | `docs/QA_HARDENING_PROGRAM.md` | Persona-based hardening rubric, severity model, and phased promotion policy |
 | `docs/COMMERCIALIZATION/README.md` | Hub for commercialization, product framing, buyer narrative, and messaging |

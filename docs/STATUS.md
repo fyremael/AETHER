@@ -20,6 +20,15 @@ scheduled non-blocking hardening automation now exist to hunt admin,
 operator, boundary, and front-door failures before they are promoted into
 blocking release gates.
 
+That QA layer now also includes a repeatable perturbation-and-capacity sweep
+that composes the persona pass, fresh performance bundles, drift checks, and
+larger release-mode stress workloads into one saved planning artifact for
+single-node scale discussions.
+
+That scaling lane now also has a first-class live sizing system: typed
+capacity curves, concrete `S`/`M`/`L`/`XL` node classes, a recurring capacity
+bundle, and a scheduled GitHub tracker issue for headroom and ceiling drift.
+
 The v1 single-node semantic thesis is now also formally closed in
 `docs/V1_CLOSEOUT.md`, which ties the semantic compliance matrix, QA contract,
 launch gate, and architectural ADR set into one explicit release posture.
@@ -89,6 +98,8 @@ Completed:
 - a governed incident blackboard commercialization document, runnable demo, and front-door docs/site packaging now exist as the canonical adjacent-next design-partner exemplar over the current pilot proof
 - a post-v1 QA hardening program now exists with a governing rubric, responsible-disclosure policy, stronger issue templates, a repeatable persona sweep runner, and a scheduled/manual non-blocking hardening workflow
 - the scheduled hardening workflow now also publishes promotion metrics, updates a standing GitHub tracker issue, and can open a promotion PR when the next pack satisfies the documented streak threshold
+- a repeatable perturbation sweep now exists to run the persona pass, full-stack benchmark snapshot, host-aware drift checks, deeper ignored stress workloads, and single-node capacity projections in one artifact pack
+- a typed capacity-planning layer now exists over perturbation and matrix evidence, with measured board/closure/replay/concurrency ladders, concrete hardware-class guidance, explicit scale-out triggers, and a scheduled GitHub tracker workflow
 
 Still open:
 
@@ -96,7 +107,7 @@ Still open:
 - broader durable storage backends beyond the current SQLite journal
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
 - mature Go/Python client ecosystems beyond the current first real boundary clients
-- historical benchmark dashboards and long-lived trend storage beyond the current run bundles, matrix summaries, and uploaded workflow artifacts
+- historical benchmark dashboards and long-lived trend storage beyond the current run bundles, matrix summaries, perturbation artifacts, and uploaded workflow artifacts
 
 ## Immediate focus
 
@@ -110,3 +121,5 @@ the formally closed v1 single-node semantic core:
 - decide which post-v1 ergonomic DSL extensions matter beyond the now-implemented canonical surface
 - continue runtime optimization now that the current bounded-aggregation requirement is covered and the replicated federated read path has its first cache
 - decide how far to widen imported-fact federation beyond the current provenance-exact single-goal query shape
+- let the new perturbation sweep accumulate repeated host evidence so scaling projections become a trend rather than a single run
+- use the new capacity tracker to watch for meaningful headroom drift and keep single-node guidance current as the benchmark matrix evolves

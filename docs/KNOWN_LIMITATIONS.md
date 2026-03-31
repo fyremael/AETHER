@@ -28,13 +28,16 @@ implemented system.
 ## Performance, Storage, And Release Discipline
 
 - The performance suite now supports host-aware run bundles, suite-specific drift comparison, stress fixtures, and matrix summaries across the dev host, WSL, and GitHub runners, but it does not yet maintain historical benchmark trends beyond saved artifacts and uploaded workflow bundles.
+- The new capacity planner now produces concrete node-class guidance and explicit scale-out triggers, but those envelopes are still internal planning outputs from single-host calibration rather than public guarantees or cloud-SKU-specific commitments.
 - The accepted regression gate is still deliberately narrow: `core_kernel` and `service_in_process` on the canonical native Windows dev host are the tracked release baselines, while HTTP and replicated-partition suites remain observational until their variance is better understood.
+- The current measured default `M` envelope is conservative: it presently recommends `1,024` pilot-board tasks even though larger ladders run correctly, because operator/report latency degrades before replay or local storage become the limiting factor.
 - The structured release-readiness suite now produces a coherent QA evidence pack, but it is still a pre-release verification flow rather than a signed artifact and promotion pipeline.
 - The new QA hardening workflow is intentionally non-blocking in phase one. It is a diagnostic program for surfacing admin, operator, user, and exec defects before stable subchecks are promoted into `CI` or release-readiness.
 - The repository now has a responsible-disclosure policy, but it is not yet advertising a paid public bug bounty.
 - Memory figures in the performance report are structural lower-bound estimates rather than allocator-exact telemetry.
 - Telemetry stops at host facts plus kernel/runtime counters. Profiler-grade CPU, allocator, or scheduler tracing is still out of scope for the current phase.
 - Durable storage is still rooted in local SQLite files. Snapshotting and restore now exist for the packaged pilot path, but there is still no general compaction, remote backup service, or platform-wide storage control plane.
+- The planner now makes the “do not chase one giant node beyond `XL`” rule explicit, but the partition/federation posture is still operational guidance rather than an automated re-sharding or multi-host placement system.
 
 ## Boundary Clients And Scaling
 

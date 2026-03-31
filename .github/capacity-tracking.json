@@ -1,0 +1,7 @@
+{
+  "workflow_file": "capacity-planning.yml",
+  "base_branch": "main",
+  "artifact_name": "capacity-tracking",
+  "tracker_issue_title": "Capacity planning tracker",
+  "material_change_threshold_pct": 25
+}

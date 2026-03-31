@@ -10,7 +10,7 @@ That program is complementary to this release gate, not a replacement for it.
 
 ## QA Layers
 
-AETHER now verifies itself in seven layers.
+AETHER now verifies itself in eight layers.
 
 1. **Core semantic unit tests**
    Rust crate tests cover the substrate, resolver, rules, runtime, explainability, storage, and API seams.
@@ -20,11 +20,13 @@ AETHER now verifies itself in seven layers.
    Python and Go exercise the stable HTTP seam so the non-Rust boundaries do not silently drift.
 4. **Persona hardening sweeps**
    The hardening runner exercises admin, operator, user, and exec workflows and writes triage artifacts without yet blocking release in phase one.
-5. **Pilot launch validation**
+5. **Perturbation and capacity sweeps**
+   A combined runner now reuses the persona sweep, full-stack benchmarks, drift checks, and release-mode stress workloads to leave behind one measured capacity snapshot instead of scattered raw outputs.
+6. **Pilot launch validation**
    The Windows launch pack generates the operator report, performance report, drift comparison, release-mode API tests, soak suite, and stress suite.
-6. **Packaging and documentation checks**
+7. **Packaging and documentation checks**
    The release-readiness suite builds the packaged pilot bundle and a GitHub Pages preview bundle from the same tree.
-7. **Release-readiness orchestration**
+8. **Release-readiness orchestration**
    A single runner now executes the full structured-release contract and writes a saved transcript and summary.
 
 ## Standing Development Gate
@@ -47,6 +49,10 @@ as a release candidate?”
 
 Use the hardening suite when the question is, “Where are the next admin,
 operator, boundary, and clarity failures hiding?”
+
+Use the perturbation sweep when the question is, “How does the current host
+behave under a broader usability-plus-stress pass, and what single-node runway
+does that imply?”
 
 ## Hardening Sweep
 
@@ -76,6 +82,38 @@ Phase-one policy:
 - findings are triage artifacts first, blockers second
 - promotion into `CI` or release-readiness requires the criteria in `docs/QA_HARDENING_PROGRAM.md`
 - the scheduled workflow now updates a standing tracker issue and opens a promotion PR automatically once the next pack satisfies the documented threshold
+
+## Perturbation Sweep
+
+For a broader usability, stress, and scaling pass, run:
+
+```text
+double-click scripts/run-perturbation-sweep.cmd
+```
+
+or:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/run-perturbation-sweep.ps1
+```
+
+That suite:
+
+- runs the full persona hardening sweep by default before stressing the runtime
+- captures a fresh `full_stack` performance bundle on the chosen host
+- checks `core_kernel` and `service_in_process` against their accepted host baselines
+- runs the ignored release-mode stress tests, including deeper closure, proof, service, and durable replay scales
+- writes one markdown and one JSON summary under `artifacts/performance/perturbation/`
+
+Primary artifacts:
+
+- `artifacts/performance/perturbation/latest.md`
+- `artifacts/performance/perturbation/latest.json`
+- timestamped siblings under `artifacts/performance/perturbation/runs/`
+
+The capacity section is intentionally a planning aid, not a product claim. It
+is a straight-line projection from the measured host and current stress shapes,
+useful for prioritization and risk review rather than SLA language.
 
 ## Structured Release Gate
 
@@ -132,10 +170,12 @@ Those files answer four different release questions:
 
 ## CI Automation
 
-The repository now has four quality-automation paths:
+The repository now has five quality-automation paths:
 
 - `CI`
   The mainline gate for Rust, Go, Python, pilot launch validation, and pilot package build.
+- `Performance Matrix`
+  The scheduled/manual host-aware benchmark workflow that captures `full_stack` bundles on GitHub Windows and Ubuntu and then builds a matrix summary.
 - `QA Hardening`
   The scheduled/manual multi-perspective hardening workflow with admin, operator, user, and exec artifact packs. It stays diagnostic-only until the tracker proves a pack is ready for promotion.
 - `Pilot Validation`

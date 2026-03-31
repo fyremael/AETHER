@@ -30,6 +30,10 @@ What this means:
 - the semantic kernel is no longer speculative
 - the remaining scaling work is mostly systems work, service hardening, and
   operationalization
+- the repo now also carries a live internal sizing system in
+  `docs/CAPACITY_PLANNING.md` and `artifacts/performance/capacity/latest.md`, so
+  node-class and scale-out discussions can be anchored to measured artifacts
+  rather than to this strategy document alone
 
 ## 2. What “Scaling” Means For AETHER
 
