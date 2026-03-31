@@ -26,6 +26,7 @@ the Rust toolchain and compiles the example service.
 | `03_recursive_closure_and_explain.ipynb` | Learn recursion, fixed point, and tuple explanation | [Open](https://colab.research.google.com/github/fyremael/AETHER/blob/main/python/notebooks/03_recursive_closure_and_explain.ipynb) |
 | `04_governed_incident_blackboard.ipynb` | Product-facing governed board walkthrough | [Open](https://colab.research.google.com/github/fyremael/AETHER/blob/main/python/notebooks/04_governed_incident_blackboard.ipynb) |
 | `05_policy_and_sidecars.ipynb` | Learn policy narrowing plus artifact/vector sidecars | [Open](https://colab.research.google.com/github/fyremael/AETHER/blob/main/python/notebooks/05_policy_and_sidecars.ipynb) |
+| `06_ai_support_resolution_desk.ipynb` | ML-facing support application walkthrough | [Open](https://colab.research.google.com/github/fyremael/AETHER/blob/main/python/notebooks/06_ai_support_resolution_desk.ipynb) |
 
 ## Suggested Order
 
@@ -38,6 +39,7 @@ That progression mirrors the wider education path:
 3. how recursive closure and proof work
 4. how governed coordination feels in a product story
 5. how policy and sidecar memory stay subordinate to semantic control
+6. how a buyer-relevant support application can be built honestly on that proof
 
 ## Local Use
 

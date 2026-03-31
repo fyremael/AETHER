@@ -15,6 +15,12 @@ That means the first wedge should remain:
 - stale-work fencing
 - replayable operator explanation
 
+The clearest ML-facing application packaging over that proof is now the
+**AI support resolution desk**:
+
+- one governed case desk for customer issues, retrieved evidence, candidate resolutions, and assignment handoff
+- one believable answer to "what does AETHER look like in an AI-enabled end-user workflow?"
+
 ## Buyer Matrix
 
 | Buyer | Pain | Question They Ask | AETHER Value | Current Proof Strength |
@@ -23,7 +29,7 @@ That means the first wedge should remain:
 | CTO / Platform Leader | Agent and service coordination is brittle and hard to audit | "How do we make autonomous systems governable?" | Semantic control plane with replay, proof, and deterministic answers | Strong |
 | Head of AI / Automation | AI pilots are promising but operationally unsafe | "How do we let agents act without losing control?" | Governed memory and action authorization for agentic systems | Strong |
 | Risk / Compliance | Decisions cannot be reconstructed cleanly after the fact | "Can you show why the system made this call?" | Exact `AsOf`, proof traces, durable audit context, operator-grade reports | Strong |
-| Customer Operations Leader | Exceptions and escalations have unclear ownership | "Why is this case blocked, and what changed?" | Dependency-aware claimability and historical replay | Medium |
+| Customer Operations Leader | Exceptions and escalations have unclear ownership | "Why is this case blocked, and what changed?" | Dependency-aware claimability, retrieved evidence, and historical replay | Strong (app pack) |
 | Service Delivery / IT Operations | Handoffs and stale actors cause outages and duplicate work | "Who is actually authoritative right now?" | Lease semantics, fencing, and current-versus-historical authority views | Strong |
 
 ## Use-Case Ladder
@@ -45,6 +51,7 @@ buyer-facing compression of that series.
 
 - incident coordination and remediation handoff
 - exception routing in human-plus-agent service operations
+- AI-assisted support resolution desks with retrieved evidence and governed assignment
 - governed approval and escalation flows
 - policy-aware case orchestration
 - explainable semantic blackboards and governed tuple-style workspaces
@@ -88,5 +95,6 @@ Translate the product according to the audience:
 - technical buyers hear "replayable semantic state and governed autonomy"
 - risk buyers hear "proof, replay, and auditable authority"
 - AI buyers hear "operational memory and action control for agents"
+- customer-support buyers now also hear "retrieved evidence, selected resolution, and governed handoff on one case desk"
 
 The same kernel supports all four views, but each view needs its own doorway.

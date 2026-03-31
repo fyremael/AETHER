@@ -14,6 +14,11 @@ repackages those existing proof surfaces in plain product language for
 design-partner conversations. That packaging layer is documentation and demo
 work, not a new kernel-semantic claim.
 
+The commercialization layer now also carries an AI support resolution desk app
+pack as the flagship ML-facing end-user application. That pack reuses the
+current pilot, sidecar, replay, and explanation surfaces to make AETHER
+legible in a buyer-relevant support workflow before broader platform language.
+
 Post-v1 hardening work is now also underway as an internal-first QA program:
 persona-based sweeps, disclosure guidance, stronger defect intake, and
 scheduled non-blocking hardening automation now exist to hunt admin,
@@ -96,6 +101,7 @@ Completed:
 - GitHub CI added for Ubuntu and Windows
 - repository front-door docs, contribution guidance, and worked examples now exist
 - a governed incident blackboard commercialization document, runnable demo, and front-door docs/site packaging now exist as the canonical adjacent-next design-partner exemplar over the current pilot proof
+- an AI support resolution desk commercialization document, runnable demo, site page, and Colab notebook now exist as the flagship ML-facing working app pack over the current pilot proof
 - a post-v1 QA hardening program now exists with a governing rubric, responsible-disclosure policy, stronger issue templates, a repeatable persona sweep runner, and a scheduled/manual non-blocking hardening workflow
 - the scheduled hardening workflow now also publishes promotion metrics, updates a standing GitHub tracker issue, and can open a promotion PR when the next pack satisfies the documented streak threshold
 - a repeatable perturbation sweep now exists to run the persona pass, full-stack benchmark snapshot, host-aware drift checks, deeper ignored stress workloads, and single-node capacity projections in one artifact pack
@@ -123,3 +129,4 @@ the formally closed v1 single-node semantic core:
 - decide how far to widen imported-fact federation beyond the current provenance-exact single-goal query shape
 - let the new perturbation sweep accumulate repeated host evidence so scaling projections become a trend rather than a single run
 - use the new capacity tracker to watch for meaningful headroom drift and keep single-node guidance current as the benchmark matrix evolves
+- continue building compelling working applications on top of the pilot, starting with ML-relevant support operations and then widening only where the live proof remains honest

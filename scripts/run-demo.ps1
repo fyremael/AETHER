@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("01", "02", "03", "04")]
+    [ValidateSet("01", "02", "03", "04", "05")]
     [string]$Demo = "01",
     [switch]$PauseOnExit
 )
@@ -54,6 +54,18 @@ $demoMap = @{
             "active observations plus published remediation actions"
             "ready-action derivation, authority handoff, and stale fencing"
             "Current, AsOf, and proof traces in one customer-facing walkthrough"
+        )
+    }
+    "05" = @{
+        Title = "AI Support Resolution Desk"
+        Crate = "aether_api"
+        Example = "demo_05_ai_support_resolution_desk"
+        Narrative = Join-Path $repoRoot "examples\demo-05-ai-support-resolution-desk.md"
+        Highlights = @(
+            "governed support case desk for agents, retrieval, and human leads"
+            "retrieved evidence re-entering the case flow in a controlled way"
+            "selected-resolution derivation, ownership handoff, and stale fencing"
+            "Current, AsOf, and proof traces in one ML-facing walkthrough"
         )
     }
 }

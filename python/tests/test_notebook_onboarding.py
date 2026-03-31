@@ -25,7 +25,7 @@ def _load_colab_setup_module():
 class NotebookOnboardingTest(unittest.TestCase):
     def test_notebooks_are_valid_json_with_cells(self) -> None:
         notebooks = sorted(NOTEBOOK_ROOT.glob("*.ipynb"))
-        self.assertGreaterEqual(len(notebooks), 5)
+        self.assertGreaterEqual(len(notebooks), 6)
 
         for notebook_path in notebooks:
             with self.subTest(notebook=str(notebook_path.name)):
@@ -42,6 +42,7 @@ class NotebookOnboardingTest(unittest.TestCase):
             "03_recursive_closure_and_explain.ipynb",
             "04_governed_incident_blackboard.ipynb",
             "05_policy_and_sidecars.ipynb",
+            "06_ai_support_resolution_desk.ipynb",
         ):
             with self.subTest(notebook=notebook_name):
                 self.assertIn(notebook_name, readme)

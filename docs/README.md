@@ -26,9 +26,11 @@ truth second, operating detail third.
 If you need the quickest product-facing answer before the wider handbook, start
 with:
 
-1. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
-2. `examples/demo-04-governed-incident-blackboard.md`
-3. `docs/PILOT_COORDINATION.md`
+1. `docs/COMMERCIALIZATION/AI_SUPPORT_RESOLUTION_DESK.md`
+2. `examples/demo-05-ai-support-resolution-desk.md`
+3. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
+4. `examples/demo-04-governed-incident-blackboard.md`
+5. `docs/PILOT_COORDINATION.md`
 
 ## Reading Paths
 
@@ -38,14 +40,16 @@ Read these in order:
 
 1. `README.md`
 2. `docs/EDUCATION/README.md`
-3. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
-4. `examples/demo-04-governed-incident-blackboard.md`
-5. `examples/demo-03-coordination-situation-room.md`
-6. `docs/ARCHITECTURE.md`
-7. `docs/STATUS.md`
-8. `docs/SEMANTIC_COMPLIANCE_MATRIX.md`
-9. `docs/V1_CLOSEOUT.md`
-10. `docs/KNOWN_LIMITATIONS.md`
+3. `docs/COMMERCIALIZATION/AI_SUPPORT_RESOLUTION_DESK.md`
+4. `examples/demo-05-ai-support-resolution-desk.md`
+5. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
+6. `examples/demo-04-governed-incident-blackboard.md`
+7. `examples/demo-03-coordination-situation-room.md`
+8. `docs/ARCHITECTURE.md`
+9. `docs/STATUS.md`
+10. `docs/SEMANTIC_COMPLIANCE_MATRIX.md`
+11. `docs/V1_CLOSEOUT.md`
+12. `docs/KNOWN_LIMITATIONS.md`
 
 That path gets you from thesis to running system to current boundary.
 
@@ -54,9 +58,11 @@ That path gets you from thesis to running system to current boundary.
 Read:
 
 1. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
-2. `examples/demo-04-governed-incident-blackboard.md`
-3. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
-4. `docs/PILOT_COORDINATION.md`
+2. `docs/COMMERCIALIZATION/AI_SUPPORT_RESOLUTION_DESK.md`
+3. `examples/demo-05-ai-support-resolution-desk.md`
+4. `examples/demo-04-governed-incident-blackboard.md`
+5. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
+6. `docs/PILOT_COORDINATION.md`
 
 That path explains the utility first, then shows the adjacent-next exemplar,
 then anchors it back to the live pilot proof and broader use-case ladder.
@@ -85,6 +91,7 @@ Read and run:
 4. `python/notebooks/03_recursive_closure_and_explain.ipynb`
 5. `python/notebooks/04_governed_incident_blackboard.ipynb`
 6. `python/notebooks/05_policy_and_sidecars.ipynb`
+7. `python/notebooks/06_ai_support_resolution_desk.ipynb`
 
 That path uses the Python SDK and the real HTTP example service so new users
 can learn by running the current boundary instead of only reading about it.
@@ -114,13 +121,14 @@ Start here:
 Read:
 
 1. `docs/COMMERCIALIZATION/README.md`
-2. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
-3. `docs/COMMERCIALIZATION/EXECUTIVE_SUMMARY.md`
-4. `docs/COMMERCIALIZATION/VISION.md`
-5. `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md`
-6. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
-7. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
-8. `docs/PILOT_COORDINATION.md`
+2. `docs/COMMERCIALIZATION/AI_SUPPORT_RESOLUTION_DESK.md`
+3. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
+4. `docs/COMMERCIALIZATION/EXECUTIVE_SUMMARY.md`
+5. `docs/COMMERCIALIZATION/VISION.md`
+6. `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md`
+7. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
+8. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
+9. `docs/PILOT_COORDINATION.md`
 
 That path moves from category ambition to buyer story to the actual pilot proof.
 

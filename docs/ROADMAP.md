@@ -99,7 +99,8 @@ Focus:
 Focus:
 
 - keep the front door anchored in operator questions and practical utility before kernel jargon
-- package the governed incident blackboard exemplar across docs, demo, and Pages surfaces
+- package the AI support resolution desk as the flagship ML-facing working app pack
+- keep the governed incident blackboard as the broader governed-workspace reference pattern
 - make adjacent-next agentic stories concrete without widening beyond current proof
 
 ## What Is Deliberately Not The Immediate Roadmap

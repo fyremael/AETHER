@@ -15,7 +15,7 @@ website copy.
 
 - Start with the first three rungs for most audiences.
 - Use rungs four and five when the audience cares about memory, search, or
-  human-plus-agent coordination.
+  human-plus-agent support operations.
 - Use rungs six and seven only after the current pilot proof is established.
 - Always distinguish `live proof today`, `adjacent next`, and `scaled horizon`.
 
@@ -27,9 +27,13 @@ website copy.
 | 2 | Lease authority and stale fencing | governed action, handoff, replay, stale rejection | Live proof |
 | 3 | Operator situation room | proof traces, reports, audit, current-vs-historical understanding | Live proof |
 | 4 | Memory-backed operational search | sidecar federation, semantic projection, memory re-entering operations | Live proof |
-| 5 | Human-plus-agent case orchestration | coordination beyond single tasks, exception routing, governed handoff | Adjacent next |
+| 5 | AI support resolution desk / human-plus-agent case orchestration | coordination beyond single tasks, retrieved evidence, exception routing, governed handoff | Working app pack over live proof |
 | 6 | Semantic blackboard / governed tuple workspace | explainable shared workspace for agents, tools, and operators | Reference pattern |
 | 7 | Autonomous operations control plane | enterprise-scale operational memory, authority, and proof fabric | Platform horizon |
+
+The recommended ML-facing packaging for rung 5 is the
+`AI support resolution desk` exemplar in
+`docs/COMMERCIALIZATION/AI_SUPPORT_RESOLUTION_DESK.md`.
 
 The recommended adjacent-next packaging for rung 6 is the
 `governed incident blackboard` exemplar in
@@ -185,7 +189,7 @@ in a governed way.
 
 Live today in a narrow slice. Present it after the pilot proof, not before it.
 
-## Rung 5: Human-Plus-Agent Case Orchestration
+## Rung 5: AI Support Resolution Desk / Human-Plus-Agent Case Orchestration
 
 ### The question
 
@@ -220,8 +224,9 @@ close to the current pilot, but broader in business value.
 
 ### Proof status
 
-Adjacent next. This should be the next vertical packaging effort after the
-current pilot, not a claim of finished capability today.
+Now packaged as a working app pack over the current pilot proof. This still is
+not a claim of finished general ML workflow capability or a separate stable
+product surface.
 
 ## Rung 6: Semantic Blackboard / Governed Tuple Workspace
 

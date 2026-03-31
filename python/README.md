@@ -15,6 +15,7 @@ Implemented today:
 - typed request and data models in `aether_sdk.models`
 - fixture builders for datoms, policy contexts, artifacts, and vectors in `aether_sdk.fixtures`
 - Colab-friendly onboarding notebooks in `python/notebooks/`
+- a flagship ML-facing support-resolution notebook over the live HTTP boundary
 - live integration coverage against `crates/aether_api/examples/http_kernel_service.rs`
 - policy-aware document execution plus sidecar artifact/vector calls, with authenticated services treating request policy as a narrowing control over token-granted visibility rather than an escalation path
 - explain calls now participate in the same effective-policy contract as document execution on authenticated services

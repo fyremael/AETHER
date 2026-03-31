@@ -35,3 +35,4 @@ The current numbered ADR set is:
 - `docs/ADR/0005-recursion-compiles-through-scc-and-semi-naive-execution.md`
 - `docs/ADR/0006-go-is-a-shell-not-the-core-runtime.md`
 - `docs/ADR/0007-sidecars-remain-subordinate-to-semantic-control.md`
+- `docs/ADR/0008-ai-support-resolution-desk-is-reference-app-packaging.md`
