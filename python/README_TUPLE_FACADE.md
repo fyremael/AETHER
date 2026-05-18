@@ -23,6 +23,36 @@ if claim:
     space.complete(claim, result={"artifact": "draft://resolution-901"})
 ```
 
+## CoordinationDesk utility
+
+For operator-facing demos and early agent workflows, use `CoordinationDesk`.
+It turns the raw tuple primitives into an evidence-backed work queue.
+
+```python
+from aether_tuple_facade import CoordinationDesk, InMemoryBackend, TupleSpace
+
+space = TupleSpace(InMemoryBackend())
+desk = CoordinationDesk(space)
+
+runbook = desk.add_evidence(
+    "case-501",
+    "migration-credit-runbook",
+    uri="sidecar://runbook/migration-credit",
+)
+
+desk.submit_task(
+    "case-501",
+    "apply-migration-credit",
+    priority=9,
+    evidence=[runbook],
+)
+
+claim = desk.claim_next(owner="lead-ana", case_id="case-501")
+if claim:
+    desk.complete_claim(claim, result={"artifact": "draft://resolution-901"})
+    print(desk.explain(claim.tuple_id))
+```
+
 ## Backends
 
 - `InMemoryBackend` is a single-shard harness for tests, notebooks, and demos.
@@ -32,11 +62,12 @@ if claim:
 ## Test
 
 ```bash
-PYTHONPATH=python python -m unittest python/tests/test_tuple_facade.py -v
+PYTHONPATH=python python -m unittest python/tests/test_tuple_facade.py python/tests/test_coordination_desk.py -v
 ```
 
 ## Demo
 
 ```bash
 PYTHONPATH=python python python/examples/tuple_facade_support_resolution_demo.py
+PYTHONPATH=python python python/examples/coordination_desk_demo.py
 ```
