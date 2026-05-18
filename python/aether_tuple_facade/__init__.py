@@ -7,10 +7,15 @@ preserving AETHER's semantic-kernel discipline. In particular, destructive
 
 from .core import Claim, Pattern, TupleRecord, TupleSpace
 from .backends import AetherHttpBackend, InMemoryBackend
+from .desk import CoordinationDesk, DeskEvidence, DeskSummary, DeskTask
 
 __all__ = [
     "AetherHttpBackend",
     "Claim",
+    "CoordinationDesk",
+    "DeskEvidence",
+    "DeskSummary",
+    "DeskTask",
     "InMemoryBackend",
     "Pattern",
     "TupleRecord",
