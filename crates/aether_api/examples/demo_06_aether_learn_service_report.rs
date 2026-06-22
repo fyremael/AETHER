@@ -1,38 +1,56 @@
-use aether_api::{AppendRequest, ExplainTupleRequest, InMemoryKernelService, KernelService, RunDocumentRequest};
-use aether_ast::{Datom, DatomProvenance, DerivationTrace, EntityId, QueryRow, Value};
+use aether_api::{AppendRequest, InMemoryKernelService, KernelService, RunDocumentRequest};
+use aether_ast::{Datom, DatomProvenance, EntityId, QueryRow, Value};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut service = InMemoryKernelService::new();
-    service.append(AppendRequest { datoms: routing_history() })?;
+    service.append(AppendRequest { datoms: history() })?;
 
-    println!("AETHER-Learn Demo 06: Service-backed routing report");
-    println!("=====================================================");
-    println!("Mapping: task, proposal, decision, outcome, router update, promotion");
+    println!("AETHER-Learn service-backed routing report");
+    println!("===========================================");
 
-    let mapped = run(&mut service, "goal service_record(task, proposal, decision, outcome, update, status)\n  keep task, proposal, decision, outcome, update, status")?;
-    print_section("Service-backed records", query_rows(&mapped), "Each row joins the six proof tuple families through the AETHER service.");
-
-    let accepted = run(&mut service, "goal accepted_update(update, task, family, worker, reason)\n  keep update, task, family, worker, reason")?;
-    let accepted_rows = query_rows(&accepted).to_vec();
-    print_section("Accepted router updates", &accepted_rows, "Promoted local router updates.");
-
-    let retained = run(&mut service, "goal retained_update(update, task, family, worker, reason)\n  keep update, task, family, worker, reason")?;
-    print_section("Retained router updates", query_rows(&retained), "Updates retained as evidence for the router.");
-
-    if let Some(tuple_id) = accepted_rows.first().and_then(|row| row.tuple_id) {
-        let trace = service.explain_tuple(ExplainTupleRequest { tuple_id, policy_context: None })?.trace;
-        print_trace_summary(&trace);
-    }
+    print_query(
+        &mut service,
+        "Service-backed records",
+        "goal service_record(task, proposal, decision, outcome, update, status)\n  keep task, proposal, decision, outcome, update, status",
+        "Each row joins task, proposal, decision, outcome, router update, and promotion facts.",
+    )?;
+    print_query(
+        &mut service,
+        "Accepted router updates",
+        "goal accepted_update(update, task, family, worker, reason)\n  keep update, task, family, worker, reason",
+        "Accepted updates are promoted locally by explicit promotion facts.",
+    )?;
+    print_query(
+        &mut service,
+        "Retained router updates",
+        "goal retained_update(update, task, family, worker, reason)\n  keep update, task, family, worker, reason",
+        "Retained updates remain available as evidence for later router learning.",
+    )?;
 
     Ok(())
 }
 
-fn run(service: &mut InMemoryKernelService, query_body: &str) -> Result<aether_api::RunDocumentResponse, aether_api::ApiError> {
-    service.run_document(RunDocumentRequest { dsl: routing_dsl("current", query_body), policy_context: None })
+fn print_query(
+    service: &mut InMemoryKernelService,
+    title: &str,
+    query: &str,
+    note: &str,
+) -> Result<(), aether_api::ApiError> {
+    let response = service.run_document(RunDocumentRequest {
+        dsl: dsl(query),
+        policy_context: None,
+    })?;
+    print_section(title, rows(&response), note);
+    Ok(())
 }
 
-fn query_rows(response: &aether_api::RunDocumentResponse) -> &[QueryRow] {
-    response.query.as_ref().expect("query result expected").rows.as_slice()
+fn rows(response: &aether_api::RunDocumentResponse) -> &[QueryRow] {
+    response
+        .query
+        .as_ref()
+        .expect("query result expected")
+        .rows
+        .as_slice()
 }
 
 fn print_section(title: &str, rows: &[QueryRow], note: &str) {
@@ -43,29 +61,13 @@ fn print_section(title: &str, rows: &[QueryRow], note: &str) {
         println!("  - none");
     } else {
         for row in rows {
-            println!("  - {}", format_values(&row.values));
+            println!("  - {}", values(&row.values));
         }
     }
     println!("  {note}");
 }
 
-fn print_trace_summary(trace: &DerivationTrace) {
-    println!();
-    println!("Proof trace for the first accepted update:");
-    println!("  - root tuple: t{}", trace.root.0);
-    println!("  - tuples in trace: {}", trace.tuples.len());
-    for tuple in &trace.tuples {
-        println!(
-            "  - t{} via r{} -> {} | sources {}",
-            tuple.tuple.id.0,
-            tuple.metadata.rule_id.0,
-            format_values(&tuple.tuple.values),
-            format_elements(&tuple.metadata.source_datom_ids)
-        );
-    }
-}
-
-fn routing_history() -> Vec<Datom> {
+fn history() -> Vec<Datom> {
     let mut datoms = Vec::new();
     let mut e = 1u64;
     add_case(&mut datoms, &mut e, 101, 201, 301, 401, 501, 601, "A", "simple", "fast_cheap_worker", "accepted_local", "good utility");
@@ -75,7 +77,21 @@ fn routing_history() -> Vec<Datom> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn add_case(datoms: &mut Vec<Datom>, e: &mut u64, task: u64, proposal: u64, decision: u64, outcome: u64, update: u64, promotion: u64, phase: &str, family: &str, worker: &str, status: &str, reason: &str) {
+fn add_case(
+    datoms: &mut Vec<Datom>,
+    e: &mut u64,
+    task: u64,
+    proposal: u64,
+    decision: u64,
+    outcome: u64,
+    update: u64,
+    promotion: u64,
+    phase: &str,
+    family: &str,
+    worker: &str,
+    status: &str,
+    reason: &str,
+) {
     push_str(datoms, task, 1, phase, e);
     push_str(datoms, task, 2, family, e);
     push_entity(datoms, proposal, 3, task, e);
@@ -91,8 +107,9 @@ fn add_case(datoms: &mut Vec<Datom>, e: &mut u64, task: u64, proposal: u64, deci
     push_str(datoms, promotion, 13, reason, e);
 }
 
-fn routing_dsl(view: &str, query_body: &str) -> String {
-    format!(r#"
+fn dsl(query_body: &str) -> String {
+    format!(
+        r#"
 schema v1 {{
   attr task.phase: ScalarLWW<String>
   attr task.family: ScalarLWW<String>
@@ -141,10 +158,11 @@ materialize {{
 }}
 
 query {{
-  {view}
+  current
   {query_body}
 }}
-"#)
+"#
+    )
 }
 
 fn push_str(datoms: &mut Vec<Datom>, entity: u64, attr: u64, value: &str, e: &mut u64) {
@@ -158,14 +176,24 @@ fn push_entity(datoms: &mut Vec<Datom>, entity: u64, attr: u64, value: u64, e: &
 }
 
 fn datom(entity: u64, attribute: u64, value: Value, element: u64) -> Datom {
-    Datom { entity: EntityId::new(entity), attribute: aether_ast::AttributeId::new(attribute), value, op: aether_ast::OperationKind::Assert, element: aether_ast::ElementId::new(element), replica: aether_ast::ReplicaId::new(1), causal_context: Default::default(), provenance: DatomProvenance::default(), policy: None }
+    Datom {
+        entity: EntityId::new(entity),
+        attribute: aether_ast::AttributeId::new(attribute),
+        value,
+        op: aether_ast::OperationKind::Assert,
+        element: aether_ast::ElementId::new(element),
+        replica: aether_ast::ReplicaId::new(1),
+        causal_context: Default::default(),
+        provenance: DatomProvenance::default(),
+        policy: None,
+    }
 }
 
-fn format_values(values: &[Value]) -> String {
-    values.iter().map(format_value).collect::<Vec<_>>().join(", ")
+fn values(values: &[Value]) -> String {
+    values.iter().map(value).collect::<Vec<_>>().join(", ")
 }
 
-fn format_value(value: &Value) -> String {
+fn value(value: &Value) -> String {
     match value {
         Value::Null => "null".into(),
         Value::Bool(value) => value.to_string(),
@@ -175,11 +203,6 @@ fn format_value(value: &Value) -> String {
         Value::String(value) => value.clone(),
         Value::Bytes(value) => format!("<{} bytes>", value.len()),
         Value::Entity(id) => format!("entity/{}", id.0),
-        Value::List(values) => format!("[{}]", format_values(values)),
+        Value::List(items) => format!("[{}]", values(items)),
     }
-}
-
-fn format_elements(elements: &[aether_ast::ElementId]) -> String {
-    if elements.is_empty() { return "none".into(); }
-    elements.iter().map(|element| format!("e{}", element.0)).collect::<Vec<_>>().join(", ")
 }
