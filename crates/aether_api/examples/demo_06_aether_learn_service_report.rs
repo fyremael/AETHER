@@ -70,9 +70,51 @@ fn print_section(title: &str, rows: &[QueryRow], note: &str) {
 fn history() -> Vec<Datom> {
     let mut datoms = Vec::new();
     let mut e = 1u64;
-    add_case(&mut datoms, &mut e, 101, 201, 301, 401, 501, 601, "A", "simple", "fast_cheap_worker", "accepted_local", "good utility");
-    add_case(&mut datoms, &mut e, 102, 202, 302, 402, 502, 602, "B", "math", "math_specialist_worker", "retained_evidence", "needs more evidence");
-    add_case(&mut datoms, &mut e, 103, 203, 303, 403, 503, 603, "B", "code", "code_specialist_worker", "accepted_local", "good utility");
+    add_case(
+        &mut datoms,
+        &mut e,
+        101,
+        201,
+        301,
+        401,
+        501,
+        601,
+        "A",
+        "simple",
+        "fast_cheap_worker",
+        "accepted_local",
+        "good utility",
+    );
+    add_case(
+        &mut datoms,
+        &mut e,
+        102,
+        202,
+        302,
+        402,
+        502,
+        602,
+        "B",
+        "math",
+        "math_specialist_worker",
+        "retained_evidence",
+        "needs more evidence",
+    );
+    add_case(
+        &mut datoms,
+        &mut e,
+        103,
+        203,
+        303,
+        403,
+        503,
+        603,
+        "B",
+        "code",
+        "code_specialist_worker",
+        "accepted_local",
+        "good utility",
+    );
     datoms
 }
 
