@@ -211,10 +211,15 @@ type HealthResponse struct {
 }
 
 type ServiceStatusStorage struct {
-	DatabasePath *string `json:"database_path,omitempty"`
-	SidecarPath  *string `json:"sidecar_path,omitempty"`
-	AuditLogPath *string `json:"audit_log_path,omitempty"`
-	PartitionRoot *string `json:"partition_root,omitempty"`
+	Backend               string  `json:"backend"`
+	DatabasePath          *string `json:"database_path,omitempty"`
+	DataRoot              *string `json:"data_root,omitempty"`
+	PostgresSchema        *string `json:"postgres_schema,omitempty"`
+	PostgresURLConfigured bool    `json:"postgres_url_configured,omitempty"`
+	SidecarMode           string  `json:"sidecar_mode"`
+	SidecarPath           *string `json:"sidecar_path,omitempty"`
+	AuditLogPath          *string `json:"audit_log_path,omitempty"`
+	PartitionRoot         *string `json:"partition_root,omitempty"`
 }
 
 type PrincipalStatusSummary struct {
@@ -222,6 +227,7 @@ type PrincipalStatusSummary struct {
 	PrincipalID   string         `json:"principal_id"`
 	TokenID       string         `json:"token_id"`
 	Scopes        []string       `json:"scopes"`
+	Namespaces    []string       `json:"namespaces"`
 	PolicyContext *PolicyContext `json:"policy_context,omitempty"`
 	Source        string         `json:"source"`
 	Revoked       bool           `json:"revoked,omitempty"`
@@ -230,6 +236,7 @@ type PrincipalStatusSummary struct {
 type ReplicaStatusSummary struct {
 	Partition      string  `json:"partition"`
 	ReplicaID      uint64  `json:"replica_id"`
+	LeaderReplica  uint64  `json:"leader_replica"`
 	Role           string  `json:"role"`
 	LeaderEpoch    uint64  `json:"leader_epoch"`
 	AppliedElement *uint64 `json:"applied_element,omitempty"`
@@ -239,24 +246,32 @@ type ReplicaStatusSummary struct {
 }
 
 type ServiceStatusResponse struct {
-	Status        string                   `json:"status"`
-	BuildVersion  string                   `json:"build_version"`
-	ConfigVersion string                   `json:"config_version"`
-	SchemaVersion string                   `json:"schema_version"`
-	BindAddr      *string                  `json:"bind_addr,omitempty"`
-	ServiceMode   string                   `json:"service_mode"`
-	Storage       ServiceStatusStorage     `json:"storage"`
-	Principals    []PrincipalStatusSummary `json:"principals"`
-	Replicas      []ReplicaStatusSummary   `json:"replicas"`
+	Status               string                   `json:"status"`
+	BuildVersion         string                   `json:"build_version"`
+	ConfigVersion        string                   `json:"config_version"`
+	SchemaVersion        string                   `json:"schema_version"`
+	BindAddr             *string                  `json:"bind_addr,omitempty"`
+	ServiceMode          string                   `json:"service_mode"`
+	Storage              ServiceStatusStorage     `json:"storage"`
+	ActiveNamespaceCount int                      `json:"active_namespace_count"`
+	Namespaces           []NamespaceStatusSummary `json:"namespaces"`
+	Principals           []PrincipalStatusSummary `json:"principals"`
+	Replicas             []ReplicaStatusSummary   `json:"replicas"`
+}
+
+type NamespaceStatusSummary struct {
+	Namespace  string   `json:"namespace"`
+	Principals []string `json:"principals"`
 }
 
 type AuthReloadResponse struct {
-	ReloadedAtMS uint64 `json:"reloaded_at_ms"`
-	PrincipalCount int  `json:"principal_count"`
-	RevokedCount   int  `json:"revoked_count"`
+	ReloadedAtMS   uint64 `json:"reloaded_at_ms"`
+	PrincipalCount int    `json:"principal_count"`
+	RevokedCount   int    `json:"revoked_count"`
 }
 
 type AuditContext struct {
+	Namespace             *string  `json:"namespace,omitempty"`
 	TemporalView          *string  `json:"temporal_view"`
 	QueryGoal             *string  `json:"query_goal"`
 	TupleID               *uint64  `json:"tuple_id"`
@@ -325,7 +340,7 @@ type CoordinationTraceHandle struct {
 }
 
 type ReportRowDiff struct {
-	Row   ReportRow               `json:"row"`
+	Row   ReportRow                `json:"row"`
 	Trace *CoordinationTraceHandle `json:"trace,omitempty"`
 }
 
@@ -343,12 +358,12 @@ type ReportSectionDelta struct {
 }
 
 type CoordinationDeltaReport struct {
-	GeneratedAtMS    uint64            `json:"generated_at_ms"`
-	Left             CoordinationCut   `json:"left"`
-	Right            CoordinationCut   `json:"right"`
-	PolicyContext    *PolicyContext    `json:"policy_context,omitempty"`
-	LeftHistoryLen   int               `json:"left_history_len"`
-	RightHistoryLen  int               `json:"right_history_len"`
+	GeneratedAtMS     uint64             `json:"generated_at_ms"`
+	Left              CoordinationCut    `json:"left"`
+	Right             CoordinationCut    `json:"right"`
+	PolicyContext     *PolicyContext     `json:"policy_context,omitempty"`
+	LeftHistoryLen    int                `json:"left_history_len"`
+	RightHistoryLen   int                `json:"right_history_len"`
 	CurrentAuthorized ReportSectionDelta `json:"current_authorized"`
 	Claimable         ReportSectionDelta `json:"claimable"`
 	LiveHeartbeats    ReportSectionDelta `json:"live_heartbeats"`

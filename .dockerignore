@@ -1,0 +1,8 @@
+target
+artifacts
+.git
+.github
+go/bin
+python/.venv
+**/__pycache__
+**/*.pyc

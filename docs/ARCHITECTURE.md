@@ -206,13 +206,14 @@ This is not an omission of ambition. It is sequencing. The kernel is being made 
 - explicit partition and federated-cut types plus a single-process partition-aware in-memory service
 - imported-fact reasoning plus federated explain/report surfaces over that partition-aware service
 - a durable SQLite-backed partition-aware backend for single-node replay across multiple partitions
+- single-host replicated authority partitions with leader epochs, leader-confirmed reads, follower replay, restart-safe metadata, manual promotion, stale-epoch fencing, lag/degraded status, and divergent-prefix rejection
 - operator-facing demonstrations
 - a tracked semantic compliance matrix for the current v1 single-node closure claim
 
 ### Deferred
 
 - broader post-v1 DSL ergonomics
-- replicated or failover-capable partition-aware backends
+- generalized multi-host consensus, automatic election, and managed failover for partition-aware backends
 - distributed or replicated sidecar federation backends
 - production-hardened multi-tenant service boundaries
 - mature Go/Python client ecosystems beyond the current first real boundary clients

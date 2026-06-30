@@ -114,7 +114,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 sidecar_path: None,
                 audit_log_path: None,
                 partition_root: Some(root.clone()),
+                ..Default::default()
             },
+            active_namespace_count: 1,
+            namespaces: Vec::new(),
             principals: Vec::new(),
             replicas: Vec::new(),
         });

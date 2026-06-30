@@ -9,13 +9,14 @@ use aether_resolver::{MaterializedResolver, ResolveError, ResolvedState, Resolve
 use aether_rules::{DefaultDslParser, DefaultRuleCompiler, DslParser, ParseError, RuleCompiler};
 use aether_runtime::{execute_query, DerivedSet, RuleRuntime, RuntimeError, SemiNaiveRuntime};
 use aether_schema::Schema;
-use aether_storage::{InMemoryJournal, Journal, JournalError, SqliteJournal};
+use aether_storage::{InMemoryJournal, Journal, JournalError, PostgresJournal, SqliteJournal};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use thiserror::Error;
 
 pub mod deployment;
 pub mod http;
+pub mod namespace;
 pub mod partitioned;
 #[doc(hidden)]
 pub mod perf;
@@ -26,13 +27,16 @@ pub mod status;
 
 pub use deployment::{
     default_audit_log_path, serve_pilot_http_service, DeploymentError, PilotAuthConfig,
-    PilotServiceConfig, PilotTokenConfig, ResolvedPilotServiceConfig, ResolvedPilotTokenSummary,
+    PilotServiceConfig, PilotStorageConfig, PilotTokenConfig, ResolvedPilotServiceConfig,
+    ResolvedPilotStorage, ResolvedPilotTokenSummary,
 };
 pub use http::{
-    http_router, http_router_with_options, http_router_with_partitioned_options, AuditContext,
+    http_router, http_router_with_options, http_router_with_partitioned_options,
+    http_router_with_postgres_namespaces, http_router_with_sqlite_namespaces, AuditContext,
     AuditEntry, AuditLogResponse, AuthScope, HealthResponse, HttpAccessToken, HttpAuthConfig,
-    HttpKernelOptions, HttpKernelState,
+    HttpKernelOptions, HttpKernelState, AETHER_NAMESPACE_HEADER,
 };
+pub use namespace::NamespaceId;
 pub use partitioned::{
     render_federated_explain_report_markdown, AuthorityPartitionConfig, FederatedExplainReport,
     FederatedHistoryRequest, FederatedHistoryResponse, FederatedImportedSourceSummary,
@@ -65,8 +69,8 @@ pub use sidecar::{
     VectorSearchMatch,
 };
 pub use status::{
-    AuthReloadResponse, PrincipalStatusSummary, ReplicaStatusSummary, ServiceMode,
-    ServiceStatusResponse, ServiceStatusStorage,
+    AuthReloadResponse, NamespaceStatusSummary, PrincipalStatusSummary, ReplicaStatusSummary,
+    ServiceMode, ServiceStatusResponse, ServiceStatusStorage,
 };
 
 pub trait KernelService {
@@ -122,6 +126,7 @@ pub trait KernelService {
 
 pub type InMemoryKernelService = KernelServiceCore<InMemoryJournal, InMemorySidecarFederation>;
 pub type SqliteKernelService = KernelServiceCore<SqliteJournal, SqliteSidecarFederation>;
+pub type PostgresKernelService = KernelServiceCore<PostgresJournal, SqliteSidecarFederation>;
 
 #[derive(Debug)]
 pub struct KernelServiceCore<J: Journal, S: SidecarFederation = InMemorySidecarFederation> {
@@ -148,6 +153,20 @@ impl KernelServiceCore<SqliteJournal, SqliteSidecarFederation> {
         Ok(Self::from_parts(
             SqliteJournal::open(path)?,
             SqliteSidecarFederation::open(sidecar::sidecar_catalog_path_for_journal(path))?,
+        ))
+    }
+}
+
+impl KernelServiceCore<PostgresJournal, SqliteSidecarFederation> {
+    pub fn open_postgres(
+        database_url: &str,
+        schema: &str,
+        namespace: &str,
+        sidecar_path: impl AsRef<Path>,
+    ) -> Result<Self, ApiError> {
+        Ok(Self::from_parts(
+            PostgresJournal::open(database_url, schema, namespace)?,
+            SqliteSidecarFederation::open(sidecar_path)?,
         ))
     }
 }

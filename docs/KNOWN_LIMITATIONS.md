@@ -16,7 +16,7 @@ implemented system.
 
 ## Service, Governance, And Operator Surface
 
-- The kernel service now has both in-memory and SQLite-backed execution paths, and the pilot HTTP path now supports bearer-token auth plus persisted audit logs, but the boundary is still not multi-tenant or production-hardened.
+- The kernel service now has in-memory, SQLite-backed, and optional Postgres-journal execution paths. Service v2 namespaces isolate HTTP service state and token authorization, but they are not DSL semantics, authority partitions, cross-partition transactions, or a full managed multi-tenant platform.
 - Coordination semantics now cover heartbeats and execution outcomes in the pilot slice, but expiry still relies on explicit semantic state rather than clock-driven timeout windows or distributed failure detection.
 - HTTP authorization still uses coarse endpoint scopes, but tokens now also bind maximum semantic policy visibility for history, state, documents, explanation, sidecar access, and reports. The remaining gap is richer governance ergonomics, not the absence of token-bound semantic policy or policy-aware derivation.
 - Audit entries now capture effective policy decisions plus requested, granted, and effective semantic visibility, but they still do not capture full operator intent or semantic diffs between cuts.
@@ -36,7 +36,7 @@ implemented system.
 - The repository now has a responsible-disclosure policy, but it is not yet advertising a paid public bug bounty.
 - Memory figures in the performance report are structural lower-bound estimates rather than allocator-exact telemetry.
 - Telemetry stops at host facts plus kernel/runtime counters. Profiler-grade CPU, allocator, or scheduler tracing is still out of scope for the current phase.
-- Durable storage is still rooted in local SQLite files. Snapshotting and restore now exist for the packaged pilot path, but there is still no general compaction, remote backup service, or platform-wide storage control plane.
+- SQLite remains the default local/package journal backend. The optional Postgres backend is journal-first only: it preserves committed source order per namespace through the `Journal` contract, but it is not a SQL rule engine, not a global `AsOf`, not consensus over derived state, and not a sidecar catalog backend.
 - The planner now makes the “do not chase one giant node beyond `XL`” rule explicit, but the partition/federation posture is still operational guidance rather than an automated re-sharding or multi-host placement system.
 
 ## Boundary Clients And Scaling
@@ -48,6 +48,7 @@ implemented system.
 - The new notebook hardening checks validate structure, bootstrap assumptions, and path integrity, but they do not yet execute full Colab notebook runs as a release blocker.
 - Artifact and vector sidecar federation is now journal-subordinated and temporally exact on the SQLite-backed pilot path, but it is still a single-node backend and does not yet replicate or fail over independently of the kernel process.
 - Vector search can now project provenance-bearing semantic facts back into the rule layer, but the current projection is deliberately narrow: a three-field `(query_entity, matched_entity, score)` extensional fact shape.
-- The first partition-aware distributed-truth slice now includes imported-fact reasoning, federated explain/report surfaces, a SQLite-backed durable backend, and a single-host leader/follower replicated authority-partition prototype with manual promotion. What it still does not include is automatic election, quorum consensus, multi-host replication, or a managed failover plane.
+- The first partition-aware distributed-truth slice now includes imported-fact reasoning, federated explain/report surfaces, a SQLite-backed durable backend, and a single-host leader/follower replicated authority-partition prototype with restart-safe metadata, manual promotion, stale-epoch fencing, lag/degraded status, and divergent-prefix rejection. What it still does not include is follower-read contracts, automatic election, quorum consensus, multi-host replication, or a managed failover plane.
 - Imported-fact federation is semantically exact for the current slice, but that slice is intentionally narrow: imported queries must currently be single-goal tuple-producing reads rather than arbitrary joined row shapes.
 - Sidecars remain partition-local and journal-subordinated in the replicated prototype. They do not replicate or fail over independently.
+- Sidecars also remain local SQLite catalogs in Service v2, including when the authoritative journal backend is Postgres. Postgres sidecar catalogs, remote sidecar failover, and sidecar-first control planes are deferred.

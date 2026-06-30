@@ -337,14 +337,22 @@ That prototype adds:
 - `POST /v1/federated/run`
 - `POST /v1/federated/report`
 
+Partition status now names the active leader replica for each authority
+partition and reports every replica's applied element, element lag, health, and
+degraded detail. A lagging follower is degraded; a divergent follower prefix is
+rejected during replay or promotion rather than repaired silently.
+
 Use it when you need to show:
 
 - exact local truth per authority partition
-- manual leader/follower failover with epoch fencing
+- manual leader/follower failover with restart-safe metadata and epoch fencing
 - federated imported-fact reasoning without a fake global clock
 
 Do not present it as a generalized distributed platform. It is a deliberate,
-single-host prototype for the next architectural step.
+single-host replicated authority-partition prototype for the next architectural
+step. Reads are leader-confirmed in this slice; follower-read contracts,
+automatic election, quorum consensus, and multi-host placement remain out of
+scope.
 
 ## How To Present The Output
 

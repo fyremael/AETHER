@@ -82,6 +82,124 @@ jobs:
         working-directory: go
         run: go test ./...
 
+  postgres-journal:
+    name: Postgres journal
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: aether
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d aether"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AETHER_POSTGRES_TEST_URL: postgres://postgres:postgres@localhost:5432/aether
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Run Postgres journal parity tests
+        run: cargo test -p aether_storage postgres_journal -- --nocapture
+
+      - name: Run Postgres HTTP namespace integration test
+        run: cargo test -p aether_api --test http_service http_service_postgres_namespaces -- --nocapture
+
+  container-smoke:
+    name: Container smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build pilot service image
+        run: docker build -t aether-pilot-service:ci .
+
+      - name: Boot image and verify authenticated status
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          mkdir -p "$workdir/config"
+          printf '%s' 'ci-pilot-token' > "$workdir/config/pilot-operator.token"
+          cat > "$workdir/config/pilot-service.json" <<'JSON'
+          {
+            "config_version": "pilot-v1",
+            "schema_version": "v1",
+            "service_mode": "single_node",
+            "bind_addr": "0.0.0.0:3000",
+            "database_path": "/tmp/aether/coordination.sqlite",
+            "audit_log_path": "/tmp/aether/audit.jsonl",
+            "auth": {
+              "revoked_token_ids": [],
+              "revoked_principal_ids": [],
+              "tokens": [
+                {
+                  "principal": "pilot-operator",
+                  "principal_id": "principal:pilot-operator",
+                  "token_id": "token:pilot-operator",
+                  "scopes": ["append", "query", "explain", "ops"],
+                  "policy_context": {
+                    "capabilities": ["executor"],
+                    "visibilities": []
+                  },
+                  "token_file": "pilot-operator.token",
+                  "revoked": false
+                }
+              ]
+            }
+          }
+          JSON
+
+          container_id="$(docker run -d \
+            -p 3000:3000 \
+            -v "$workdir/config:/etc/aether:ro" \
+            aether-pilot-service:ci)"
+          trap 'docker logs "$container_id" || true; docker rm -f "$container_id" || true; rm -rf "$workdir"' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl -fsS "http://127.0.0.1:3000/health" >/tmp/aether-health.json; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "container did not become healthy" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          curl -fsS \
+            -H "Authorization: Bearer ci-pilot-token" \
+            "http://127.0.0.1:3000/v1/status" > /tmp/aether-status.json
+          python3 - <<'PY'
+          import json
+
+          with open("/tmp/aether-health.json", "r", encoding="utf-8") as handle:
+              health = json.load(handle)
+          with open("/tmp/aether-status.json", "r", encoding="utf-8") as handle:
+              status = json.load(handle)
+
+          assert health["status"] == "ok", health
+          assert status["status"] == "ok", status
+          assert status["config_version"] == "pilot-v1", status
+          assert status["schema_version"] == "v1", status
+          assert status["service_mode"] == "single_node", status
+          assert status["storage"]["backend"] == "sqlite", status
+          assert status["principals"][0]["token_id"] == "token:pilot-operator", status
+          PY
+
   python-sdk:
     name: Python SDK
     runs-on: ubuntu-latest
@@ -144,6 +262,8 @@ jobs:
       - hardening-promotion-state
       - rust
       - go-shell
+      - postgres-journal
+      - container-smoke
       - python-sdk
       - pilot-launch-gate
 

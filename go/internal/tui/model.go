@@ -751,8 +751,21 @@ func (m Model) renderOverview() string {
 		if m.status.BindAddr != nil {
 			lines = append(lines, fmt.Sprintf("Bind: %s", *m.status.BindAddr))
 		}
+		lines = append(lines, fmt.Sprintf("Storage: %s", stringOrDefault(m.status.Storage.Backend, "-")))
 		if m.status.Storage.DatabasePath != nil {
 			lines = append(lines, fmt.Sprintf("Database: %s", *m.status.Storage.DatabasePath))
+		}
+		if m.status.Storage.DataRoot != nil {
+			lines = append(lines, fmt.Sprintf("Data root: %s", *m.status.Storage.DataRoot))
+		}
+		if m.status.Storage.PostgresSchema != nil {
+			lines = append(lines, fmt.Sprintf("Postgres schema: %s", *m.status.Storage.PostgresSchema))
+		}
+		if m.status.Storage.SidecarMode != "" {
+			lines = append(lines, fmt.Sprintf("Sidecars: %s", m.status.Storage.SidecarMode))
+		}
+		if m.status.ActiveNamespaceCount > 0 {
+			lines = append(lines, fmt.Sprintf("Active namespaces: %d", m.status.ActiveNamespaceCount))
 		}
 	}
 	lines = append(lines, fmt.Sprintf("Journal entries: %d", historyCount))
@@ -770,6 +783,7 @@ func (m Model) renderOverview() string {
 		lines = append(lines, "")
 		lines = append(lines, highlight.Render("Operator identity surface"))
 		lines = append(lines, fmt.Sprintf("Configured principals: %d", len(m.status.Principals)))
+		lines = append(lines, fmt.Sprintf("Namespace policies: %d", len(m.status.Namespaces)))
 		revoked := 0
 		for _, principal := range m.status.Principals {
 			if principal.Revoked {
@@ -785,16 +799,21 @@ func (m Model) renderOverview() string {
 				if replica.AppliedElement != nil {
 					applied = fmt.Sprintf("e%d", *replica.AppliedElement)
 				}
-				lines = append(lines, fmt.Sprintf(
-					"%s/%d | %s | epoch=%d | applied=%s | lag=%d | healthy=%t",
+				summary := fmt.Sprintf(
+					"%s/%d | leader=%d | %s | epoch=%d | applied=%s | lag=%d | healthy=%t",
 					replica.Partition,
 					replica.ReplicaID,
+					replica.LeaderReplica,
 					replica.Role,
 					replica.LeaderEpoch,
 					applied,
 					replica.ReplicationLag,
 					replica.Healthy,
-				))
+				)
+				if replica.Detail != nil {
+					summary = fmt.Sprintf("%s | detail=%s", summary, *replica.Detail)
+				}
+				lines = append(lines, summary)
 			}
 		}
 	}

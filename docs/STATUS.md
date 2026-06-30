@@ -89,7 +89,8 @@ Completed:
 - imported-fact federation implemented over explicit partition cuts, including provenance-bearing extensional facts that carry source partition/cut context into derived tuples
 - federated document execution, explain traces, and markdown report generation implemented on top of the partition-aware in-memory service
 - SQLite-backed partition-aware service implemented for durable per-partition replay and restart-safe federated imported-fact / explain / report execution
-- single-host leader/follower replicated authority partitions implemented as a manual-failover prototype with leader epochs, follower replay, stale-epoch fencing, HTTP status surfaces, and federated HTTP routes
+- single-host leader/follower replicated authority partitions implemented as an operable manual-failover prototype with leader epochs, follower replay, restart-safe metadata reload, stale-epoch fencing, explicit leader/lag/degraded replica status, divergent-prefix rejection, HTTP status surfaces, and federated HTTP routes
+- AETHER Service v2 groundwork implemented as a service-plane widening over the closed v1 kernel: `X-Aether-Namespace` request isolation, namespace-bound bearer tokens, namespace-bearing audit/status surfaces, legacy pilot config compatibility, tagged v2 SQLite/Postgres storage config, and a Postgres journal backend behind the existing `Journal` contract
 - coordination delta reports implemented in JSON and markdown for cut-to-cut operator comparisons, including policy-aware trace-handle redaction instead of hard failure
 - federated run/report HTTP surfaces implemented for the replicated prototype, with imported-cut provenance carried into explain and report artifacts
 - lightweight exact-response reuse implemented for repeated replicated federated run/report requests, invalidated on append and promotion
@@ -110,7 +111,7 @@ Completed:
 Still open:
 
 - post-v1 DSL ergonomics and document modularity beyond the current canonical surface
-- broader durable storage backends beyond the current SQLite journal
+- production hardening for the optional Postgres journal deployment path beyond current parity/concurrency coverage
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
 - mature Go/Python client ecosystems beyond the current first real boundary clients
 - historical benchmark dashboards and long-lived trend storage beyond the current run bundles, matrix summaries, perturbation artifacts, and uploaded workflow artifacts
@@ -121,7 +122,8 @@ The most immediate work now sits just beyond the launch-ready pilot slice and
 the formally closed v1 single-node semantic core:
 
 - let the new hardening tracker accumulate enough scheduled green evidence to promote admin first, then operator, user, and exec checks into blocking CI in order
-- extend the new single-host replicated-partition prototype toward stronger recovery drills, better status surfacing, and clearer operator presets without pretending it is a generalized cluster manager
+- continue hardening the single-host replicated authority-partition prototype with longer recovery drills, clearer operator presets, and measured promotion/follower-replay evidence without pretending it is a generalized cluster manager
+- continue Service v2 hardening around namespace isolation, Postgres journal parity, container smoke, and design-partner deployment docs while keeping SQLite the package default and sidecars local/journal-subordinated
 - add longer-duration scheduled operability evidence beyond the current release and launch gates
 - decide how far to widen audit context from the current semantic cut/query/tuple/diff fields into fuller operator intent
 - decide which post-v1 ergonomic DSL extensions matter beyond the now-implemented canonical surface

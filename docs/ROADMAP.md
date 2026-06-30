@@ -54,6 +54,7 @@ Non-goal:
 Focus:
 
 - deepen the new status/reload/backup surfaces into broader operational discipline
+- complete the Service v2 design-partner path: namespace-aware service isolation, tagged storage config, optional Postgres authoritative journal deployments, and container smoke evidence without changing kernel semantics
 - keep deployment and upgrade discipline coherent as the operator surface grows
 - extend cut-diff and proof surfaces without widening beyond exact pilot semantics
 - add longer-duration soak and recovery evidence around the now-hardened bundle
@@ -62,7 +63,7 @@ Focus:
 
 Focus:
 
-- take the current single-host replicated authority-partition prototype toward clearer failover and recovery evidence
+- keep the single-host replicated authority-partition prototype on an evidence path: restart-safe metadata reload, manual promotion, follower replay, stale-epoch fencing, lag/degraded status, and divergent-prefix rejection before broader consensus machinery
 - widen durable federated service boundaries only where provenance remains exact
 - keep imported-fact widening constrained to provenance-preserving shapes
 - delay generalized consensus machinery until the current exact-local-truth model is exhausted
@@ -111,6 +112,7 @@ Deliberately not the near-term center:
 
 - a broad multi-tenant platform story
 - replicated sidecar control planes before replicated authority partitions
+- Postgres as a SQL rule engine, derived-state authority, or sidecar catalog backend in Service v2
 - post-v1 DSL flourish for its own sake
 - feature breadth that outruns explainability or replay discipline
 
@@ -121,9 +123,10 @@ If the team needs a practical ordering, use this one:
 1. harden the current pilot boundary
 2. promote the most stable hardening checks into the mainline gates
 3. deepen operator-facing proof and reporting
-4. execute replicated authority partitions
-5. widen distributed truth only where provenance remains exact
-6. improve ergonomics and optimization around the already-settled core
+4. finish Service v2 namespace/Postgres deployment evidence over the same append/history contract
+5. execute replicated authority partitions
+6. widen distributed truth only where provenance remains exact
+7. improve ergonomics and optimization around the already-settled core
 
 The first pass through that order is now in motion: pilot hardening, delta
 reporting, replicated authority partitions, federated HTTP surfaces, and the

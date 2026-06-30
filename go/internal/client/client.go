@@ -14,6 +14,7 @@ import (
 type Client struct {
 	baseURL    string
 	token      string
+	namespace  string
 	httpClient *http.Client
 }
 
@@ -35,6 +36,12 @@ func New(baseURL string, token string) *Client {
 			Timeout: 10 * time.Second,
 		},
 	}
+}
+
+func (c *Client) WithNamespace(namespace string) *Client {
+	next := *c
+	next.namespace = namespace
+	return &next
 }
 
 func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
@@ -154,6 +161,9 @@ func (c *Client) doJSON(ctx context.Context, method string, path string, payload
 	}
 	if c.token != "" {
 		request.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	if c.namespace != "" {
+		request.Header.Set("X-Aether-Namespace", c.namespace)
 	}
 
 	response, err := c.httpClient.Do(request)

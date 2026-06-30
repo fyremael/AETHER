@@ -1552,6 +1552,8 @@ fn build_http_fixture() -> Result<HttpFixture, ApiError> {
             bind_addr: Some("127.0.0.1:3000".into()),
             service_mode: ServiceMode::SingleNode,
             storage: ServiceStatusStorage::default(),
+            active_namespace_count: 1,
+            namespaces: Vec::new(),
             principals: Vec::new(),
             replicas: Vec::new(),
         });

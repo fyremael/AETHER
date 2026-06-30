@@ -3,10 +3,11 @@ use crate::{
     CoordinationDeltaReportRequest, CoordinationPilotReportRequest, CurrentStateRequest,
     ExplainTupleRequest, FederatedExplainReport, FederatedHistoryRequest,
     FederatedRunDocumentRequest, GetArtifactReferenceRequest, HistoryRequest, KernelService,
-    ParseDocumentRequest, PartitionAppendRequest, PartitionHistoryRequest, PartitionStateRequest,
-    PartitionStatusResponse, PromoteReplicaRequest, RegisterArtifactReferenceRequest,
-    RegisterVectorRecordRequest, ReplicatedAuthorityPartitionService, RunDocumentRequest,
-    SearchVectorsRequest, ServiceMode, ServiceStatusResponse,
+    NamespaceId, ParseDocumentRequest, PartitionAppendRequest, PartitionHistoryRequest,
+    PartitionStateRequest, PartitionStatusResponse, PostgresKernelService, PromoteReplicaRequest,
+    RegisterArtifactReferenceRequest, RegisterVectorRecordRequest,
+    ReplicatedAuthorityPartitionService, RunDocumentRequest, SearchVectorsRequest, ServiceMode,
+    ServiceStatusResponse, SqliteKernelService,
 };
 use aether_ast::PolicyContext;
 use axum::{
@@ -18,7 +19,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -26,9 +27,11 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+pub const AETHER_NAMESPACE_HEADER: &str = "x-aether-namespace";
+
 #[derive(Clone)]
 pub struct HttpKernelState {
-    service: Arc<Mutex<Box<dyn KernelService + Send>>>,
+    services: Arc<Mutex<NamespaceServiceStore>>,
     partitioned: Option<Arc<Mutex<ReplicatedAuthorityPartitionService>>>,
     auth: Arc<Mutex<HttpAuth>>,
     audit: AuditLog,
@@ -61,8 +64,36 @@ impl HttpKernelState {
         partitioned: Option<ReplicatedAuthorityPartitionService>,
         options: HttpKernelOptions,
     ) -> Self {
+        Self::with_service_store(NamespaceServiceStore::single(service), partitioned, options)
+    }
+
+    pub fn with_sqlite_namespaces(
+        data_root: impl Into<PathBuf>,
+        options: HttpKernelOptions,
+    ) -> Self {
+        Self::with_service_store(NamespaceServiceStore::sqlite(data_root), None, options)
+    }
+
+    pub fn with_postgres_namespaces(
+        database_url: impl Into<String>,
+        schema: impl Into<String>,
+        sidecar_path: impl Into<PathBuf>,
+        options: HttpKernelOptions,
+    ) -> Self {
+        Self::with_service_store(
+            NamespaceServiceStore::postgres(database_url, schema, sidecar_path),
+            None,
+            options,
+        )
+    }
+
+    fn with_service_store(
+        services: NamespaceServiceStore,
+        partitioned: Option<ReplicatedAuthorityPartitionService>,
+        options: HttpKernelOptions,
+    ) -> Self {
         Self {
-            service: Arc::new(Mutex::new(Box::new(service))),
+            services: Arc::new(Mutex::new(services)),
             partitioned: partitioned.map(|service| Arc::new(Mutex::new(service))),
             auth: Arc::new(Mutex::new(HttpAuth::from_config(options.auth))),
             audit: AuditLog::new(options.audit_log_path),
@@ -71,12 +102,6 @@ impl HttpKernelState {
             }))),
             auth_reload_config_path: options.auth_reload_config_path,
         }
-    }
-
-    fn service(
-        &self,
-    ) -> Result<std::sync::MutexGuard<'_, Box<dyn KernelService + Send>>, HttpError> {
-        self.service.lock().map_err(|_| HttpError::LockPoisoned)
     }
 
     fn partitioned_service(
@@ -94,11 +119,12 @@ impl HttpKernelState {
         &self,
         headers: &HeaderMap,
         required_scope: AuthScope,
+        namespace: &NamespaceId,
     ) -> Result<AuthenticatedPrincipal, HttpError> {
         self.auth
             .lock()
             .map_err(|_| HttpError::LockPoisoned)?
-            .authorize(headers, required_scope)
+            .authorize(headers, required_scope, namespace)
     }
 
     fn status_snapshot(&self) -> Result<ServiceStatusResponse, HttpError> {
@@ -116,6 +142,17 @@ impl HttpKernelState {
             status.service_mode = ServiceMode::Partitioned;
             status.replicas = flatten_replica_status(&partition_status);
         }
+        let active_namespaces = self
+            .services
+            .lock()
+            .map_err(|_| HttpError::LockPoisoned)?
+            .active_namespaces();
+        status.active_namespace_count = active_namespaces.len();
+        status.namespaces = self
+            .auth
+            .lock()
+            .map_err(|_| HttpError::LockPoisoned)?
+            .namespace_status(&active_namespaces);
         Ok(status)
     }
 
@@ -128,13 +165,13 @@ impl HttpKernelState {
         let resolved = PilotServiceConfig::load(config_path)
             .and_then(|config| config.resolve(config_path))
             .map_err(|error| HttpError::Api(ApiError::Validation(error.to_string())))?;
+        let resolved_status = resolved.service_status();
         let mut status = self.status.lock().map_err(|_| HttpError::LockPoisoned)?;
         if status.bind_addr.as_deref() != Some(resolved.bind_addr.as_str())
-            || status.storage.database_path.as_ref() != Some(&resolved.database_path)
-            || status.storage.audit_log_path.as_ref() != Some(&resolved.audit_log_path)
+            || status.storage != resolved_status.storage
         {
             return Err(HttpError::Api(ApiError::Validation(
-                "auth reload cannot change bind or storage paths".into(),
+                "auth reload cannot change bind or storage configuration".into(),
             )));
         }
         {
@@ -143,11 +180,7 @@ impl HttpKernelState {
         }
         status.config_version.clone_from(&resolved.config_version);
         status.schema_version.clone_from(&resolved.schema_version);
-        status.principals = resolved
-            .token_summaries
-            .iter()
-            .map(|summary| summary.status_summary())
-            .collect();
+        status.principals = resolved_status.principals;
         Ok(AuthReloadResponse {
             reloaded_at_ms: now_millis(),
             principal_count: status.principals.len(),
@@ -175,7 +208,9 @@ impl HttpKernelState {
             &mut AuditContext,
         ) -> Result<T, HttpError>,
     {
-        let principal = match self.authorize(headers, required_scope) {
+        let namespace = namespace_from_headers(headers)?;
+        context.namespace = Some(namespace.to_string());
+        let principal = match self.authorize(headers, required_scope, &namespace) {
             Ok(principal) => principal,
             Err(error) => {
                 self.audit.record(AuditEntry::for_denied(
@@ -194,8 +229,10 @@ impl HttpKernelState {
         };
 
         let result = {
-            let mut service = self.service()?;
-            operation(service.as_mut(), &principal, &mut context)
+            let mut services = self.services.lock().map_err(|_| HttpError::LockPoisoned)?;
+            services.execute(&namespace, |service| {
+                operation(service, &principal, &mut context)
+            })
         };
 
         let status = match &result {
@@ -230,7 +267,10 @@ impl HttpKernelState {
             &mut AuditContext,
         ) -> Result<T, HttpError>,
     {
-        let principal = match self.authorize(headers, required_scope) {
+        let namespace = namespace_from_headers(headers)?;
+        let mut context = context;
+        context.namespace = Some(namespace.to_string());
+        let principal = match self.authorize(headers, required_scope, &namespace) {
             Ok(principal) => principal,
             Err(error) => {
                 self.audit.record(AuditEntry::for_denied(
@@ -250,7 +290,6 @@ impl HttpKernelState {
 
         {
             let mut service = self.partitioned_service()?;
-            let mut context = context;
             let result = operation(&mut service, &principal, &mut context);
             let status = match &result {
                 Ok(_) => StatusCode::OK,
@@ -269,7 +308,12 @@ impl HttpKernelState {
     }
 
     fn audit_entries(&self, headers: &HeaderMap) -> Result<AuditLogResponse, HttpError> {
-        let principal = match self.authorize(headers, AuthScope::Ops) {
+        let namespace = namespace_from_headers(headers)?;
+        let context = AuditContext {
+            namespace: Some(namespace.to_string()),
+            ..Default::default()
+        };
+        let principal = match self.authorize(headers, AuthScope::Ops, &namespace) {
             Ok(principal) => principal,
             Err(error) => {
                 self.audit.record(AuditEntry::for_denied(
@@ -281,14 +325,21 @@ impl HttpKernelState {
                     None,
                     AuthScope::Ops,
                     error.audit_message(),
-                    AuditContext::default(),
+                    context,
                 ));
                 return Err(error);
             }
         };
 
         let response = AuditLogResponse {
-            entries: self.audit.snapshot()?,
+            entries: self
+                .audit
+                .snapshot()?
+                .into_iter()
+                .filter(|entry| {
+                    entry.context.namespace.as_deref().unwrap_or("default") == namespace.as_str()
+                })
+                .collect(),
         };
         self.audit.record(AuditEntry::for_request(
             "GET",
@@ -296,7 +347,10 @@ impl HttpKernelState {
             StatusCode::OK,
             &principal,
             AuthScope::Ops,
-            AuditContext::default(),
+            AuditContext {
+                namespace: Some(namespace.to_string()),
+                ..Default::default()
+            },
         ));
         Ok(response)
     }
@@ -344,6 +398,7 @@ impl HttpAuthConfig {
             principal: principal.into(),
             principal_id: String::new(),
             scopes: scopes.into_iter().collect(),
+            namespaces: Vec::new(),
             policy_context: None,
             source: "inline".into(),
             revoked: false,
@@ -364,6 +419,7 @@ impl HttpAuthConfig {
             principal: principal.into(),
             principal_id: String::new(),
             scopes: scopes.into_iter().collect(),
+            namespaces: Vec::new(),
             policy_context: normalize_policy_context(Some(policy_context)),
             source: "inline".into(),
             revoked: false,
@@ -381,6 +437,8 @@ pub struct HttpAccessToken {
     #[serde(default)]
     pub principal_id: String,
     pub scopes: Vec<AuthScope>,
+    #[serde(default)]
+    pub namespaces: Vec<NamespaceId>,
     pub policy_context: Option<PolicyContext>,
     #[serde(default)]
     pub source: String,
@@ -441,6 +499,8 @@ pub struct AuditEntry {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AuditContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
     pub temporal_view: Option<String>,
     pub query_goal: Option<String>,
     pub tuple_id: Option<u64>,
@@ -645,6 +705,238 @@ pub fn http_router_with_options(
         .with_state(HttpKernelState::with_options(service, options))
 }
 
+pub fn http_router_with_sqlite_namespaces(
+    data_root: impl Into<PathBuf>,
+    options: HttpKernelOptions,
+) -> Router {
+    Router::new()
+        .route("/health", get(health))
+        .route("/v1/status", get(service_status))
+        .route("/v1/history", get(history))
+        .route("/v1/audit", get(audit_log))
+        .route("/v1/admin/auth/reload", post(reload_auth))
+        .route("/v1/append", post(append))
+        .route("/v1/state/current", post(current_state))
+        .route("/v1/state/as-of", post(as_of))
+        .route("/v1/documents/parse", post(parse_document))
+        .route("/v1/documents/run", post(run_document))
+        .route(
+            "/v1/reports/pilot/coordination",
+            post(coordination_pilot_report),
+        )
+        .route(
+            "/v1/reports/pilot/coordination-delta",
+            post(coordination_delta_report),
+        )
+        .route("/v1/explain/tuple", post(explain_tuple))
+        .route(
+            "/v1/sidecars/artifacts/register",
+            post(register_artifact_reference),
+        )
+        .route("/v1/sidecars/artifacts/get", post(get_artifact_reference))
+        .route(
+            "/v1/sidecars/vectors/register",
+            post(register_vector_record),
+        )
+        .route("/v1/sidecars/vectors/search", post(search_vectors))
+        .with_state(HttpKernelState::with_sqlite_namespaces(data_root, options))
+}
+
+pub fn http_router_with_postgres_namespaces(
+    database_url: impl Into<String>,
+    schema: impl Into<String>,
+    sidecar_path: impl Into<PathBuf>,
+    options: HttpKernelOptions,
+) -> Router {
+    Router::new()
+        .route("/health", get(health))
+        .route("/v1/status", get(service_status))
+        .route("/v1/history", get(history))
+        .route("/v1/audit", get(audit_log))
+        .route("/v1/admin/auth/reload", post(reload_auth))
+        .route("/v1/append", post(append))
+        .route("/v1/state/current", post(current_state))
+        .route("/v1/state/as-of", post(as_of))
+        .route("/v1/documents/parse", post(parse_document))
+        .route("/v1/documents/run", post(run_document))
+        .route(
+            "/v1/reports/pilot/coordination",
+            post(coordination_pilot_report),
+        )
+        .route(
+            "/v1/reports/pilot/coordination-delta",
+            post(coordination_delta_report),
+        )
+        .route("/v1/explain/tuple", post(explain_tuple))
+        .route(
+            "/v1/sidecars/artifacts/register",
+            post(register_artifact_reference),
+        )
+        .route("/v1/sidecars/artifacts/get", post(get_artifact_reference))
+        .route(
+            "/v1/sidecars/vectors/register",
+            post(register_vector_record),
+        )
+        .route("/v1/sidecars/vectors/search", post(search_vectors))
+        .with_state(HttpKernelState::with_postgres_namespaces(
+            database_url,
+            schema,
+            sidecar_path,
+            options,
+        ))
+}
+
+enum NamespaceServiceMode {
+    Static,
+    Sqlite {
+        data_root: PathBuf,
+    },
+    Postgres {
+        database_url: String,
+        schema: String,
+        sidecar_path: PathBuf,
+    },
+}
+
+struct NamespaceServiceStore {
+    mode: NamespaceServiceMode,
+    services: HashMap<NamespaceId, Box<dyn KernelService + Send>>,
+}
+
+impl NamespaceServiceStore {
+    fn single(service: impl KernelService + Send + 'static) -> Self {
+        let mut services: HashMap<NamespaceId, Box<dyn KernelService + Send>> = HashMap::new();
+        services.insert(NamespaceId::default(), Box::new(service));
+        Self {
+            mode: NamespaceServiceMode::Static,
+            services,
+        }
+    }
+
+    fn sqlite(data_root: impl Into<PathBuf>) -> Self {
+        Self {
+            mode: NamespaceServiceMode::Sqlite {
+                data_root: data_root.into(),
+            },
+            services: HashMap::new(),
+        }
+    }
+
+    fn postgres(
+        database_url: impl Into<String>,
+        schema: impl Into<String>,
+        sidecar_path: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            mode: NamespaceServiceMode::Postgres {
+                database_url: database_url.into(),
+                schema: schema.into(),
+                sidecar_path: sidecar_path.into(),
+            },
+            services: HashMap::new(),
+        }
+    }
+
+    fn execute<T, F>(&mut self, namespace: &NamespaceId, operation: F) -> Result<T, HttpError>
+    where
+        F: FnOnce(&mut dyn KernelService) -> Result<T, HttpError>,
+    {
+        if !self.services.contains_key(namespace) {
+            let service = self.open_namespace_service(namespace)?;
+            self.services.insert(namespace.clone(), service);
+        }
+        let service = self.services.get_mut(namespace).ok_or_else(|| {
+            HttpError::Api(ApiError::Validation(format!(
+                "namespace {} is not available",
+                namespace
+            )))
+        })?;
+        operation(service.as_mut())
+    }
+
+    fn active_namespaces(&self) -> Vec<NamespaceId> {
+        let mut namespaces = self.services.keys().cloned().collect::<Vec<_>>();
+        namespaces.sort();
+        namespaces
+    }
+
+    fn open_namespace_service(
+        &self,
+        namespace: &NamespaceId,
+    ) -> Result<Box<dyn KernelService + Send>, HttpError> {
+        match &self.mode {
+            NamespaceServiceMode::Static => {
+                if namespace == &NamespaceId::default() {
+                    Err(HttpError::Api(ApiError::Validation(
+                        "default namespace service is not initialized".into(),
+                    )))
+                } else {
+                    Err(HttpError::Api(ApiError::Validation(format!(
+                        "namespace {} is not configured for this single-node service",
+                        namespace
+                    ))))
+                }
+            }
+            NamespaceServiceMode::Sqlite { data_root } => Ok(Box::new(
+                SqliteKernelService::open(namespace_sqlite_path(data_root, namespace))
+                    .map_err(HttpError::Api)?,
+            )),
+            NamespaceServiceMode::Postgres {
+                database_url,
+                schema,
+                sidecar_path,
+            } => Ok(Box::new(
+                PostgresKernelService::open_postgres(
+                    database_url,
+                    schema,
+                    namespace.as_str(),
+                    namespace_sidecar_path(sidecar_path, namespace),
+                )
+                .map_err(HttpError::Api)?,
+            )),
+        }
+    }
+}
+
+fn namespace_sqlite_path(data_root: &Path, namespace: &NamespaceId) -> PathBuf {
+    if namespace == &NamespaceId::default() {
+        data_root.join("default.sqlite")
+    } else {
+        data_root.join(format!(
+            "namespace-{}.sqlite",
+            namespace_file_token(namespace)
+        ))
+    }
+}
+
+fn namespace_sidecar_path(sidecar_path: &Path, namespace: &NamespaceId) -> PathBuf {
+    if namespace == &NamespaceId::default() {
+        return sidecar_path.to_path_buf();
+    }
+    let token = namespace_file_token(namespace);
+    let stem = sidecar_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("sidecars");
+    let file_name = match sidecar_path.extension().and_then(|value| value.to_str()) {
+        Some(extension) if !extension.is_empty() => format!("{stem}-{token}.{extension}"),
+        _ => format!("{stem}-{token}"),
+    };
+    match sidecar_path.parent() {
+        Some(parent) => parent.join(file_name),
+        None => PathBuf::from(file_name),
+    }
+}
+
+fn namespace_file_token(namespace: &NamespaceId) -> String {
+    namespace
+        .as_str()
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 #[derive(Clone, Debug)]
 struct AuthenticatedPrincipal {
     id: String,
@@ -709,6 +1001,7 @@ impl HttpAuth {
             } else {
                 Some(access.token_id.clone())
             };
+            let namespaces = normalized_namespaces(access.namespaces);
             tokens.insert(
                 access.token,
                 AuthenticatedToken {
@@ -716,6 +1009,7 @@ impl HttpAuth {
                     principal_id,
                     token_id,
                     scopes: access.scopes.into_iter().collect(),
+                    namespaces,
                     policy_context: access.policy_context,
                     revoked: access.revoked,
                 },
@@ -728,6 +1022,7 @@ impl HttpAuth {
         &self,
         headers: &HeaderMap,
         required_scope: AuthScope,
+        namespace: &NamespaceId,
     ) -> Result<AuthenticatedPrincipal, HttpError> {
         if self.tokens.is_empty() {
             return Ok(AuthenticatedPrincipal {
@@ -767,6 +1062,12 @@ impl HttpAuth {
                 message: format!("token lacks {} scope", required_scope.as_str()),
             });
         }
+        if !access.namespaces.contains(namespace) {
+            return Err(HttpError::Forbidden {
+                principal: access.principal.clone(),
+                message: format!("token is not allowed for namespace {}", namespace),
+            });
+        }
         if access.revoked {
             return Err(HttpError::Forbidden {
                 principal: access.principal.clone(),
@@ -782,6 +1083,39 @@ impl HttpAuth {
             policy_bound: true,
         })
     }
+
+    fn namespace_status(
+        &self,
+        active_namespaces: &[NamespaceId],
+    ) -> Vec<crate::NamespaceStatusSummary> {
+        let mut namespaces: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for namespace in active_namespaces {
+            namespaces.entry(namespace.to_string()).or_default();
+        }
+        for token in self.tokens.values() {
+            for namespace in &token.namespaces {
+                namespaces
+                    .entry(namespace.to_string())
+                    .or_default()
+                    .insert(token.principal.clone());
+            }
+        }
+        if self.tokens.is_empty() {
+            for namespace in active_namespaces {
+                namespaces
+                    .entry(namespace.to_string())
+                    .or_default()
+                    .insert("anonymous".into());
+            }
+        }
+        namespaces
+            .into_iter()
+            .map(|(namespace, principals)| crate::NamespaceStatusSummary {
+                namespace,
+                principals: principals.into_iter().collect(),
+            })
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -790,8 +1124,33 @@ struct AuthenticatedToken {
     principal_id: Option<String>,
     token_id: Option<String>,
     scopes: BTreeSet<AuthScope>,
+    namespaces: BTreeSet<NamespaceId>,
     policy_context: Option<PolicyContext>,
     revoked: bool,
+}
+
+fn normalized_namespaces(namespaces: Vec<NamespaceId>) -> BTreeSet<NamespaceId> {
+    if namespaces.is_empty() {
+        BTreeSet::from([NamespaceId::default()])
+    } else {
+        namespaces.into_iter().collect()
+    }
+}
+
+fn namespace_from_headers(headers: &HeaderMap) -> Result<NamespaceId, HttpError> {
+    let Some(value) = headers.get(AETHER_NAMESPACE_HEADER) else {
+        return Ok(NamespaceId::default());
+    };
+    let value = value.to_str().map_err(|_| {
+        HttpError::Api(ApiError::Validation(
+            "X-Aether-Namespace header is not valid UTF-8".into(),
+        ))
+    })?;
+    NamespaceId::new(value).map_err(|message| {
+        HttpError::Api(ApiError::Validation(format!(
+            "invalid X-Aether-Namespace header: {message}"
+        )))
+    })
 }
 
 fn normalize_policy_context(policy_context: Option<PolicyContext>) -> Option<PolicyContext> {
@@ -808,6 +1167,7 @@ fn flatten_replica_status(status: &PartitionStatusResponse) -> Vec<crate::Replic
             replicas.push(crate::ReplicaStatusSummary {
                 partition: partition.partition.to_string(),
                 replica_id: replica.replica_id.0,
+                leader_replica: partition.leader_replica.0,
                 role: match replica.role {
                     crate::ReplicaRole::Leader => "leader".into(),
                     crate::ReplicaRole::Follower => "follower".into(),
@@ -996,7 +1356,13 @@ async fn service_status(
     State(state): State<HttpKernelState>,
     headers: HeaderMap,
 ) -> Result<Json<ServiceStatusResponse>, HttpError> {
-    let principal = match state.authorize(&headers, AuthScope::Ops) {
+    let namespace = namespace_from_headers(&headers)?;
+    let context = AuditContext {
+        namespace: Some(namespace.to_string()),
+        temporal_view: Some("service_status".into()),
+        ..Default::default()
+    };
+    let principal = match state.authorize(&headers, AuthScope::Ops, &namespace) {
         Ok(principal) => principal,
         Err(error) => {
             state.audit.record(AuditEntry::for_denied(
@@ -1008,10 +1374,7 @@ async fn service_status(
                 None,
                 AuthScope::Ops,
                 error.audit_message(),
-                AuditContext {
-                    temporal_view: Some("service_status".into()),
-                    ..Default::default()
-                },
+                context,
             ));
             return Err(error);
         }
@@ -1024,6 +1387,7 @@ async fn service_status(
         &principal,
         AuthScope::Ops,
         AuditContext {
+            namespace: Some(namespace.to_string()),
             temporal_view: Some("service_status".into()),
             ..Default::default()
         },
@@ -1069,7 +1433,13 @@ async fn reload_auth(
     State(state): State<HttpKernelState>,
     headers: HeaderMap,
 ) -> Result<Json<AuthReloadResponse>, HttpError> {
-    let principal = match state.authorize(&headers, AuthScope::Ops) {
+    let namespace = namespace_from_headers(&headers)?;
+    let context = AuditContext {
+        namespace: Some(namespace.to_string()),
+        temporal_view: Some("auth_reload".into()),
+        ..Default::default()
+    };
+    let principal = match state.authorize(&headers, AuthScope::Ops, &namespace) {
         Ok(principal) => principal,
         Err(error) => {
             state.audit.record(AuditEntry::for_denied(
@@ -1081,10 +1451,7 @@ async fn reload_auth(
                 None,
                 AuthScope::Ops,
                 error.audit_message(),
-                AuditContext {
-                    temporal_view: Some("auth_reload".into()),
-                    ..Default::default()
-                },
+                context,
             ));
             return Err(error);
         }
@@ -1097,6 +1464,7 @@ async fn reload_auth(
         &principal,
         AuthScope::Ops,
         AuditContext {
+            namespace: Some(namespace.to_string()),
             temporal_view: Some("auth_reload".into()),
             ..Default::default()
         },

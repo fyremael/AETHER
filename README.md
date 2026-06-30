@@ -159,7 +159,8 @@ The distributed scale posture is now explicit too:
 The repository takes a deliberately opinionated stance.
 
 - Rust is the mainline implementation language for the semantic core.
-- The AETHER DSL is the canonical semantics surface, even before the parser is complete.
+- The AETHER DSL is the canonical semantics surface, with the parser covering
+  the current v1 surface.
 - Go is an operational shell and service-wrapper language, not the semantic authority.
 - Python is a research and experimentation layer, not a shadow kernel.
 - Sidecars for artifacts, vectors, and streams remain subordinate to the semantic kernel.
@@ -174,7 +175,7 @@ Implemented today:
 
 - foundational identifiers, values, datoms, rule/query ASTs, and provenance types
 - schema registration and predicate arity validation
-- append-only journal semantics across both in-memory and SQLite-backed durable storage
+- append-only journal semantics across in-memory, SQLite-backed durable storage, and an optional Postgres journal backend for Service v2 deployments
 - deterministic `Current` and `AsOf` resolution across scalar, set, and sequence classes
 - strict v1 operation/class validation across scalar, set, and sequence semantics
 - anchored `InsertAfter` replay for `SequenceRGA`, with deterministic tie-breaking by committed element order
@@ -199,6 +200,7 @@ Implemented today:
 - explicit policy-context filtering for datoms, DSL-authored extensional facts, and sidecar reads/searches, with request policy now allowed to narrow token-granted visibility but not widen it
 - policy-matched explanation, visible-history filtering, and policy-aware coordination reports on the service/operator path
 - a config-backed pilot service binary with secret-file/env/command token resolution, package-local rotation tooling, and packaged single-node deployment bundles
+- Service v2 namespace isolation through `X-Aether-Namespace`, namespace-bound tokens, tagged SQLite/Postgres storage config, and a container image path for the pilot service binary
 - a live service-status surface with explicit config/schema/service-mode identity plus config-backed auth reload for principal and revocation changes
 - auditable pilot request logging with semantic cut, query, tuple, and count context plus persisted JSONL output
 - operator-grade coordination pilot report generation in markdown and JSON
@@ -219,15 +221,17 @@ Implemented today:
 - imported-fact federation over explicit partition cuts, with source partition/cut provenance carried into derived tuples
 - federated document execution, explain traces, and markdown reports over partition-local truth without inventing a fake global clock
 - a SQLite-backed partition-aware service for durable per-partition replay plus restart-safe imported-fact and federated explain/report execution
-- a single-host leader/follower replicated authority-partition prototype with manual promotion, leader epochs, stale-epoch fencing, follower replay, federated HTTP routes, and exact-response reuse for repeated federated run/report polling
+- a single-host leader/follower replicated authority-partition prototype with restart-safe metadata, manual promotion, leader epochs, stale-epoch fencing, follower replay, explicit leader/lag/degraded status, divergent-prefix rejection, federated HTTP routes, and exact-response reuse for repeated federated run/report polling
 
 Deliberately still narrow:
 
 - the DSL now covers the canonical v1 surface, but broader post-v1 ergonomics and modular authoring are still open
 - bounded aggregation is intentionally limited to non-recursive grouped aggregate rules, so richer aggregate syntax remains future work even though the v1 bounded-aggregation requirement is now covered
 - the Go shell and Python SDK are now real, but they are still early boundary clients rather than mature multi-platform ecosystems
+- Service v2 namespaces are service isolation boundaries, not DSL semantics, authority partitions, or a full managed multi-tenant platform
+- Postgres is journal-first only in Service v2; it is not a SQL rule engine, derived-state authority, sidecar catalog backend, global `AsOf`, or consensus layer
 - sidecar federation is now journal-subordinated and temporally exact on the SQLite-backed pilot path, but it is not yet replicated, distributed, or policy-enforced end to end
-- the first partition-aware service slice now includes imported-fact reasoning, federated explain/report surfaces, a SQLite-backed durable backend, and a single-host replicated authority-partition prototype; generalized multi-host consensus and failover remain future work
+- the first partition-aware service slice now includes imported-fact reasoning, federated explain/report surfaces, a SQLite-backed durable backend, and a single-host replicated authority-partition prototype; follower-read contracts, generalized multi-host consensus, automatic election, and managed failover remain future work
 - imported-fact federation is currently constrained to single-goal tuple-producing query shapes so imported provenance stays semantically exact instead of pretending to justify arbitrary joined rows
 
 Within that deliberately narrow bar, the current repository can honestly claim
@@ -283,7 +287,7 @@ The repository follows the crate boundaries declared in `REPO_LAYOUT.md`.
 | `aether_plan` | compiled-program planning structures, phase graphs, delta-plan metadata |
 | `aether_runtime` | semi-naive recursive evaluation, stratified negation, iteration metadata, derived tuple production |
 | `aether_explain` | derivation and plan explanation surface |
-| `aether_api` | request/response boundary types, an in-memory kernel service, and a minimal HTTP JSON boundary |
+| `aether_api` | request/response boundary types, kernel services, authenticated HTTP routes, reports, sidecars, and partition/federated service surfaces |
 
 ### Non-Rust boundaries
 

@@ -30,7 +30,8 @@ fn developer_config() -> Result<PilotServiceConfig, Box<dyn std::error::Error>> 
         schema_version: "v1".into(),
         service_mode: ServiceMode::SingleNode,
         bind_addr,
-        database_path: database_path.clone(),
+        database_path: Some(database_path.clone()),
+        storage: None,
         audit_log_path: Some(default_audit_log_path(&database_path)),
         auth: PilotAuthConfig {
             revoked_token_ids: Vec::new(),
@@ -53,6 +54,7 @@ fn developer_config() -> Result<PilotServiceConfig, Box<dyn std::error::Error>> 
                 token_env: Some(token_env),
                 token_file: None,
                 token_command: None,
+                namespaces: Vec::new(),
                 revoked: false,
             }],
         },
@@ -65,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let config = PilotServiceConfig::load(&config_path)?.resolve(&config_path)?;
         println!("AETHER durable pilot HTTP service");
         println!("  config: {}", config_path.display());
-        println!("  storage: {}", config.database_path.display());
+        println!("  storage: {}", config.storage.storage_label());
         println!("  sidecars: {}", config.sidecar_path().display());
         println!("  audit log: {}", config.audit_log_path.display());
         println!("  listening: http://{}", config.bind_addr);
@@ -74,11 +76,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = developer_config()?;
     let resolved = config.resolve(std::env::current_dir()?.join("aether-pilot-dev.json"))?;
-    let service = SqliteKernelService::open(&resolved.database_path)?;
+    let database_path = resolved
+        .database_path
+        .clone()
+        .expect("developer config uses legacy sqlite storage");
+    let service = SqliteKernelService::open(&database_path)?;
     let listener = tokio::net::TcpListener::bind(&resolved.bind_addr).await?;
 
     println!("AETHER durable pilot HTTP service");
-    println!("  storage: {}", resolved.database_path.display());
+    println!("  storage: {}", resolved.storage.storage_label());
     println!("  sidecars: {}", resolved.sidecar_path().display());
     println!("  audit log: {}", resolved.audit_log_path.display());
     println!("  listening: http://{}", resolved.bind_addr);

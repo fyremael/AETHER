@@ -38,14 +38,19 @@ class AetherClient:
         base_url: str,
         *,
         bearer_token: str | None = None,
+        namespace: str | None = None,
         timeout_seconds: float = 10.0,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._bearer_token = bearer_token
+        self._namespace = namespace
         self._timeout_seconds = timeout_seconds
 
     def health(self) -> dict[str, Any]:
         return self._request_json("GET", "/health")
+
+    def status(self) -> dict[str, Any]:
+        return self._request_json("GET", "/v1/status")
 
     def history(self) -> dict[str, Any]:
         return self._request_json("GET", "/v1/history")
@@ -196,6 +201,8 @@ class AetherClient:
             headers["Content-Type"] = "application/json"
         if self._bearer_token:
             headers["Authorization"] = f"Bearer {self._bearer_token}"
+        if self._namespace:
+            headers["X-Aether-Namespace"] = self._namespace
 
         request_object = request.Request(
             f"{self._base_url}{path}",

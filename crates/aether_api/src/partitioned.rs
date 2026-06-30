@@ -83,6 +83,8 @@ pub struct ReplicaStatus {
 pub struct PartitionStatus {
     pub partition: PartitionId,
     pub leader_epoch: LeaderEpoch,
+    #[serde(default)]
+    pub leader_replica: ReplicaId,
     pub replicas: Vec<ReplicaStatus>,
 }
 
@@ -807,24 +809,27 @@ impl ReplicatedPartition {
                 .datoms;
             let last = history.last().map(|datom| datom.element);
             let mismatch = validate_replica_prefix(&history, &leader_history).err();
+            let replication_lag = leader_last
+                .zip(last)
+                .map(|(leader, replica)| leader.0.saturating_sub(replica.0))
+                .unwrap_or_else(|| leader_last.map(|leader| leader.0).unwrap_or(0));
+            let detail = replica_status_detail(mismatch, replication_lag);
             replicas.push(ReplicaStatus {
                 partition: self.metadata.partition.clone(),
                 replica_id: config.replica_id,
                 role: config.role,
                 leader_epoch: self.metadata.leader_epoch.clone(),
                 applied_element: last,
-                replication_lag: leader_last
-                    .zip(last)
-                    .map(|(leader, replica)| leader.0.saturating_sub(replica.0))
-                    .unwrap_or_else(|| leader_last.map(|leader| leader.0).unwrap_or(0)),
-                healthy: mismatch.is_none(),
-                detail: mismatch,
+                replication_lag,
+                healthy: detail.is_none(),
+                detail,
             });
         }
 
         Ok(PartitionStatus {
             partition: self.metadata.partition.clone(),
             leader_epoch: self.metadata.leader_epoch.clone(),
+            leader_replica: leader_id,
             replicas,
         })
     }
@@ -914,6 +919,14 @@ fn validate_replica_prefix(
         }
     }
     Ok(())
+}
+
+fn replica_status_detail(mismatch: Option<String>, replication_lag: u64) -> Option<String> {
+    match (mismatch, replication_lag) {
+        (Some(detail), _) => Some(format!("diverged from leader prefix: {detail}")),
+        (None, 0) => None,
+        (None, lag) => Some(format!("behind leader by element delta {lag}")),
+    }
 }
 
 fn validate_federated_cut(cut: FederatedCut) -> Result<FederatedCut, ApiError> {
@@ -2512,6 +2525,7 @@ mod tests {
 
         let status = service.partition_status().expect("partition status");
         let authority = &status.partitions[0];
+        assert_eq!(authority.leader_replica, ReplicaId::new(1));
         assert_eq!(authority.replicas.len(), 2);
         assert!(authority.replicas.iter().all(|replica| replica.healthy));
         assert!(authority
@@ -2559,6 +2573,7 @@ mod tests {
             .partition_status()
             .expect("partition status after promotion");
         let authority = &status.partitions[0];
+        assert_eq!(authority.leader_replica, ReplicaId::new(2));
         assert!(authority.replicas.iter().any(|replica| {
             replica.replica_id == ReplicaId::new(2)
                 && replica.role == ReplicaRole::Leader
@@ -2568,6 +2583,194 @@ mod tests {
             .replicas
             .iter()
             .all(|replica| replica.applied_element == Some(ElementId::new(2))));
+    }
+
+    #[test]
+    fn replicated_partition_service_restarts_promotes_and_preserves_exact_cuts() {
+        let temp = TestPartitionDir::new("replicated-restart");
+        let configs = replicated_authority_config();
+        {
+            let mut service =
+                ReplicatedAuthorityPartitionService::open(temp.path(), configs.clone())
+                    .expect("open replicated partitions");
+            service
+                .append_partition(PartitionAppendRequest {
+                    partition: PartitionId::new("authority"),
+                    leader_epoch: None,
+                    datoms: vec![sample_datom(1, 1, "worker-a", 1, None)],
+                })
+                .expect("append before restart");
+            assert_partition_value(
+                &service,
+                PartitionCut::as_of("authority", ElementId::new(1)),
+                "worker-a",
+            );
+        }
+
+        let mut service = ReplicatedAuthorityPartitionService::open(temp.path(), configs.clone())
+            .expect("reopen replicated partitions");
+        let status = service.partition_status().expect("status after reopen");
+        let authority = &status.partitions[0];
+        assert_eq!(authority.leader_epoch, LeaderEpoch::new(1));
+        assert_eq!(authority.leader_replica, ReplicaId::new(1));
+        assert!(authority.replicas.iter().all(|replica| {
+            replica.healthy
+                && replica.replication_lag == 0
+                && replica.applied_element == Some(ElementId::new(1))
+        }));
+        assert_partition_value(&service, PartitionCut::current("authority"), "worker-a");
+
+        let promoted = service
+            .promote_replica(PromoteReplicaRequest {
+                partition: PartitionId::new("authority"),
+                replica_id: ReplicaId::new(2),
+            })
+            .expect("promote follower after restart");
+        assert_eq!(promoted.leader_epoch, LeaderEpoch::new(2));
+
+        let stale = service.append_partition(PartitionAppendRequest {
+            partition: PartitionId::new("authority"),
+            leader_epoch: Some(LeaderEpoch::new(1)),
+            datoms: vec![sample_datom(1, 1, "stale-worker", 2, None)],
+        });
+        assert!(matches!(
+            stale,
+            Err(crate::ApiError::Validation(message))
+                if message.contains("stale leader epoch 1 for partition authority; current epoch is 2")
+        ));
+
+        service
+            .append_partition(PartitionAppendRequest {
+                partition: PartitionId::new("authority"),
+                leader_epoch: Some(LeaderEpoch::new(2)),
+                datoms: vec![sample_datom(1, 1, "worker-b", 2, None)],
+            })
+            .expect("append under promoted epoch");
+        assert_partition_value(&service, PartitionCut::current("authority"), "worker-b");
+        assert_partition_value(
+            &service,
+            PartitionCut::as_of("authority", ElementId::new(1)),
+            "worker-a",
+        );
+
+        drop(service);
+        let service = ReplicatedAuthorityPartitionService::open(temp.path(), configs)
+            .expect("reopen after promotion");
+        let status = service
+            .partition_status()
+            .expect("status after promoted reopen");
+        let authority = &status.partitions[0];
+        assert_eq!(authority.leader_epoch, LeaderEpoch::new(2));
+        assert_eq!(authority.leader_replica, ReplicaId::new(2));
+        assert!(authority.replicas.iter().all(|replica| replica.healthy));
+        let history = service
+            .partition_history(PartitionHistoryRequest {
+                cut: PartitionCut::current("authority"),
+                policy_context: None,
+            })
+            .expect("current history after promoted reopen");
+        assert_eq!(history.datoms.len(), 2);
+    }
+
+    #[test]
+    fn replicated_partition_status_reports_lag_and_rejects_divergence() {
+        let temp = TestPartitionDir::new("replicated-divergence");
+        let configs = replicated_authority_config();
+        let mut service = ReplicatedAuthorityPartitionService::open(temp.path(), configs.clone())
+            .expect("open replicated partitions");
+        service
+            .append_partition(PartitionAppendRequest {
+                partition: PartitionId::new("authority"),
+                leader_epoch: None,
+                datoms: vec![sample_datom(1, 1, "worker-a", 1, None)],
+            })
+            .expect("append through leader");
+
+        {
+            let mut partitions = service.partitions.borrow_mut();
+            let partition = partitions
+                .get_mut(&PartitionId::new("authority"))
+                .expect("authority partition");
+            let leader = partition
+                .replicas
+                .get_mut(&ReplicaId::new(1))
+                .expect("leader replica");
+            crate::KernelService::append(
+                leader,
+                crate::AppendRequest {
+                    datoms: vec![sample_datom(1, 1, "worker-b", 2, None)],
+                },
+            )
+            .expect("leader-only append");
+        }
+
+        let status = service
+            .partition_status()
+            .expect("status with lagging follower");
+        let authority = &status.partitions[0];
+        let follower = authority
+            .replicas
+            .iter()
+            .find(|replica| replica.replica_id == ReplicaId::new(2))
+            .expect("follower status");
+        assert!(!follower.healthy);
+        assert_eq!(follower.replication_lag, 1);
+        assert_eq!(
+            follower.detail.as_deref(),
+            Some("behind leader by element delta 1")
+        );
+
+        {
+            let mut partitions = service.partitions.borrow_mut();
+            let partition = partitions
+                .get_mut(&PartitionId::new("authority"))
+                .expect("authority partition");
+            let follower = partition
+                .replicas
+                .get_mut(&ReplicaId::new(2))
+                .expect("follower replica");
+            crate::KernelService::append(
+                follower,
+                crate::AppendRequest {
+                    datoms: vec![sample_datom(1, 1, "divergent-worker", 2, None)],
+                },
+            )
+            .expect("divergent follower append");
+        }
+
+        let status = service
+            .partition_status()
+            .expect("status with divergent follower");
+        let authority = &status.partitions[0];
+        let follower = authority
+            .replicas
+            .iter()
+            .find(|replica| replica.replica_id == ReplicaId::new(2))
+            .expect("follower status");
+        assert!(!follower.healthy);
+        assert_eq!(follower.replication_lag, 0);
+        assert_eq!(
+            follower.detail.as_deref(),
+            Some("diverged from leader prefix: entry 1 does not match leader")
+        );
+
+        let promoted = service.promote_replica(PromoteReplicaRequest {
+            partition: PartitionId::new("authority"),
+            replica_id: ReplicaId::new(2),
+        });
+        assert!(matches!(
+            promoted,
+            Err(crate::ApiError::Validation(message))
+                if message.contains("replica 2 for partition authority diverged from leader prefix: entry 1 does not match leader")
+        ));
+
+        drop(service);
+        let reopened = ReplicatedAuthorityPartitionService::open(temp.path(), configs);
+        assert!(matches!(
+            reopened,
+            Err(crate::ApiError::Validation(message))
+                if message.contains("replica 2 for partition authority diverged from leader prefix: entry 1 does not match leader")
+        ));
     }
 
     #[test]
@@ -2687,6 +2890,45 @@ mod tests {
                 Value::Entity(EntityId::new(1)),
                 Value::String("worker-b".into())
             ]
+        );
+    }
+
+    fn replicated_authority_config() -> Vec<AuthorityPartitionConfig> {
+        vec![AuthorityPartitionConfig {
+            partition: PartitionId::new("authority"),
+            replicas: vec![
+                ReplicaConfig {
+                    replica_id: ReplicaId::new(1),
+                    database_path: PathBuf::from("authority-leader.sqlite"),
+                    role: ReplicaRole::Leader,
+                },
+                ReplicaConfig {
+                    replica_id: ReplicaId::new(2),
+                    database_path: PathBuf::from("authority-follower.sqlite"),
+                    role: ReplicaRole::Follower,
+                },
+            ],
+        }]
+    }
+
+    fn assert_partition_value(
+        service: &ReplicatedAuthorityPartitionService,
+        cut: PartitionCut,
+        expected: &str,
+    ) {
+        let state = service
+            .partition_state(PartitionStateRequest {
+                cut,
+                schema: schema(),
+                policy_context: None,
+            })
+            .expect("partition state");
+        assert_eq!(
+            state
+                .state
+                .entity(&EntityId::new(1))
+                .and_then(|entity| entity.attribute(&AttributeId::new(1))),
+            Some(&ResolvedValue::Scalar(Some(Value::String(expected.into()))))
         );
     }
 

@@ -1,17 +1,18 @@
 use aether_api::{
     coordination_pilot_dsl, coordination_pilot_seed_history, http_router, http_router_with_options,
-    http_router_with_partitioned_options, AppendRequest, AuditEntry, AuditLogResponse, AuthScope,
+    http_router_with_partitioned_options, http_router_with_postgres_namespaces,
+    http_router_with_sqlite_namespaces, AppendRequest, AuditEntry, AuditLogResponse, AuthScope,
     AuthorityPartitionConfig, CoordinationCut, CoordinationDeltaReport,
     CoordinationDeltaReportRequest, CoordinationPilotReport, CoordinationPilotReportRequest,
     ExplainTupleRequest, FederatedExplainReport, FederatedRunDocumentRequest,
-    GetArtifactReferenceRequest, HealthResponse, HistoryResponse, HttpAuthConfig,
-    HttpKernelOptions, ImportedFactQueryRequest, InMemoryKernelService, KernelService,
+    GetArtifactReferenceRequest, HealthResponse, HistoryResponse, HttpAccessToken, HttpAuthConfig,
+    HttpKernelOptions, ImportedFactQueryRequest, InMemoryKernelService, KernelService, NamespaceId,
     ParseDocumentRequest, ParseDocumentResponse, PartitionAppendRequest, PartitionStatusResponse,
     PilotAuthConfig, PilotServiceConfig, PilotTokenConfig, PromoteReplicaRequest,
     RegisterArtifactReferenceRequest, RegisterVectorRecordRequest, ReplicaConfig, ReplicaRole,
     ReplicatedAuthorityPartitionService, RunDocumentRequest, RunDocumentResponse,
     SearchVectorsRequest, SearchVectorsResponse, ServiceMode, ServiceStatusResponse,
-    SqliteKernelService, VectorFactProjection, VectorMetric,
+    SqliteKernelService, VectorFactProjection, VectorMetric, AETHER_NAMESPACE_HEADER,
     COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
 use aether_ast::{
@@ -706,7 +707,8 @@ async fn http_service_exposes_status_and_supports_auth_reload() {
         schema_version: "test-schema-v1".into(),
         service_mode: ServiceMode::SingleNode,
         bind_addr: "127.0.0.1:0".into(),
-        database_path: database_path.clone(),
+        database_path: Some(database_path.clone()),
+        storage: None,
         audit_log_path: Some(audit_path.clone()),
         auth: PilotAuthConfig {
             tokens: vec![
@@ -728,6 +730,7 @@ async fn http_service_exposes_status_and_supports_auth_reload() {
                     token_env: None,
                     token_file: None,
                     token_command: None,
+                    namespaces: Vec::new(),
                     revoked: false,
                 },
                 PilotTokenConfig {
@@ -740,6 +743,7 @@ async fn http_service_exposes_status_and_supports_auth_reload() {
                     token_env: None,
                     token_file: None,
                     token_command: None,
+                    namespaces: Vec::new(),
                     revoked: false,
                 },
             ],
@@ -957,6 +961,368 @@ async fn coordination_delta_report_endpoint_is_policy_aware() {
 }
 
 #[tokio::test]
+async fn http_service_isolates_journal_history_by_namespace_header() {
+    let temp = TestTempDir::new("namespace-isolation");
+    let audit_path = temp.path().join("audit.jsonl");
+    let options = HttpKernelOptions::new()
+        .with_auth(HttpAuthConfig {
+            tokens: vec![
+                HttpAccessToken {
+                    token: "default-token".into(),
+                    token_id: "token:default".into(),
+                    principal: "default-operator".into(),
+                    principal_id: "principal:default".into(),
+                    scopes: vec![AuthScope::Append, AuthScope::Query, AuthScope::Ops],
+                    namespaces: Vec::new(),
+                    policy_context: None,
+                    source: "inline".into(),
+                    revoked: false,
+                },
+                HttpAccessToken {
+                    token: "acme-token".into(),
+                    token_id: "token:acme".into(),
+                    principal: "acme-operator".into(),
+                    principal_id: "principal:acme".into(),
+                    scopes: vec![AuthScope::Append, AuthScope::Query, AuthScope::Ops],
+                    namespaces: vec![NamespaceId::new("acme").expect("valid namespace")],
+                    policy_context: None,
+                    source: "inline".into(),
+                    revoked: false,
+                },
+            ],
+        })
+        .with_audit_log_path(audit_path.clone());
+    let (base_url, server) = spawn_sqlite_namespace_server(temp.path().join("data"), options).await;
+    let client = Client::new();
+
+    let default_append = client
+        .post(format!("{base_url}/v1/append"))
+        .bearer_auth("default-token")
+        .json(&AppendRequest {
+            datoms: vec![policy_status_datom(1, "default-open", 1, None)],
+        })
+        .send()
+        .await
+        .expect("default namespace append");
+    assert!(default_append.status().is_success());
+
+    let acme_append = client
+        .post(format!("{base_url}/v1/append"))
+        .header(AETHER_NAMESPACE_HEADER, "acme")
+        .bearer_auth("acme-token")
+        .json(&AppendRequest {
+            datoms: vec![policy_status_datom(1, "acme-open", 1, None)],
+        })
+        .send()
+        .await
+        .expect("acme namespace append");
+    assert!(acme_append.status().is_success());
+
+    let forbidden = client
+        .post(format!("{base_url}/v1/append"))
+        .header(AETHER_NAMESPACE_HEADER, "acme")
+        .bearer_auth("default-token")
+        .json(&AppendRequest {
+            datoms: vec![policy_status_datom(2, "wrong-tenant", 2, None)],
+        })
+        .send()
+        .await
+        .expect("forbidden namespace append");
+    assert_eq!(forbidden.status(), reqwest::StatusCode::FORBIDDEN);
+
+    let default_history = client
+        .get(format!("{base_url}/v1/history"))
+        .bearer_auth("default-token")
+        .send()
+        .await
+        .expect("default namespace history")
+        .json::<HistoryResponse>()
+        .await
+        .expect("default history response");
+    assert_eq!(default_history.datoms.len(), 1);
+    assert_eq!(
+        default_history.datoms[0].value,
+        Value::String("default-open".into())
+    );
+
+    let acme_history = client
+        .get(format!("{base_url}/v1/history"))
+        .header(AETHER_NAMESPACE_HEADER, "acme")
+        .bearer_auth("acme-token")
+        .send()
+        .await
+        .expect("acme namespace history")
+        .json::<HistoryResponse>()
+        .await
+        .expect("acme history response");
+    assert_eq!(acme_history.datoms.len(), 1);
+    assert_eq!(
+        acme_history.datoms[0].value,
+        Value::String("acme-open".into())
+    );
+
+    let status = client
+        .get(format!("{base_url}/v1/status"))
+        .header(AETHER_NAMESPACE_HEADER, "acme")
+        .bearer_auth("acme-token")
+        .send()
+        .await
+        .expect("status request")
+        .json::<ServiceStatusResponse>()
+        .await
+        .expect("status response");
+    assert_eq!(status.storage.backend, "sqlite");
+    assert_eq!(status.active_namespace_count, 2);
+    assert!(status
+        .namespaces
+        .iter()
+        .any(|namespace| namespace.namespace == "acme"
+            && namespace.principals == vec!["acme-operator".to_string()]));
+
+    let audit = client
+        .get(format!("{base_url}/v1/audit"))
+        .header(AETHER_NAMESPACE_HEADER, "acme")
+        .bearer_auth("acme-token")
+        .send()
+        .await
+        .expect("acme audit request")
+        .json::<AuditLogResponse>()
+        .await
+        .expect("audit response");
+    assert!(!audit.entries.is_empty());
+    assert!(audit
+        .entries
+        .iter()
+        .all(|entry| entry.context.namespace.as_deref() == Some("acme")));
+
+    stop_server(server).await;
+}
+
+#[tokio::test]
+async fn http_service_postgres_namespaces_cover_http_policy_status_and_sidecars_when_configured() {
+    let Some(database_url) = postgres_test_url() else {
+        return;
+    };
+    let temp = TestTempDir::new("postgres-http-namespace");
+    let tenant_a = unique_namespace_id("pg-http-a");
+    let tenant_b = unique_namespace_id("pg-http-b");
+    let options = HttpKernelOptions::new().with_auth(HttpAuthConfig {
+        tokens: vec![
+            HttpAccessToken {
+                token: "pg-a-operator".into(),
+                token_id: "token:pg-a-operator".into(),
+                principal: "pg-a-operator".into(),
+                principal_id: "principal:pg-a-operator".into(),
+                scopes: vec![AuthScope::Append, AuthScope::Query, AuthScope::Ops],
+                namespaces: vec![tenant_a.clone()],
+                policy_context: Some(PolicyContext {
+                    capabilities: vec!["executor".into()],
+                    visibilities: Vec::new(),
+                }),
+                source: "inline".into(),
+                revoked: false,
+            },
+            HttpAccessToken {
+                token: "pg-a-query".into(),
+                token_id: "token:pg-a-query".into(),
+                principal: "pg-a-query".into(),
+                principal_id: "principal:pg-a-query".into(),
+                scopes: vec![AuthScope::Query],
+                namespaces: vec![tenant_a.clone()],
+                policy_context: None,
+                source: "inline".into(),
+                revoked: false,
+            },
+            HttpAccessToken {
+                token: "pg-b-operator".into(),
+                token_id: "token:pg-b-operator".into(),
+                principal: "pg-b-operator".into(),
+                principal_id: "principal:pg-b-operator".into(),
+                scopes: vec![AuthScope::Append, AuthScope::Query, AuthScope::Ops],
+                namespaces: vec![tenant_b.clone()],
+                policy_context: Some(PolicyContext {
+                    capabilities: vec!["executor".into()],
+                    visibilities: Vec::new(),
+                }),
+                source: "inline".into(),
+                revoked: false,
+            },
+        ],
+    });
+    let (base_url, server) = spawn_postgres_namespace_server(
+        database_url,
+        "aether_http_test".into(),
+        temp.path().join("sidecars.sqlite"),
+        options,
+    )
+    .await;
+    let client = Client::new();
+    let protected_policy = Some(PolicyEnvelope {
+        capabilities: vec!["executor".into()],
+        visibilities: Vec::new(),
+    });
+
+    let tenant_a_append = client
+        .post(format!("{base_url}/v1/append"))
+        .header(AETHER_NAMESPACE_HEADER, tenant_a.as_str())
+        .bearer_auth("pg-a-operator")
+        .json(&AppendRequest {
+            datoms: vec![
+                policy_status_datom(1, "public-ready", 1, None),
+                policy_status_datom(2, "protected-ready", 2, protected_policy.clone()),
+            ],
+        })
+        .send()
+        .await
+        .expect("tenant a append");
+    assert!(tenant_a_append.status().is_success());
+
+    let tenant_b_append = client
+        .post(format!("{base_url}/v1/append"))
+        .header(AETHER_NAMESPACE_HEADER, tenant_b.as_str())
+        .bearer_auth("pg-b-operator")
+        .json(&AppendRequest {
+            datoms: vec![policy_status_datom(1, "tenant-b-ready", 1, None)],
+        })
+        .send()
+        .await
+        .expect("tenant b append");
+    assert!(tenant_b_append.status().is_success());
+
+    let tenant_a_operator_history = client
+        .get(format!("{base_url}/v1/history"))
+        .header(AETHER_NAMESPACE_HEADER, tenant_a.as_str())
+        .bearer_auth("pg-a-operator")
+        .send()
+        .await
+        .expect("tenant a operator history")
+        .json::<HistoryResponse>()
+        .await
+        .expect("tenant a operator history response");
+    assert_eq!(tenant_a_operator_history.datoms.len(), 2);
+
+    let tenant_a_public_history = client
+        .get(format!("{base_url}/v1/history"))
+        .header(AETHER_NAMESPACE_HEADER, tenant_a.as_str())
+        .bearer_auth("pg-a-query")
+        .send()
+        .await
+        .expect("tenant a query history")
+        .json::<HistoryResponse>()
+        .await
+        .expect("tenant a query history response");
+    assert_eq!(tenant_a_public_history.datoms.len(), 1);
+    assert_eq!(
+        tenant_a_public_history.datoms[0].value,
+        Value::String("public-ready".into())
+    );
+
+    let tenant_b_history = client
+        .get(format!("{base_url}/v1/history"))
+        .header(AETHER_NAMESPACE_HEADER, tenant_b.as_str())
+        .bearer_auth("pg-b-operator")
+        .send()
+        .await
+        .expect("tenant b history")
+        .json::<HistoryResponse>()
+        .await
+        .expect("tenant b history response");
+    assert_eq!(tenant_b_history.datoms.len(), 1);
+    assert_eq!(
+        tenant_b_history.datoms[0].value,
+        Value::String("tenant-b-ready".into())
+    );
+
+    let vector = client
+        .post(format!("{base_url}/v1/sidecars/vectors/register"))
+        .header(AETHER_NAMESPACE_HEADER, tenant_a.as_str())
+        .bearer_auth("pg-a-operator")
+        .json(&RegisterVectorRecordRequest {
+            record: aether_api::VectorRecordMetadata {
+                sidecar_id: "semantic-memory".into(),
+                vector_id: "tenant-a-protected".into(),
+                entity: EntityId::new(2),
+                source_artifact_id: None,
+                embedding_ref: "s3://aether/pg/tenant-a-protected.bin".into(),
+                dimensions: 3,
+                metric: VectorMetric::Cosine,
+                metadata: BTreeMap::new(),
+                provenance: DatomProvenance::default(),
+                policy: protected_policy,
+                registered_at: ElementId::new(2),
+            },
+            embedding: vec![1.0, 0.0, 0.0],
+        })
+        .send()
+        .await
+        .expect("tenant a vector register");
+    assert!(vector.status().is_success());
+
+    let tenant_a_operator_search = search_semantic_memory(
+        &client,
+        &base_url,
+        tenant_a.as_str(),
+        "pg-a-operator",
+        Some(ElementId::new(2)),
+    )
+    .await;
+    assert_eq!(tenant_a_operator_search.matches.len(), 1);
+    assert_eq!(tenant_a_operator_search.facts.len(), 1);
+    assert_eq!(
+        tenant_a_operator_search.matches[0].vector_id,
+        "tenant-a-protected"
+    );
+
+    let tenant_a_public_search = search_semantic_memory(
+        &client,
+        &base_url,
+        tenant_a.as_str(),
+        "pg-a-query",
+        Some(ElementId::new(2)),
+    )
+    .await;
+    assert!(tenant_a_public_search.matches.is_empty());
+    assert!(tenant_a_public_search.facts.is_empty());
+
+    let tenant_b_search = search_semantic_memory(
+        &client,
+        &base_url,
+        tenant_b.as_str(),
+        "pg-b-operator",
+        Some(ElementId::new(1)),
+    )
+    .await;
+    assert!(tenant_b_search.matches.is_empty());
+    assert!(tenant_b_search.facts.is_empty());
+
+    let status = client
+        .get(format!("{base_url}/v1/status"))
+        .header(AETHER_NAMESPACE_HEADER, tenant_a.as_str())
+        .bearer_auth("pg-a-operator")
+        .send()
+        .await
+        .expect("postgres status")
+        .json::<ServiceStatusResponse>()
+        .await
+        .expect("postgres status response");
+    assert_eq!(status.storage.backend, "postgres");
+    assert_eq!(
+        status.storage.postgres_schema.as_deref(),
+        Some("aether_http_test")
+    );
+    assert!(status.storage.postgres_url_configured);
+    assert_eq!(status.active_namespace_count, 2);
+    assert!(status
+        .namespaces
+        .iter()
+        .any(|namespace| namespace.namespace == tenant_a.to_string()
+            && namespace.principals
+                == vec!["pg-a-operator".to_string(), "pg-a-query".to_string()]));
+
+    stop_server(server).await;
+}
+
+#[tokio::test]
 async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
     let temp = TestTempDir::new("partitioned-http");
     let partitioned = replicated_partition_service(temp.path());
@@ -974,7 +1340,10 @@ async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
                 sidecar_path: None,
                 audit_log_path: None,
                 partition_root: Some(temp.path().to_path_buf()),
+                ..Default::default()
             },
+            active_namespace_count: 1,
+            namespaces: Vec::new(),
             principals: Vec::new(),
             replicas: Vec::new(),
         });
@@ -1017,6 +1386,11 @@ async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
         .expect("status response");
     assert_eq!(status.service_mode, ServiceMode::Partitioned);
     assert_eq!(status.replicas.len(), 4);
+    assert!(status
+        .replicas
+        .iter()
+        .filter(|replica| replica.partition == "authority")
+        .all(|replica| replica.leader_replica == 1));
 
     let partition_status = client
         .get(format!("{base_url}/v1/partitions/status"))
@@ -1034,6 +1408,10 @@ async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
         .partitions
         .iter()
         .all(|partition| partition.replicas.len() == 2));
+    assert!(partition_status.partitions.iter().all(|partition| {
+        partition.leader_replica == ReplicaId::new(1)
+            && partition.replicas.iter().all(|replica| replica.healthy)
+    }));
 
     let federated_request = FederatedRunDocumentRequest {
         dsl: federated_assignment_document(),
@@ -1168,6 +1546,7 @@ async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
         .find(|partition| partition.partition == PartitionId::new("authority"))
         .expect("authority partition");
     assert_eq!(authority.leader_epoch.0, 2);
+    assert_eq!(authority.leader_replica, ReplicaId::new(2));
     assert!(authority
         .replicas
         .iter()
@@ -2036,6 +2415,45 @@ async fn spawn_partitioned_server_with_options(
     (format!("http://{address}"), server)
 }
 
+async fn spawn_sqlite_namespace_server(
+    data_root: PathBuf,
+    options: HttpKernelOptions,
+) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind namespace test listener");
+    let address = listener.local_addr().expect("listener address");
+    let server = tokio::spawn(async move {
+        let router = http_router_with_sqlite_namespaces(data_root, options);
+        axum::serve(listener, router)
+            .await
+            .expect("serve namespace http kernel");
+    });
+
+    (format!("http://{address}"), server)
+}
+
+async fn spawn_postgres_namespace_server(
+    database_url: String,
+    schema: String,
+    sidecar_path: PathBuf,
+    options: HttpKernelOptions,
+) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind postgres namespace test listener");
+    let address = listener.local_addr().expect("listener address");
+    let server = tokio::spawn(async move {
+        let router =
+            http_router_with_postgres_namespaces(database_url, schema, sidecar_path, options);
+        axum::serve(listener, router)
+            .await
+            .expect("serve postgres namespace http kernel");
+    });
+
+    (format!("http://{address}"), server)
+}
+
 async fn stop_server(server: tokio::task::JoinHandle<()>) {
     server.abort();
     let _ = server.await;
@@ -2145,6 +2563,59 @@ fn pilot_auth() -> HttpAuthConfig {
             },
         )
         .with_token("pilot-query-token", "query-client", [AuthScope::Query])
+}
+
+async fn search_semantic_memory(
+    client: &Client,
+    base_url: &str,
+    namespace: &str,
+    token: &str,
+    as_of: Option<ElementId>,
+) -> SearchVectorsResponse {
+    let response = client
+        .post(format!("{base_url}/v1/sidecars/vectors/search"))
+        .header(AETHER_NAMESPACE_HEADER, namespace)
+        .bearer_auth(token)
+        .json(&SearchVectorsRequest {
+            sidecar_id: "semantic-memory".into(),
+            query_embedding: vec![1.0, 0.0, 0.0],
+            top_k: 1,
+            metric: VectorMetric::Cosine,
+            as_of,
+            projection: Some(VectorFactProjection {
+                predicate: PredicateRef {
+                    id: PredicateId::new(81),
+                    name: "semantic_neighbor".into(),
+                    arity: 3,
+                },
+                query_entity: EntityId::new(999),
+            }),
+            policy_context: None,
+        })
+        .send()
+        .await
+        .expect("semantic-memory search request");
+    assert!(response.status().is_success());
+    response
+        .json::<SearchVectorsResponse>()
+        .await
+        .expect("semantic-memory search response")
+}
+
+fn postgres_test_url() -> Option<String> {
+    std::env::var("AETHER_POSTGRES_TEST_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn unique_namespace_id(prefix: &str) -> NamespaceId {
+    let unique = NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time")
+        .as_nanos();
+    NamespaceId::new(format!("{prefix}-{nanos}-{unique}")).expect("valid generated namespace")
 }
 
 fn read_audit_entries(path: &Path) -> Vec<AuditEntry> {

@@ -133,6 +133,15 @@ Track 3 now also runs over the first durable partition-aware backend:
 - a SQLite-backed partition service can replay local truth after restart
 - imported-fact, federated explain, and federated report semantics survive that restart intact
 
+The first replicated authority-partition hardening slice is also in place:
+
+- leader-confirmed reads remain the only replicated read contract
+- restart-safe metadata reload preserves the current leader and epoch
+- manual promotion increments the leader epoch and fences stale appends
+- follower replay rejects divergent prefixes instead of repairing them silently
+- status surfaces name the leader replica and expose applied element, lag,
+  health, and degraded detail
+
 ### Expected crate touch points
 
 - `crates/aether_ast`

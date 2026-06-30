@@ -40,14 +40,33 @@ The config defines:
 - schema version
 - service mode
 - bind address
-- SQLite journal path
+- either the legacy SQLite `database_path` or the Service v2 tagged `storage` object
 - audit log path
 - one or more auth principals
 - explicit principal IDs and token IDs
 - optional config-backed revoked token or principal IDs
 - per-principal scopes
 - optional semantic policy context
+- optional allowed namespaces for each token; missing namespace bindings default to `default`
 - a secret source for each token
+
+Service v2 storage examples:
+
+```json
+{ "kind": "sqlite", "data_root": "../data" }
+```
+
+```json
+{
+  "kind": "postgres",
+  "database_url_env": "AETHER_DATABASE_URL",
+  "schema": "aether",
+  "sidecar_path": "../data/sidecars.sqlite"
+}
+```
+
+SQLite remains the package default. Postgres is journal-first only; sidecar
+catalogs remain local SQLite files in this slice.
 
 Each token must come from exactly one source:
 

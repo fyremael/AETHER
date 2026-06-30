@@ -41,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("AETHER pilot HTTP service");
     println!("  config: {}", config_path.display());
-    println!("  storage: {}", config.database_path.display());
+    println!("  storage: {}", config.storage.storage_label());
     println!("  sidecars: {}", config.sidecar_path().display());
     println!("  audit log: {}", config.audit_log_path.display());
     println!("  listening: http://{}", config.bind_addr);
