@@ -98,6 +98,11 @@ query current_cut {
             run_response["query"]["rows"][0]["values"],
             [{"Entity": 1}],
         )
+        named_query = client.run_named_query(document, query_name="current_cut")
+        self.assertEqual(
+            [row["values"] for row in named_query["rows"]],
+            [[{"Entity": 1}]],
+        )
 
         policy_document = """
 schema {

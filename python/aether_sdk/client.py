@@ -124,7 +124,7 @@ class AetherClient:
         response = self.run_document(dsl, policy_context=policy_context)
         for query in response.get("queries", []):
             if query.get("name") == query_name:
-                return query
+                return query.get("result", query)
         raise AetherApiError(
             404,
             f"named query not found: {query_name}",
