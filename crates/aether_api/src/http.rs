@@ -7,7 +7,7 @@ use crate::{
     PartitionStateRequest, PartitionStatusResponse, PostgresKernelService, PromoteReplicaRequest,
     RegisterArtifactReferenceRequest, RegisterVectorRecordRequest,
     ReplicatedAuthorityPartitionService, RunDocumentRequest, SearchVectorsRequest, ServiceMode,
-    ServiceStatusResponse, SqliteKernelService,
+    ServiceStatusResponse, ServiceStatusStorage, SqliteKernelService,
 };
 use aether_ast::PolicyContext;
 use axum::{
@@ -92,15 +92,21 @@ impl HttpKernelState {
         partitioned: Option<ReplicatedAuthorityPartitionService>,
         options: HttpKernelOptions,
     ) -> Self {
+        let HttpKernelOptions {
+            auth,
+            audit_log_path,
+            service_status,
+            auth_reload_config_path,
+        } = options;
+        let status =
+            service_status.unwrap_or_else(|| services.default_status(audit_log_path.clone()));
         Self {
             services: Arc::new(Mutex::new(services)),
             partitioned: partitioned.map(|service| Arc::new(Mutex::new(service))),
-            auth: Arc::new(Mutex::new(HttpAuth::from_config(options.auth))),
-            audit: AuditLog::new(options.audit_log_path),
-            status: Arc::new(Mutex::new(options.service_status.unwrap_or_else(|| {
-                ServiceStatusResponse::single_node(env!("CARGO_PKG_VERSION"), "pilot-v1", "v1")
-            }))),
-            auth_reload_config_path: options.auth_reload_config_path,
+            auth: Arc::new(Mutex::new(HttpAuth::from_config(auth))),
+            audit: AuditLog::new(audit_log_path),
+            status: Arc::new(Mutex::new(status)),
+            auth_reload_config_path,
         }
     }
 
@@ -202,11 +208,14 @@ impl HttpKernelState {
         operation: F,
     ) -> Result<T, HttpError>
     where
+        T: Send + 'static,
         F: FnOnce(
-            &mut dyn KernelService,
-            &AuthenticatedPrincipal,
-            &mut AuditContext,
-        ) -> Result<T, HttpError>,
+                &mut dyn KernelService,
+                &AuthenticatedPrincipal,
+                &mut AuditContext,
+            ) -> Result<T, HttpError>
+            + Send
+            + 'static,
     {
         let namespace = namespace_from_headers(headers)?;
         context.namespace = Some(namespace.to_string());
@@ -228,11 +237,37 @@ impl HttpKernelState {
             }
         };
 
-        let result = {
-            let mut services = self.services.lock().map_err(|_| HttpError::LockPoisoned)?;
-            services.execute(&namespace, |service| {
-                operation(service, &principal, &mut context)
+        let use_blocking_thread = self
+            .services
+            .lock()
+            .map_err(|_| HttpError::LockPoisoned)?
+            .requires_blocking_thread();
+        let principal_for_operation = principal.clone();
+        let (result, context) = if use_blocking_thread {
+            let services = Arc::clone(&self.services);
+            let namespace_for_operation = namespace.clone();
+            std::thread::spawn(move || {
+                let mut context = context;
+                let result = match services.lock() {
+                    Ok(mut services) => services.execute(&namespace_for_operation, |service| {
+                        operation(service, &principal_for_operation, &mut context)
+                    }),
+                    Err(_) => Err(HttpError::LockPoisoned),
+                };
+                (result, context)
             })
+            .join()
+            .map_err(|_| {
+                HttpError::Api(ApiError::Validation(
+                    "namespace service worker panicked".into(),
+                ))
+            })?
+        } else {
+            let mut services = self.services.lock().map_err(|_| HttpError::LockPoisoned)?;
+            let result = services.execute(&namespace, |service| {
+                operation(service, &principal_for_operation, &mut context)
+            });
+            (result, context)
         };
 
         let status = match &result {
@@ -860,6 +895,48 @@ impl NamespaceServiceStore {
         namespaces
     }
 
+    fn requires_blocking_thread(&self) -> bool {
+        matches!(self.mode, NamespaceServiceMode::Postgres { .. })
+    }
+
+    fn default_status(&self, audit_log_path: Option<PathBuf>) -> ServiceStatusResponse {
+        let mut status =
+            ServiceStatusResponse::single_node(env!("CARGO_PKG_VERSION"), "pilot-v1", "v1");
+        status.storage = match &self.mode {
+            NamespaceServiceMode::Static => ServiceStatusStorage {
+                audit_log_path,
+                ..ServiceStatusStorage::default()
+            },
+            NamespaceServiceMode::Sqlite { data_root } => ServiceStatusStorage {
+                backend: "sqlite".into(),
+                database_path: None,
+                data_root: Some(data_root.clone()),
+                postgres_schema: None,
+                postgres_url_configured: false,
+                sidecar_mode: "sqlite_local_per_namespace".into(),
+                sidecar_path: None,
+                audit_log_path,
+                partition_root: None,
+            },
+            NamespaceServiceMode::Postgres {
+                schema,
+                sidecar_path,
+                ..
+            } => ServiceStatusStorage {
+                backend: "postgres".into(),
+                database_path: None,
+                data_root: None,
+                postgres_schema: Some(schema.clone()),
+                postgres_url_configured: true,
+                sidecar_mode: "sqlite_local".into(),
+                sidecar_path: Some(sidecar_path.clone()),
+                audit_log_path,
+                partition_root: None,
+            },
+        };
+        status
+    }
+
     fn open_namespace_service(
         &self,
         namespace: &NamespaceId,
@@ -1410,7 +1487,7 @@ async fn history(
         "/v1/history",
         AuthScope::Ops,
         request_context.clone(),
-        |service, principal, context| {
+        move |service, principal, context| {
             let policy_context = apply_policy_binding(principal, None, context)?;
             let response = service
                 .history(HistoryRequest { policy_context })
@@ -1485,7 +1562,7 @@ async fn append(
         "/v1/append",
         AuthScope::Append,
         request_context.clone(),
-        |service, _principal, _context| {
+        move |service, _principal, _context| {
             let response = service.append(request).map_err(HttpError::Api)?;
             Ok(response)
         },
@@ -1509,7 +1586,7 @@ async fn current_state(
         "/v1/state/current",
         AuthScope::Query,
         request_context.clone(),
-        |service, principal, context| {
+        move |service, principal, context| {
             let mut request = request;
             request.policy_context =
                 apply_policy_binding(principal, request.policy_context, context)?;
@@ -1539,7 +1616,7 @@ async fn as_of(
         "/v1/state/as-of",
         AuthScope::Query,
         request_context.clone(),
-        |service, principal, context| {
+        move |service, principal, context| {
             let mut request = request;
             request.policy_context =
                 apply_policy_binding(principal, request.policy_context, context)?;
@@ -1564,7 +1641,7 @@ async fn parse_document(
         "/v1/documents/parse",
         AuthScope::Query,
         request_context.clone(),
-        |service, _principal, _context| {
+        move |service, _principal, _context| {
             let response = service.parse_document(request).map_err(HttpError::Api)?;
             Ok(response)
         },
@@ -1584,7 +1661,7 @@ async fn run_document(
         "/v1/documents/run",
         AuthScope::Query,
         request_context.clone(),
-        |service, principal, context| {
+        move |service, principal, context| {
             let mut request = request;
             request.policy_context =
                 apply_policy_binding(principal, request.policy_context, context)?;
@@ -1614,7 +1691,7 @@ async fn coordination_pilot_report(
         "/v1/reports/pilot/coordination",
         AuthScope::Query,
         request_context.clone(),
-        |service, principal, context| {
+        move |service, principal, context| {
             let mut request = request;
             request.policy_context =
                 apply_policy_binding(principal, request.policy_context, context)?;
@@ -1654,7 +1731,7 @@ async fn coordination_delta_report(
         "/v1/reports/pilot/coordination-delta",
         AuthScope::Query,
         request_context,
-        |service, principal, context| {
+        move |service, principal, context| {
             let mut request = request;
             request.policy_context =
                 apply_policy_binding(principal, request.policy_context, context)?;
@@ -1698,7 +1775,7 @@ async fn partition_status(
             temporal_view: Some("partition_status".into()),
             ..Default::default()
         },
-        |service, _principal, context| {
+        move |service, _principal, context| {
             let response = service.partition_status().map_err(HttpError::Api)?;
             context.entity_count = Some(response.partitions.len());
             context.row_count = Some(
@@ -1729,7 +1806,7 @@ async fn promote_replica(
         "/v1/partitions/promote",
         AuthScope::Ops,
         request_context,
-        |service, _principal, context| {
+        move |service, _principal, context| {
             let response = service.promote_replica(request).map_err(HttpError::Api)?;
             context.requested_element = Some(response.leader_epoch.0);
             Ok(response)
@@ -1755,7 +1832,7 @@ async fn partition_append(
         "/v1/partitions/append",
         AuthScope::Append,
         request_context,
-        |service, _principal, context| {
+        move |service, _principal, context| {
             let response = service.append_partition(request).map_err(HttpError::Api)?;
             context.requested_element = response.leader_epoch.as_ref().map(|epoch| epoch.0);
             Ok(response)
@@ -1780,7 +1857,7 @@ async fn partition_history(
         "/v1/partitions/history",
         AuthScope::Query,
         request_context,
-        |service, principal, context| {
+        move |service, principal, context| {
             let mut request = request;
             request.policy_context =
                 apply_policy_binding(principal, request.policy_context, context)?;
@@ -1817,7 +1894,7 @@ async fn partition_state(
         "/v1/partitions/state",
         AuthScope::Query,
         request_context,
-        |service, principal, context| {
+        move |service, principal, context| {
             let mut request = request;
             request.policy_context =
                 apply_policy_binding(principal, request.policy_context, context)?;
@@ -1845,7 +1922,7 @@ async fn federated_history(
         "/v1/federated/history",
         AuthScope::Query,
         request_context,
-        |service, principal, context| {
+        move |service, principal, context| {
             let mut request = request;
             request.policy_context =
                 apply_policy_binding(principal, request.policy_context, context)?;
@@ -1879,7 +1956,7 @@ async fn federated_run_document(
         "/v1/federated/run",
         AuthScope::Query,
         request_context,
-        |service, principal, context| {
+        move |service, principal, context| {
             let mut request = request;
             request.policy_context =
                 apply_policy_binding(principal, request.policy_context, context)?;
@@ -1917,7 +1994,7 @@ async fn federated_report(
         "/v1/federated/report",
         AuthScope::Explain,
         request_context,
-        |service, principal, context| {
+        move |service, principal, context| {
             let mut request = request;
             request.policy_context =
                 apply_policy_binding(principal, request.policy_context, context)?;
@@ -1957,7 +2034,7 @@ async fn explain_tuple(
         "/v1/explain/tuple",
         AuthScope::Explain,
         request_context.clone(),
-        |service, principal, context| {
+        move |service, principal, context| {
             let mut request = request;
             request.policy_context =
                 apply_policy_binding(principal, request.policy_context, context)?;
@@ -1985,7 +2062,7 @@ async fn register_artifact_reference(
         "/v1/sidecars/artifacts/register",
         AuthScope::Append,
         request_context.clone(),
-        |service, _principal, _context| {
+        move |service, _principal, _context| {
             let response = service
                 .register_artifact_reference(request)
                 .map_err(HttpError::Api)?;
@@ -2010,7 +2087,7 @@ async fn get_artifact_reference(
         "/v1/sidecars/artifacts/get",
         AuthScope::Query,
         request_context.clone(),
-        |service, principal, context| {
+        move |service, principal, context| {
             let mut request = request;
             request.policy_context =
                 apply_policy_binding(principal, request.policy_context, context)?;
@@ -2039,7 +2116,7 @@ async fn register_vector_record(
         "/v1/sidecars/vectors/register",
         AuthScope::Append,
         request_context.clone(),
-        |service, _principal, _context| {
+        move |service, _principal, _context| {
             let response = service
                 .register_vector_record(request)
                 .map_err(HttpError::Api)?;
@@ -2065,7 +2142,7 @@ async fn search_vectors(
         "/v1/sidecars/vectors/search",
         AuthScope::Query,
         request_context.clone(),
-        |service, principal, context| {
+        move |service, principal, context| {
             let mut request = request;
             request.policy_context =
                 apply_policy_binding(principal, request.policy_context, context)?;

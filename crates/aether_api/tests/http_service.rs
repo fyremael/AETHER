@@ -1127,7 +1127,7 @@ async fn http_service_postgres_namespaces_cover_http_policy_status_and_sidecars_
                 token_id: "token:pg-a-query".into(),
                 principal: "pg-a-query".into(),
                 principal_id: "principal:pg-a-query".into(),
-                scopes: vec![AuthScope::Query],
+                scopes: vec![AuthScope::Query, AuthScope::Ops],
                 namespaces: vec![tenant_a.clone()],
                 policy_context: None,
                 source: "inline".into(),

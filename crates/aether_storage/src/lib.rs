@@ -76,6 +76,8 @@ pub struct PostgresJournal {
     namespace: String,
 }
 
+const POSTGRES_SCHEMA_INIT_LOCK: i64 = 0x4145_5448_4552;
+
 impl std::fmt::Debug for PostgresJournal {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -218,7 +220,7 @@ impl Journal for PostgresJournal {
             let encoded = serde_json::to_string(datom)?;
             let inserted = transaction.execute(
                 &format!(
-                    "INSERT INTO {journal_table} (namespace, element, datom_json) VALUES ($1, $2, $3::jsonb)"
+                    "INSERT INTO {journal_table} (namespace, element, datom_json) VALUES ($1, $2, $3::text::jsonb)"
                 ),
                 &[&self.namespace, &element_key(&datom.element), &encoded],
             );
@@ -287,7 +289,12 @@ fn initialize_postgres_schema(client: &mut Client, schema: &str) -> Result<(), J
     let schema = quote_pg_identifier(schema);
     let journal_table = format!("{schema}.{}", quote_pg_identifier("journal_entries"));
     let lock_table = format!("{schema}.{}", quote_pg_identifier("namespace_locks"));
-    client.batch_execute(&format!(
+    let mut transaction = client.transaction()?;
+    transaction.execute(
+        "SELECT pg_advisory_xact_lock($1)",
+        &[&POSTGRES_SCHEMA_INIT_LOCK],
+    )?;
+    transaction.batch_execute(&format!(
         "
         CREATE SCHEMA IF NOT EXISTS {schema};
         CREATE TABLE IF NOT EXISTS {journal_table} (
@@ -304,6 +311,7 @@ fn initialize_postgres_schema(client: &mut Client, schema: &str) -> Result<(), J
         );
         "
     ))?;
+    transaction.commit()?;
     Ok(())
 }
 
