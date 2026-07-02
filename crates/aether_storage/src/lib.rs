@@ -643,12 +643,11 @@ mod tests {
         let barrier = Arc::new(Barrier::new(4));
         let mut handles = Vec::new();
         for offset in 0..4 {
-            let database_url = database_url.clone();
-            let namespace = namespace.clone();
+            let mut journal =
+                PostgresJournal::open(&database_url, "aether_test", namespace.clone())
+                    .expect("open postgres journal");
             let barrier = Arc::clone(&barrier);
             handles.push(thread::spawn(move || {
-                let mut journal = PostgresJournal::open(&database_url, "aether_test", namespace)
-                    .expect("open postgres journal");
                 barrier.wait();
                 journal
                     .append(&[sample_datom(100 + offset, &format!("value-{offset}"))])
