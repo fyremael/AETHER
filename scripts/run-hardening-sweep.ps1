@@ -23,6 +23,15 @@ $transcript = [System.Collections.Generic.List[string]]::new()
 $normalizedPacks = $Packs | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ }
 $script:hasFailures = $false
 
+function Test-WindowsHost {
+    if (Get-Variable -Name IsWindows -ErrorAction SilentlyContinue) {
+        return [bool]$IsWindows
+    }
+    return [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+        [System.Runtime.InteropServices.OSPlatform]::Windows
+    )
+}
+
 function Close-Runner([int]$ExitCode) {
     if ($PauseOnExit) {
         Write-Host ""
@@ -87,7 +96,10 @@ function Invoke-CapturedCommand {
         [switch]$AllowFailure
     )
 
-    $outputPath = New-ArtifactPath $PackName ($Label -replace '[^A-Za-z0-9\-_]+', '-')
+    $safeLabel = $Label -replace '[^A-Za-z0-9\-_]+', '-'
+    $outputPath = New-ArtifactPath $PackName $safeLabel
+    $stdoutPath = New-ArtifactPath $PackName "$safeLabel.stdout"
+    $stderrPath = New-ArtifactPath $PackName "$safeLabel.stderr"
     $commandText = Format-CommandText $Command $Arguments $WorkingDirectory
     Add-TranscriptLine("## $Label")
     Add-TranscriptLine("")
@@ -101,11 +113,29 @@ function Invoke-CapturedCommand {
 
     Push-Location $WorkingDirectory
     try {
-        & $Command @Arguments *>&1 | Tee-Object -FilePath $outputPath | Out-Host
-        $exitCode = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }
+        $process = Start-Process `
+            -FilePath $Command `
+            -ArgumentList $Arguments `
+            -WorkingDirectory $WorkingDirectory `
+            -NoNewWindow `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath
+        $exitCode = $process.ExitCode
     } finally {
         Pop-Location
     }
+
+    $outputLines = [System.Collections.Generic.List[string]]::new()
+    foreach ($path in @($stdoutPath, $stderrPath)) {
+        if (Test-Path $path) {
+            foreach ($line in Get-Content -Path $path) {
+                $outputLines.Add($line)
+            }
+        }
+    }
+    Set-Content -Path $outputPath -Value $outputLines
 
     $outputText = if (Test-Path $outputPath) {
         Get-Content -Path $outputPath -Raw
@@ -114,6 +144,7 @@ function Invoke-CapturedCommand {
     }
     foreach ($line in ($outputText -split "`r?`n")) {
         if ($line -ne "") {
+            Write-Host $line
             Add-TranscriptLine($line)
         }
     }
@@ -149,7 +180,12 @@ function Invoke-JsonRequest {
         Uri = $Url
         Method = $Method
         Headers = $headers
-        SkipHttpErrorCheck = $true
+    }
+    if ((Get-Command Invoke-WebRequest).Parameters.ContainsKey("SkipHttpErrorCheck")) {
+        $params["SkipHttpErrorCheck"] = $true
+    }
+    if ((Get-Command Invoke-WebRequest).Parameters.ContainsKey("UseBasicParsing")) {
+        $params["UseBasicParsing"] = $true
     }
 
     if ($null -ne $Body) {
@@ -157,19 +193,45 @@ function Invoke-JsonRequest {
         $params["ContentType"] = "application/json"
     }
 
-    $response = Invoke-WebRequest @params
+    $statusCode = $null
+    $content = ""
+    try {
+        $response = Invoke-WebRequest @params
+        $statusCode = [int]$response.StatusCode
+        $content = [string]$response.Content
+    } catch {
+        $webResponse = $_.Exception.Response
+        if ($null -eq $webResponse) {
+            throw
+        }
+        $statusCode = [int]$webResponse.StatusCode
+        $stream = $webResponse.GetResponseStream()
+        if ($null -ne $stream) {
+            $reader = [System.IO.StreamReader]::new($stream)
+            try {
+                $content = $reader.ReadToEnd()
+            } finally {
+                $reader.Dispose()
+            }
+        }
+    }
+
     $parsed = $null
-    if ($response.Content) {
+    if ($content) {
         try {
-            $parsed = $response.Content | ConvertFrom-Json -Depth 32
+            if ((Get-Command ConvertFrom-Json).Parameters.ContainsKey("Depth")) {
+                $parsed = $content | ConvertFrom-Json -Depth 32
+            } else {
+                $parsed = $content | ConvertFrom-Json
+            }
         } catch {
-            $parsed = $response.Content
+            $parsed = $content
         }
     }
 
     [pscustomobject]@{
-        StatusCode = [int]$response.StatusCode
-        RawBody = [string]$response.Content
+        StatusCode = $statusCode
+        RawBody = $content
         Body = $parsed
     }
 }
@@ -244,6 +306,20 @@ function Stop-ServiceProcess($ServiceHandle) {
 function Assert-Contains([string]$Text, [string]$Expected, [string]$Context) {
     if ($Text -notmatch [regex]::Escape($Expected)) {
         throw "$Context did not contain expected text: $Expected"
+    }
+}
+
+function Set-JsonProperty {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name,
+        $Value
+    )
+
+    if ($Object.PSObject.Properties[$Name]) {
+        $Object.$Name = $Value
+    } else {
+        Add-Member -InputObject $Object -MemberType NoteProperty -Name $Name -Value $Value -Force
     }
 }
 
@@ -378,7 +454,7 @@ function New-TestDatom([uint64]$Element, [string]$Value) {
 }
 
 function Invoke-AdminPack {
-    if (-not $IsWindows) {
+    if (-not (Test-WindowsHost)) {
         Add-SkippedResult `
             -Persona "admin" `
             -Surface "admin" `
@@ -560,27 +636,27 @@ function Invoke-AdminPack {
             $badConfigDir = Join-Path $runDir "admin\bad-configs"
             New-Item -ItemType Directory -Force -Path $badConfigDir | Out-Null
 
-            $missingSource = Get-Content -Path $packageConfigPath -Raw | ConvertFrom-Json -AsHashtable -Depth 16
-            $missingSource.auth.tokens[0].token = $null
-            $missingSource.auth.tokens[0].token_env = $null
-            $missingSource.auth.tokens[0].token_file = $null
-            $missingSource.auth.tokens[0].token_command = $null
+            $missingSource = Get-Content -Path $packageConfigPath -Raw | ConvertFrom-Json
+            Set-JsonProperty $missingSource.auth.tokens[0] "token" $null
+            Set-JsonProperty $missingSource.auth.tokens[0] "token_env" $null
+            Set-JsonProperty $missingSource.auth.tokens[0] "token_file" $null
+            Set-JsonProperty $missingSource.auth.tokens[0] "token_command" $null
             $missingSourcePath = Join-Path $badConfigDir "missing-token-source.json"
             $missingSource | ConvertTo-Json -Depth 16 | Set-Content -Path $missingSourcePath
 
-            $stalePath = Get-Content -Path $packageConfigPath -Raw | ConvertFrom-Json -AsHashtable -Depth 16
-            $stalePath.auth.tokens[0].token = $null
-            $stalePath.auth.tokens[0].token_env = $null
-            $stalePath.auth.tokens[0].token_file = "missing.token"
-            $stalePath.auth.tokens[0].token_command = $null
+            $stalePath = Get-Content -Path $packageConfigPath -Raw | ConvertFrom-Json
+            Set-JsonProperty $stalePath.auth.tokens[0] "token" $null
+            Set-JsonProperty $stalePath.auth.tokens[0] "token_env" $null
+            Set-JsonProperty $stalePath.auth.tokens[0] "token_file" "missing.token"
+            Set-JsonProperty $stalePath.auth.tokens[0] "token_command" $null
             $stalePathConfig = Join-Path $badConfigDir "stale-token-path.json"
             $stalePath | ConvertTo-Json -Depth 16 | Set-Content -Path $stalePathConfig
 
-            $badCommand = Get-Content -Path $packageConfigPath -Raw | ConvertFrom-Json -AsHashtable -Depth 16
-            $badCommand.auth.tokens[0].token = $null
-            $badCommand.auth.tokens[0].token_env = $null
-            $badCommand.auth.tokens[0].token_file = $null
-            $badCommand.auth.tokens[0].token_command = @($pwshPath, "-NoProfile", "-Command", "Write-Error 'hardening token failure'; exit 9")
+            $badCommand = Get-Content -Path $packageConfigPath -Raw | ConvertFrom-Json
+            Set-JsonProperty $badCommand.auth.tokens[0] "token" $null
+            Set-JsonProperty $badCommand.auth.tokens[0] "token_env" $null
+            Set-JsonProperty $badCommand.auth.tokens[0] "token_file" $null
+            Set-JsonProperty $badCommand.auth.tokens[0] "token_command" @($pwshPath, "-NoProfile", "-Command", "Write-Error 'hardening token failure'; exit 9")
             $badCommandPath = Join-Path $badConfigDir "bad-token-command.json"
             $badCommand | ConvertTo-Json -Depth 16 | Set-Content -Path $badCommandPath
 
@@ -630,7 +706,7 @@ function Invoke-AdminPack {
 }
 
 function Invoke-OperatorPack {
-    if (-not $IsWindows) {
+    if (-not (Test-WindowsHost)) {
         Add-SkippedResult `
             -Persona "operator" `
             -Surface "operator" `
