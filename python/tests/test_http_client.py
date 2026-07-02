@@ -67,7 +67,7 @@ class AetherHttpClientIntegrationTest(unittest.TestCase):
         self.assertEqual(client.health()["status"], "ok")
 
         document = """
-schema {
+schema v1 {
 }
 
 predicates {

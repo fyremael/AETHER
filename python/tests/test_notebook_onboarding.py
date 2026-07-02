@@ -46,6 +46,60 @@ class NotebookOnboardingTest(unittest.TestCase):
                 with self.subTest(notebook=notebook_path.name, cell=index):
                     ast.parse(source)
 
+    def test_tutorial_documents_use_explicit_schema_version(self) -> None:
+        for notebook_path in sorted(NOTEBOOK_ROOT.glob("*.ipynb")):
+            data = json.loads(notebook_path.read_text(encoding="utf-8"))
+            for index, cell in enumerate(data.get("cells", [])):
+                if cell.get("cell_type") != "code":
+                    continue
+                source = "".join(cell.get("source", []))
+                if '"""' not in source or "schema" not in source:
+                    continue
+                with self.subTest(notebook=notebook_path.name, cell=index):
+                    self.assertNotIn("schema {\n", source)
+                    self.assertTrue("rules {\n" in source or "rules {{" in source)
+
+    def test_pretty_json_calls_are_labeled(self) -> None:
+        for notebook_path in sorted(NOTEBOOK_ROOT.glob("*.ipynb")):
+            data = json.loads(notebook_path.read_text(encoding="utf-8"))
+            for index, cell in enumerate(data.get("cells", [])):
+                if cell.get("cell_type") != "code":
+                    continue
+                source = "".join(cell.get("source", []))
+                if "pretty_json(" not in source:
+                    continue
+                with self.subTest(notebook=notebook_path.name, cell=index):
+                    self.assertIn("title=", source)
+
+    def test_pretty_json_describes_core_response_shapes(self) -> None:
+        module = _load_colab_setup_module()
+
+        status_lines = module.describe_value(
+            {
+                "status": "ok",
+                "service_mode": "single_node",
+                "config_version": "pilot-v2-colab",
+                "schema_version": "v1",
+                "effective_namespace": "notebook",
+                "storage": {"backend": "sqlite", "data_root": "/tmp/aether"},
+                "principals": [
+                    {
+                        "principal": "notebook-operator",
+                        "token_id": "token:notebook-operator",
+                        "scopes": ["append", "query"],
+                    }
+                ],
+                "active_namespace_count": 1,
+                "namespaces": ["notebook"],
+            }
+        )
+        self.assertTrue(any("Service status" in line for line in status_lines))
+
+        query_lines = module.describe_value(
+            {"rows": [{"values": [{"Entity": 1}], "tuple_id": 7}]}
+        )
+        self.assertTrue(any("Query result: 1 row" in line for line in query_lines))
+
     def test_notebook_readme_links_point_at_tracked_series(self) -> None:
         readme = (NOTEBOOK_ROOT / "README.md").read_text(encoding="utf-8")
         for notebook_name in (

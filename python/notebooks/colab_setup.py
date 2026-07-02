@@ -245,8 +245,264 @@ def _stop_process(service: NotebookService) -> None:
         service.process.wait(timeout=10.0)
 
 
-def pretty_json(value: Any) -> None:
-    print(json.dumps(value, indent=2, sort_keys=True))
+def pretty_json(value: Any, title: str | None = None) -> None:
+    """Print a notebook-friendly summary followed by raw JSON."""
+
+    if title:
+        print(f"\n=== {title} ===")
+    for line in describe_value(value):
+        print(line)
+    print("Raw JSON:")
+    print(json.dumps(value, indent=2, sort_keys=True, default=str))
+
+
+def describe_value(value: Any) -> list[str]:
+    if isinstance(value, dict):
+        if _looks_like_health(value):
+            return [f"Health check: status={value.get('status', '<missing>')}."]
+        if _looks_like_service_status(value):
+            return _describe_service_status(value)
+        if "datoms" in value and isinstance(value["datoms"], list):
+            return _describe_history(value)
+        if "rows" in value and isinstance(value["rows"], list):
+            return _describe_query_result(value)
+        if "query" in value or "queries" in value:
+            return _describe_document_run(value)
+        if "trace" in value and isinstance(value["trace"], dict):
+            return _describe_trace(value["trace"])
+        if _looks_like_coordination_report(value):
+            return _describe_coordination_report(value)
+        if _looks_like_coordination_delta(value):
+            return _describe_coordination_delta(value)
+        if "entries" in value and isinstance(value["entries"], list):
+            return _describe_audit(value)
+        if "matches" in value and "facts" in value:
+            return _describe_vector_search(value)
+        if "reference" in value and isinstance(value["reference"], dict):
+            return _describe_artifact_reference(value["reference"])
+        return [f"Object with {len(value)} top-level fields: {', '.join(sorted(value.keys()))}."]
+    if isinstance(value, list):
+        return _describe_list(value)
+    return [f"Value: {value!r}."]
+
+
+def _looks_like_health(value: dict[str, Any]) -> bool:
+    return set(value.keys()) == {"status"} or (
+        "status" in value and len(value) == 1
+    )
+
+
+def _looks_like_service_status(value: dict[str, Any]) -> bool:
+    return (
+        "service_mode" in value
+        and "storage" in value
+        and "principals" in value
+    )
+
+
+def _describe_service_status(value: dict[str, Any]) -> list[str]:
+    storage = value.get("storage") or {}
+    principals = value.get("principals") or []
+    principal_bits = []
+    for principal in principals[:3]:
+        principal_bits.append(
+            f"{principal.get('principal', '<unknown>')} "
+            f"token={principal.get('token_id', '<none>')} "
+            f"scopes={principal.get('scopes', [])}"
+        )
+    if len(principals) > 3:
+        principal_bits.append(f"... {len(principals) - 3} more principal(s)")
+    return [
+        "Service status: authenticated pilot boundary is reachable.",
+        f"Mode={value.get('service_mode')} namespace={value.get('effective_namespace')} "
+        f"config={value.get('config_version')} schema={value.get('schema_version')}.",
+        f"Storage backend={storage.get('backend')} data_root={storage.get('data_root')} "
+        f"audit={storage.get('audit_log_path')}.",
+        f"Active namespaces={value.get('active_namespace_count')} "
+        f"known={value.get('namespaces', [])}.",
+        f"Principals: {'; '.join(principal_bits) if principal_bits else 'none reported'}.",
+    ]
+
+
+def _describe_history(value: dict[str, Any]) -> list[str]:
+    datoms = value["datoms"]
+    op_counts: dict[str, int] = {}
+    latest = None
+    for datom in datoms:
+        op = str(datom.get("op", "<missing>"))
+        op_counts[op] = op_counts.get(op, 0) + 1
+        element = datom.get("element")
+        if isinstance(element, int):
+            latest = max(latest or element, element)
+    return [
+        f"Journal history: {len(datoms)} datom(s), latest element={latest}.",
+        f"Operation mix: {_format_counts(op_counts)}.",
+    ]
+
+
+def _describe_query_result(value: dict[str, Any]) -> list[str]:
+    rows = value["rows"]
+    lines = [f"Query result: {len(rows)} row(s)."]
+    tuple_ids = [row.get("tuple_id") for row in rows if isinstance(row, dict)]
+    tuple_ids = [tuple_id for tuple_id in tuple_ids if tuple_id is not None]
+    if tuple_ids:
+        lines.append(f"Tuple ids: {_preview(tuple_ids)}.")
+    values = [row.get("values") for row in rows if isinstance(row, dict)]
+    if values:
+        lines.append(f"Row values preview: {_preview(values)}.")
+    return lines
+
+
+def _describe_document_run(value: dict[str, Any]) -> list[str]:
+    lines = ["Document run: parsed, planned, evaluated, and returned by the service."]
+    if isinstance(value.get("derived"), list):
+        lines.append(f"Derived tuples materialized: {len(value['derived'])}.")
+    query = value.get("query")
+    if isinstance(query, dict) and isinstance(query.get("rows"), list):
+        lines.append(f"Default query rows: {len(query['rows'])}.")
+    queries = value.get("queries")
+    if isinstance(queries, list):
+        lines.append(f"Named queries returned: {len(queries)}.")
+        for query_entry in queries[:5]:
+            if not isinstance(query_entry, dict):
+                continue
+            result = query_entry.get("result") or {}
+            rows = result.get("rows") if isinstance(result, dict) else None
+            row_count = len(rows) if isinstance(rows, list) else "unknown"
+            lines.append(f"- {query_entry.get('name', '<unnamed>')}: {row_count} row(s).")
+    return lines
+
+
+def _describe_trace(trace: dict[str, Any]) -> list[str]:
+    tuples = trace.get("tuples") or []
+    source_ids: set[Any] = set()
+    for item in tuples:
+        metadata = item.get("metadata", {}) if isinstance(item, dict) else {}
+        for source_id in metadata.get("source_datom_ids", []) or []:
+            source_ids.add(source_id)
+    return [
+        f"Explanation trace: root tuple={trace.get('root')} with {len(tuples)} tuple(s).",
+        f"Source datoms referenced: {_preview(sorted(source_ids)) if source_ids else 'none reported'}.",
+    ]
+
+
+def _looks_like_coordination_report(value: dict[str, Any]) -> bool:
+    return "history_len" in value and "current_authorized" in value and "claimable" in value
+
+
+def _describe_coordination_report(value: dict[str, Any]) -> list[str]:
+    sections = [
+        "pre_heartbeat_authorized",
+        "as_of_authorized",
+        "live_heartbeats",
+        "current_authorized",
+        "claimable",
+        "accepted_outcomes",
+        "rejected_outcomes",
+    ]
+    counts = {
+        section: len(value.get(section, []))
+        for section in sections
+    }
+    return [
+        f"Coordination report: history={value.get('history_len')} datom(s).",
+        f"Section counts: {_format_counts(counts)}.",
+        "Trace summary is included when at least one visible report row can be explained.",
+    ]
+
+
+def _looks_like_coordination_delta(value: dict[str, Any]) -> bool:
+    return "left_history_len" in value and "right_history_len" in value
+
+
+def _describe_coordination_delta(value: dict[str, Any]) -> list[str]:
+    sections = [
+        "current_authorized",
+        "claimable",
+        "live_heartbeats",
+        "accepted_outcomes",
+        "rejected_outcomes",
+    ]
+    lines = [
+        "Coordination delta: compares two explicit semantic cuts.",
+        f"History lengths: left={value.get('left_history_len')} right={value.get('right_history_len')}.",
+    ]
+    for section in sections:
+        delta = value.get(section) or {}
+        if not isinstance(delta, dict):
+            continue
+        lines.append(
+            f"- {section}: added={len(delta.get('added', []))} "
+            f"removed={len(delta.get('removed', []))} "
+            f"changed={len(delta.get('changed', []))}."
+        )
+    return lines
+
+
+def _describe_audit(value: dict[str, Any]) -> list[str]:
+    entries = value["entries"]
+    lines = [f"Audit log: {len(entries)} entries visible to this token."]
+    for entry in entries[-3:]:
+        if not isinstance(entry, dict):
+            continue
+        context = entry.get("context") or {}
+        lines.append(
+            f"- {entry.get('method')} {entry.get('path')} status={entry.get('status')} "
+            f"principal={entry.get('principal')} namespace={context.get('namespace')} "
+            f"intent={context.get('selected_report') or context.get('query_goal') or context.get('command_source')}."
+        )
+    return lines
+
+
+def _describe_vector_search(value: dict[str, Any]) -> list[str]:
+    matches = value.get("matches") or []
+    facts = value.get("facts") or []
+    lines = [
+        f"Vector sidecar search: {len(matches)} match(es), {len(facts)} projected semantic fact(s)."
+    ]
+    if matches:
+        first = matches[0]
+        lines.append(
+            f"Top match: vector={first.get('vector_id')} score={first.get('score')} "
+            f"entity={first.get('entity')}."
+        )
+    return lines
+
+
+def _describe_artifact_reference(reference: dict[str, Any]) -> list[str]:
+    return [
+        "Artifact sidecar reference: external memory metadata recovered under policy.",
+        f"sidecar={reference.get('sidecar_id')} artifact={reference.get('artifact_id')} "
+        f"uri={reference.get('uri')}.",
+    ]
+
+
+def _describe_list(value: list[Any]) -> list[str]:
+    lines = [f"List output: {len(value)} item(s)."]
+    if value and all(isinstance(item, dict) and "result" in item for item in value):
+        lines.append("Named query list:")
+        for item in value[:5]:
+            result = item.get("result") or {}
+            rows = result.get("rows") if isinstance(result, dict) else None
+            row_count = len(rows) if isinstance(rows, list) else "unknown"
+            lines.append(f"- {item.get('name', '<unnamed>')}: {row_count} row(s).")
+    elif value:
+        lines.append(f"Preview: {_preview(value)}.")
+    return lines
+
+
+def _format_counts(counts: dict[str, int]) -> str:
+    if not counts:
+        return "none"
+    return ", ".join(f"{key}={value}" for key, value in sorted(counts.items()))
+
+
+def _preview(value: Any, limit: int = 3) -> str:
+    if isinstance(value, list):
+        shown = value[:limit]
+        suffix = "" if len(value) <= limit else f", ... +{len(value) - limit}"
+        return f"{shown}{suffix}"
+    return repr(value)
 
 
 def _discover_repo_root() -> Path | None:

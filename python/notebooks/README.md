@@ -21,6 +21,10 @@ the helper prefers the built pilot binary instead of invoking `cargo run`
 again. Rerunning the setup cell in the same kernel also reuses the live pilot
 service when it is still healthy.
 
+Notebook output is intentionally verbose. Cells print a short plain-language
+summary first, then the raw JSON response, so a reader can understand the
+semantic result without losing the exact service payload.
+
 ## Notebook Series
 
 | Notebook | Best use | Open in Colab |
