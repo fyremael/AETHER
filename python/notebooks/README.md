@@ -16,7 +16,10 @@ Rust if `cargo` is not present, and start the authenticated pilot
 temporary SQLite namespace and notebook-local operator token.
 
 The first run in a fresh Colab session takes a few minutes because it installs
-the Rust toolchain and compiles the example service.
+the Rust toolchain and compiles the example service. After that first build,
+the helper prefers the built pilot binary instead of invoking `cargo run`
+again. Rerunning the setup cell in the same kernel also reuses the live pilot
+service when it is still healthy.
 
 ## Notebook Series
 

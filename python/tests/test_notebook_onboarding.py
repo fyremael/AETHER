@@ -4,6 +4,7 @@ import ast
 import importlib.util
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -73,6 +74,37 @@ class NotebookOnboardingTest(unittest.TestCase):
 
         repo_root = module.bootstrap_repo(repo_root=REPO_ROOT)
         self.assertEqual(Path(repo_root).resolve(), REPO_ROOT.resolve())
+
+    def test_colab_helper_prefers_built_pilot_binary_when_present(self) -> None:
+        module = _load_colab_setup_module()
+        suffix = ".exe" if sys.platform.startswith("win") else ""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            binary = (
+                repo_root
+                / "target"
+                / "debug"
+                / "examples"
+                / f"pilot_http_kernel_service{suffix}"
+            )
+            binary.parent.mkdir(parents=True)
+            binary.write_text("", encoding="utf-8")
+
+            self.assertEqual(
+                module._pilot_service_command(
+                    repo_root,
+                    prefer_existing_binary=True,
+                ),
+                [str(binary)],
+            )
+            self.assertEqual(
+                module._pilot_service_command(
+                    repo_root,
+                    prefer_existing_binary=False,
+                )[:2],
+                ["cargo", "run"],
+            )
 
 
 if __name__ == "__main__":

@@ -16,6 +16,9 @@ from urllib import error, request
 
 DEFAULT_REPO_URL = "https://github.com/fyremael/AETHER"
 DEFAULT_COLAB_ROOT = Path("/content/AETHER")
+PILOT_EXAMPLE_NAME = "pilot_http_kernel_service"
+
+_PILOT_SERVICE_CACHE: dict[tuple[str, str, int | None, str, str], "NotebookService"] = {}
 
 
 @dataclass
@@ -110,9 +113,22 @@ def start_pilot_service(
     port: int | None = None,
     namespace: str = "notebook",
     bearer_token: str = "notebook-pilot-token",
+    reuse: bool = True,
+    prefer_existing_binary: bool = True,
+    verbose: bool = True,
 ) -> NotebookService:
-    root = Path(repo_root)
+    root = Path(repo_root).resolve()
     _ensure_python_path(root)
+
+    cache_key = (str(root), host, port, namespace, bearer_token)
+    if reuse:
+        cached = _PILOT_SERVICE_CACHE.get(cache_key)
+        if cached is not None and _service_is_healthy(cached):
+            if verbose:
+                print(f"Reusing AETHER pilot service at {cached.base_url}")
+            return cached
+        if cached is not None:
+            stop_http_service(cached)
 
     service_port = port or _free_port()
     base_url = f"http://{host}:{service_port}"
@@ -168,16 +184,22 @@ def start_pilot_service(
     if cargo_bin.exists():
         env["PATH"] = f"{cargo_bin}{os.pathsep}{env.get('PATH', '')}"
 
+    command = _pilot_service_command(
+        root,
+        prefer_existing_binary=prefer_existing_binary,
+    )
+    if verbose:
+        if _is_cargo_run_command(command):
+            print(
+                "Starting AETHER pilot service through Cargo. "
+                "The first notebook launch may compile Rust; later launches reuse the built binary."
+            )
+        else:
+            print(f"Starting AETHER pilot service from {command[0]}")
+
     try:
         process = subprocess.Popen(
-            [
-                "cargo",
-                "run",
-                "-p",
-                "aether_api",
-                "--example",
-                "pilot_http_kernel_service",
-            ],
+            command,
             cwd=root,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -189,7 +211,7 @@ def start_pilot_service(
         shutil.rmtree(scratch_dir, ignore_errors=True)
         raise
 
-    return NotebookService(
+    service = NotebookService(
         repo_root=root,
         base_url=base_url,
         process=process,
@@ -198,17 +220,29 @@ def start_pilot_service(
         scratch_dir=scratch_dir,
         config_path=config_path,
     )
+    if reuse:
+        _PILOT_SERVICE_CACHE[cache_key] = service
+    return service
 
 
 def stop_http_service(service: NotebookService) -> None:
+    for key, cached in list(_PILOT_SERVICE_CACHE.items()):
+        if cached is service:
+            _PILOT_SERVICE_CACHE.pop(key, None)
+    _stop_process(service)
+    if service.scratch_dir is not None:
+        shutil.rmtree(service.scratch_dir, ignore_errors=True)
+
+
+def _stop_process(service: NotebookService) -> None:
+    if service.process.poll() is not None:
+        return
     service.process.terminate()
     try:
         service.process.wait(timeout=10.0)
     except subprocess.TimeoutExpired:
         service.process.kill()
         service.process.wait(timeout=10.0)
-    if service.scratch_dir is not None:
-        shutil.rmtree(service.scratch_dir, ignore_errors=True)
 
 
 def pretty_json(value: Any) -> None:
@@ -241,10 +275,64 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def _pilot_service_command(
+    repo_root: Path,
+    *,
+    prefer_existing_binary: bool,
+) -> list[str]:
+    if prefer_existing_binary and os.environ.get("AETHER_NOTEBOOK_FORCE_CARGO_RUN") != "1":
+        binary = _example_binary(repo_root, PILOT_EXAMPLE_NAME)
+        if binary is not None:
+            return [str(binary)]
+
+    return [
+        "cargo",
+        "run",
+        "-p",
+        "aether_api",
+        "--example",
+        PILOT_EXAMPLE_NAME,
+    ]
+
+
+def _example_binary(repo_root: Path, example_name: str) -> Path | None:
+    suffix = ".exe" if os.name == "nt" else ""
+    for profile in ("debug", "release"):
+        binary = repo_root / "target" / profile / "examples" / f"{example_name}{suffix}"
+        if binary.exists() and _binary_is_fresh(repo_root, binary):
+            return binary
+    return None
+
+
+def _binary_is_fresh(repo_root: Path, binary: Path) -> bool:
+    binary_mtime = binary.stat().st_mtime
+    source_paths = [repo_root / "Cargo.toml", repo_root / "Cargo.lock"]
+    source_paths.extend((repo_root / "crates").glob("**/*.rs"))
+    for source_path in source_paths:
+        if source_path.exists() and source_path.stat().st_mtime > binary_mtime:
+            return False
+    return True
+
+
+def _is_cargo_run_command(command: list[str]) -> bool:
+    return len(command) >= 2 and command[0] == "cargo" and command[1] == "run"
+
+
+def _service_is_healthy(service: NotebookService) -> bool:
+    if service.process.poll() is not None:
+        return False
+    try:
+        with request.urlopen(f"{service.base_url}/health", timeout=0.5) as response:
+            return response.status == 200
+    except (error.URLError, TimeoutError):
+        return False
+
+
 def _wait_for_health(
     base_url: str,
     process: subprocess.Popen[str],
     timeout_seconds: float = 180.0,
+    poll_interval_seconds: float = 0.25,
 ) -> None:
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
@@ -259,7 +347,7 @@ def _wait_for_health(
                 if response.status == 200:
                     return
         except (error.URLError, TimeoutError):
-            time.sleep(1.0)
+            time.sleep(poll_interval_seconds)
 
     output = process.stdout.read() if process.stdout else ""
     raise RuntimeError(
