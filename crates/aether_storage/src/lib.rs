@@ -617,9 +617,9 @@ mod tests {
         };
         let left_namespace = unique_postgres_namespace("left");
         let right_namespace = unique_postgres_namespace("right");
-        let mut left = PostgresJournal::open(&database_url, "aether_test", &left_namespace)
+        let mut left = PostgresJournal::open(&database_url, "aether_test", left_namespace)
             .expect("open left postgres journal");
-        let mut right = PostgresJournal::open(&database_url, "aether_test", &right_namespace)
+        let mut right = PostgresJournal::open(&database_url, "aether_test", right_namespace)
             .expect("open right postgres journal");
 
         left.append(&[sample_datom(1, "left")])

@@ -88,7 +88,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: capacity-perturbation-windows
-          path: artifacts/performance
+          path: artifacts/performance/perturbation
 
       - name: Download Ubuntu perf artifact
         uses: actions/download-artifact@v4
@@ -138,26 +138,30 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: capacity-perturbation-windows
-          path: artifacts/performance
+          path: artifacts/performance/perturbation
 
       - name: Download matrix summary
         uses: actions/download-artifact@v4
         with:
           name: capacity-matrix-summary
-          path: artifacts/performance
+          path: artifacts/performance/matrix
 
       - name: Build capacity report
         shell: pwsh
         run: |
           $perturbationJson = Resolve-Path artifacts/performance/perturbation/latest.json
           $matrixJson = Resolve-Path artifacts/performance/matrix/latest.json
-          $perturbation = Get-Content $perturbationJson -Raw | ConvertFrom-Json -Depth 64
-          $capacityInputs = Resolve-Path $perturbation.capacity_inputs.json_path
+          $capacityInputs = Get-ChildItem -Path artifacts/performance/perturbation/runs -Recurse -Filter capacity-curves.json |
+            Sort-Object FullName |
+            Select-Object -First 1
+          if (-not $capacityInputs) {
+            throw "No capacity-curves.json file was downloaded from the perturbation artifact."
+          }
           $arguments = @(
             "run", "-p", "aether_api", "--example", "performance_capacity_report", "--release", "--",
             "--perturbation-json", $perturbationJson.Path,
             "--matrix-json", $matrixJson.Path,
-            "--capacity-inputs-json", $capacityInputs.Path,
+            "--capacity-inputs-json", $capacityInputs.FullName,
             "--output-json", "artifacts/performance/capacity/latest.json",
             "--output-report", "artifacts/performance/capacity/latest.md"
           )
@@ -199,7 +203,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: capacity-report
-          path: artifacts/performance
+          path: artifacts/performance/capacity
 
       - name: Write capacity summary
         run: |

@@ -949,7 +949,7 @@ mod tests {
             },
         };
 
-        let resolved = config.resolve(&config_path).expect("resolve sqlite v2");
+        let resolved = config.resolve(config_path).expect("resolve sqlite v2");
         let status = resolved.service_status();
         assert_eq!(resolved.database_path, None);
         assert_eq!(status.storage.backend, "sqlite");
@@ -1034,7 +1034,7 @@ mod tests {
             },
         };
 
-        let resolved = config.resolve(&config_path).expect("resolve postgres v2");
+        let resolved = config.resolve(config_path).expect("resolve postgres v2");
         std::env::remove_var(env_name);
         let status = resolved.service_status();
         assert_eq!(resolved.database_path, None);

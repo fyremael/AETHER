@@ -929,12 +929,13 @@ fn namespace_sidecar_path(sidecar_path: &Path, namespace: &NamespaceId) -> PathB
 }
 
 fn namespace_file_token(namespace: &NamespaceId) -> String {
-    namespace
-        .as_str()
-        .as_bytes()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    use std::fmt::Write as _;
+
+    let mut token = String::with_capacity(namespace.as_str().len() * 2);
+    for byte in namespace.as_str().as_bytes() {
+        write!(&mut token, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    token
 }
 
 #[derive(Clone, Debug)]
