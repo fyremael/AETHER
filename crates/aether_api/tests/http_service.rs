@@ -644,6 +644,9 @@ async fn authenticated_http_service_exposes_policy_aware_coordination_reports() 
         entry.path == "/v1/reports/pilot/coordination"
             && entry.principal == "pilot-operator"
             && entry.context.temporal_view.as_deref() == Some("coordination_pilot_report")
+            && entry.context.command_source.as_deref() == Some("http")
+            && entry.context.selected_report.as_deref() == Some("coordination_pilot")
+            && entry.context.selected_cut.as_deref() == Some("current")
             && entry.context.datom_count == Some(25)
             && entry.context.row_count.is_some()
             && entry.context.trace_tuple_count.is_some()
@@ -779,6 +782,7 @@ async fn http_service_exposes_status_and_supports_auth_reload() {
         .json::<ServiceStatusResponse>()
         .await
         .expect("status response");
+    assert_eq!(status.effective_namespace.as_deref(), Some("default"));
     assert_eq!(status.service_mode, ServiceMode::SingleNode);
     assert_eq!(status.config_version, "test-config-v1");
     assert_eq!(status.schema_version, "test-schema-v1");
@@ -815,6 +819,7 @@ async fn http_service_exposes_status_and_supports_auth_reload() {
         .json::<ServiceStatusResponse>()
         .await
         .expect("status response");
+    assert_eq!(status.effective_namespace.as_deref(), Some("default"));
     assert_eq!(status.config_version, "test-config-v2");
     assert!(status
         .principals
@@ -947,6 +952,9 @@ async fn coordination_delta_report_endpoint_is_policy_aware() {
         entry.path == "/v1/reports/pilot/coordination-delta"
             && entry.principal == "pilot-operator"
             && entry.context.temporal_view.as_deref() == Some("coordination_delta_report")
+            && entry.context.command_source.as_deref() == Some("http")
+            && entry.context.selected_report.as_deref() == Some("coordination_delta")
+            && entry.context.selected_cut.as_deref() == Some("as_of(e5) -> current")
             && entry.context.datom_count == Some(25)
             && entry.context.policy_decision.as_deref() == Some("token_default")
     }));
@@ -1072,6 +1080,7 @@ async fn http_service_isolates_journal_history_by_namespace_header() {
         .await
         .expect("status response");
     assert_eq!(status.storage.backend, "sqlite");
+    assert_eq!(status.effective_namespace.as_deref(), Some("acme"));
     assert_eq!(status.active_namespace_count, 2);
     assert!(status
         .namespaces
@@ -1094,6 +1103,79 @@ async fn http_service_isolates_journal_history_by_namespace_header() {
         .entries
         .iter()
         .all(|entry| entry.context.namespace.as_deref() == Some("acme")));
+
+    stop_server(server).await;
+}
+
+#[tokio::test]
+async fn http_service_sqlite_namespaces_preserve_history_across_restart() {
+    let temp = TestTempDir::new("sqlite-namespace-restart");
+    let tenant = NamespaceId::new("design-partner").expect("valid namespace");
+    let options = HttpKernelOptions::new().with_auth(HttpAuthConfig {
+        tokens: vec![HttpAccessToken {
+            token: "design-token".into(),
+            token_id: "token:design".into(),
+            principal: "design-operator".into(),
+            principal_id: "principal:design".into(),
+            scopes: vec![AuthScope::Append, AuthScope::Query, AuthScope::Ops],
+            namespaces: vec![tenant.clone()],
+            policy_context: None,
+            source: "inline".into(),
+            revoked: false,
+        }],
+    });
+
+    {
+        let (base_url, server) =
+            spawn_sqlite_namespace_server(temp.path().join("data"), options.clone()).await;
+        let client = Client::new();
+        let append = client
+            .post(format!("{base_url}/v1/append"))
+            .header(AETHER_NAMESPACE_HEADER, tenant.as_str())
+            .bearer_auth("design-token")
+            .json(&AppendRequest {
+                datoms: vec![policy_status_datom(1, "ready-before-restart", 1, None)],
+            })
+            .send()
+            .await
+            .expect("append before restart");
+        assert!(append.status().is_success());
+        stop_server(server).await;
+    }
+
+    let (base_url, server) = spawn_sqlite_namespace_server(temp.path().join("data"), options).await;
+    let client = Client::new();
+    let history = client
+        .get(format!("{base_url}/v1/history"))
+        .header(AETHER_NAMESPACE_HEADER, tenant.as_str())
+        .bearer_auth("design-token")
+        .send()
+        .await
+        .expect("history after restart")
+        .json::<HistoryResponse>()
+        .await
+        .expect("history response");
+    assert_eq!(history.datoms.len(), 1);
+    assert_eq!(
+        history.datoms[0].value,
+        Value::String("ready-before-restart".into())
+    );
+
+    let status = client
+        .get(format!("{base_url}/v1/status"))
+        .header(AETHER_NAMESPACE_HEADER, tenant.as_str())
+        .bearer_auth("design-token")
+        .send()
+        .await
+        .expect("status after restart")
+        .json::<ServiceStatusResponse>()
+        .await
+        .expect("status response");
+    assert_eq!(
+        status.effective_namespace.as_deref(),
+        Some("design-partner")
+    );
+    assert_eq!(status.active_namespace_count, 1);
 
     stop_server(server).await;
 }
@@ -1307,6 +1389,10 @@ async fn http_service_postgres_namespaces_cover_http_policy_status_and_sidecars_
         .expect("postgres status response");
     assert_eq!(status.storage.backend, "postgres");
     assert_eq!(
+        status.effective_namespace.as_deref(),
+        Some(tenant_a.as_str())
+    );
+    assert_eq!(
         status.storage.postgres_schema.as_deref(),
         Some("aether_http_test")
     );
@@ -1323,6 +1409,96 @@ async fn http_service_postgres_namespaces_cover_http_policy_status_and_sidecars_
 }
 
 #[tokio::test]
+async fn http_service_postgres_namespaces_preserve_history_across_restart_when_configured() {
+    let Some(database_url) = postgres_test_url() else {
+        return;
+    };
+    let temp = TestTempDir::new("postgres-http-restart");
+    let tenant = unique_namespace_id("pg-restart");
+    let schema = unique_postgres_schema("aether_http_restart");
+    let options = HttpKernelOptions::new().with_auth(HttpAuthConfig {
+        tokens: vec![HttpAccessToken {
+            token: "pg-restart-operator".into(),
+            token_id: "token:pg-restart".into(),
+            principal: "pg-restart-operator".into(),
+            principal_id: "principal:pg-restart".into(),
+            scopes: vec![AuthScope::Append, AuthScope::Query, AuthScope::Ops],
+            namespaces: vec![tenant.clone()],
+            policy_context: None,
+            source: "inline".into(),
+            revoked: false,
+        }],
+    });
+
+    {
+        let (base_url, server) = spawn_postgres_namespace_server(
+            database_url.clone(),
+            schema.clone(),
+            temp.path().join("sidecars.sqlite"),
+            options.clone(),
+        )
+        .await;
+        let client = Client::new();
+        let append = client
+            .post(format!("{base_url}/v1/append"))
+            .header(AETHER_NAMESPACE_HEADER, tenant.as_str())
+            .bearer_auth("pg-restart-operator")
+            .json(&AppendRequest {
+                datoms: vec![policy_status_datom(1, "postgres-restarted", 1, None)],
+            })
+            .send()
+            .await
+            .expect("postgres append before restart");
+        assert!(append.status().is_success());
+        stop_server(server).await;
+    }
+
+    let (base_url, server) = spawn_postgres_namespace_server(
+        database_url,
+        schema.clone(),
+        temp.path().join("sidecars.sqlite"),
+        options,
+    )
+    .await;
+    let client = Client::new();
+    let history = client
+        .get(format!("{base_url}/v1/history"))
+        .header(AETHER_NAMESPACE_HEADER, tenant.as_str())
+        .bearer_auth("pg-restart-operator")
+        .send()
+        .await
+        .expect("postgres history after restart")
+        .json::<HistoryResponse>()
+        .await
+        .expect("postgres history response");
+    assert_eq!(history.datoms.len(), 1);
+    assert_eq!(
+        history.datoms[0].value,
+        Value::String("postgres-restarted".into())
+    );
+
+    let status = client
+        .get(format!("{base_url}/v1/status"))
+        .header(AETHER_NAMESPACE_HEADER, tenant.as_str())
+        .bearer_auth("pg-restart-operator")
+        .send()
+        .await
+        .expect("postgres status after restart")
+        .json::<ServiceStatusResponse>()
+        .await
+        .expect("postgres status response");
+    assert_eq!(status.storage.backend, "postgres");
+    assert_eq!(
+        status.storage.postgres_schema.as_deref(),
+        Some(schema.as_str())
+    );
+    assert_eq!(status.effective_namespace.as_deref(), Some(tenant.as_str()));
+    assert_eq!(status.active_namespace_count, 1);
+
+    stop_server(server).await;
+}
+
+#[tokio::test]
 async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
     let temp = TestTempDir::new("partitioned-http");
     let partitioned = replicated_partition_service(temp.path());
@@ -1334,6 +1510,7 @@ async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
             config_version: "replicated-prototype".into(),
             schema_version: "v1".into(),
             bind_addr: None,
+            effective_namespace: None,
             service_mode: ServiceMode::Partitioned,
             storage: aether_api::ServiceStatusStorage {
                 database_path: None,
@@ -2616,6 +2793,15 @@ fn unique_namespace_id(prefix: &str) -> NamespaceId {
         .expect("system time")
         .as_nanos();
     NamespaceId::new(format!("{prefix}-{nanos}-{unique}")).expect("valid generated namespace")
+}
+
+fn unique_postgres_schema(prefix: &str) -> String {
+    let unique = NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time")
+        .as_nanos();
+    format!("{prefix}_{nanos}_{unique}")
 }
 
 fn read_audit_entries(path: &Path) -> Vec<AuditEntry> {

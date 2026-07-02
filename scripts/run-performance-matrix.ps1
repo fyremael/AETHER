@@ -16,6 +16,7 @@ if (-not $WslHostManifestPath) {
 }
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $matrixDir = Join-Path $repoRoot "artifacts\performance\matrix"
+$trendDir = Join-Path $repoRoot "artifacts\performance\trends"
 $runsDir = Join-Path $repoRoot "artifacts\performance\runs"
 
 function Close-Runner([int]$ExitCode) {
@@ -42,7 +43,7 @@ if (-not $cargo) {
     Close-Runner 1
 }
 
-New-Item -ItemType Directory -Force $matrixDir | Out-Null
+New-Item -ItemType Directory -Force $matrixDir, $trendDir | Out-Null
 New-Item -ItemType Directory -Force $runsDir | Out-Null
 
 $windowsHost = Get-Content -Path $WindowsHostManifestPath | ConvertFrom-Json
@@ -121,7 +122,29 @@ if ($unavailableNotes.Count -gt 0) {
     }
 }
 
+$trendJsonPath = Join-Path $trendDir "latest.json"
+$trendReportPath = Join-Path $trendDir "latest.md"
+$baselineArgs = @()
+$baselineRoot = Join-Path $repoRoot "fixtures\performance\baselines"
+if (Test-Path $baselineRoot) {
+    $baselinePaths = @(Get-ChildItem -Path $baselineRoot -Recurse -Filter *.json -File | Sort-Object FullName | Select-Object -ExpandProperty FullName)
+    foreach ($baselinePath in $baselinePaths) {
+        $baselineArgs += @("--baseline", $baselinePath)
+    }
+}
+$trendArguments = @(
+    "run", "-p", "aether_api", "--example", "performance_trend_report", "--release", "--",
+    "--output-json", $trendJsonPath,
+    "--output-report", $trendReportPath
+) + $baselineArgs + $bundlePaths
+& $cargo.Source @trendArguments
+if ($LASTEXITCODE -ne 0) {
+    Close-Runner $LASTEXITCODE
+}
+
 Write-Host ""
 Write-Host "Matrix report: $matrixReportPath" -ForegroundColor Green
 Write-Host "Matrix json:   $matrixJsonPath"
+Write-Host "Trend report:  $trendReportPath"
+Write-Host "Trend json:    $trendJsonPath"
 Close-Runner 0

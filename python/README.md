@@ -14,8 +14,9 @@ Implemented today:
 - `aether_sdk.AetherClient`, a broader HTTP client for the stable Rust service boundary
 - typed request and data models in `aether_sdk.models`
 - fixture builders for datoms, policy contexts, artifacts, and vectors in `aether_sdk.fixtures`
-- Colab-friendly onboarding notebooks in `python/notebooks/`
+- Colab-friendly onboarding notebooks in `python/notebooks/` over the authenticated pilot boundary
 - a flagship ML-facing support-resolution notebook over the live HTTP boundary
+- an M6 operating-proof notebook for status, reports, cut diffs, audit context, and trend artifacts
 - live integration coverage against `crates/aether_api/examples/http_kernel_service.rs`
 - policy-aware document execution plus sidecar artifact/vector calls, with authenticated services treating request policy as a narrowing control over token-granted visibility rather than an escalation path
 - explain calls now participate in the same effective-policy contract as document execution on authenticated services

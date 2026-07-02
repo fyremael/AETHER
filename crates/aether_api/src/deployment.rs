@@ -357,6 +357,7 @@ impl ResolvedPilotServiceConfig {
             config_version: self.config_version.clone(),
             schema_version: self.schema_version.clone(),
             bind_addr: Some(self.bind_addr.clone()),
+            effective_namespace: None,
             service_mode: self.service_mode.clone(),
             storage: self.storage.status_storage(self.audit_log_path.clone()),
             active_namespace_count: 0,

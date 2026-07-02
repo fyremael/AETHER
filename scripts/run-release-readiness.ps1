@@ -17,6 +17,10 @@ $transcriptPath = Join-Path $reportDir "release-readiness-$outputTimestamp.txt"
 $latestTranscriptPath = Join-Path $reportDir "latest.txt"
 $summaryPath = Join-Path $reportDir "release-readiness-$outputTimestamp.md"
 $latestSummaryPath = Join-Path $reportDir "latest.md"
+$hardeningGateJsonPath = Join-Path $reportDir "hardening-gates-$outputTimestamp.json"
+$hardeningGateSummaryPath = Join-Path $reportDir "hardening-gates-$outputTimestamp.md"
+$latestHardeningGateJsonPath = Join-Path $reportDir "hardening-gates-latest.json"
+$latestHardeningGateSummaryPath = Join-Path $reportDir "hardening-gates-latest.md"
 $pagesPreviewDir = Join-Path $repoRoot "artifacts\pages-preview-release"
 $transcript = [System.Collections.Generic.List[string]]::new()
 if (-not $HostManifestPath) {
@@ -218,6 +222,24 @@ $failed = $false
 $failureMessage = $null
 
 try {
+    $hardeningGateArgs = @(
+        (Join-Path $repoRoot "scripts\hardening_promotion.py"),
+        "gate-summary",
+        "--config", (Join-Path $repoRoot ".github\hardening-promotion-state.json"),
+        "--out-json", $hardeningGateJsonPath,
+        "--out-md", $hardeningGateSummaryPath
+    )
+    $latestHardeningJsonPath = Join-Path $repoRoot "artifacts\qa\hardening\latest.json"
+    if (Test-Path $latestHardeningJsonPath) {
+        $hardeningGateArgs += @("--hardening-json", $latestHardeningJsonPath)
+    }
+    Invoke-Step "Hardening gate summary" $python.Source $hardeningGateArgs
+    if (Test-Path $hardeningGateJsonPath) {
+        Copy-Item -Force $hardeningGateJsonPath $latestHardeningGateJsonPath
+    }
+    if (Test-Path $hardeningGateSummaryPath) {
+        Copy-Item -Force $hardeningGateSummaryPath $latestHardeningGateSummaryPath
+    }
     Invoke-Step "Rust format check" $cargo.Source @("fmt", "--all", "--check")
     Invoke-Step "Rust clippy" $cargo.Source @("clippy", "--workspace", "--all-targets", "--", "-D", "warnings")
     Invoke-Step "Workspace tests" $cargo.Source @("test", "--workspace", "-j", "1", "--", "--test-threads=1")
@@ -246,26 +268,43 @@ $summaryLines.Add('- Baseline source: `' + $baseline.Source + '`')
 $summaryLines.Add("")
 $summaryLines.Add("## Executed gates")
 $summaryLines.Add("")
-$summaryLines.Add("1. Rust format check")
-$summaryLines.Add("2. Rust clippy")
-$summaryLines.Add("3. Full Rust workspace tests")
-$summaryLines.Add("4. Python SDK tests")
-$summaryLines.Add("5. Go boundary tests")
-$summaryLines.Add("6. Rust API docs build")
-$summaryLines.Add("7. GitHub Pages preview bundle build")
-$summaryLines.Add("8. Criterion benchmark compile")
-$summaryLines.Add("9. Pilot launch validation pack")
-$summaryLines.Add("10. Packaged pilot bundle build")
+$summaryLines.Add("1. Hardening gate-state summary")
+$summaryLines.Add("2. Rust format check")
+$summaryLines.Add("3. Rust clippy")
+$summaryLines.Add("4. Full Rust workspace tests")
+$summaryLines.Add("5. Python SDK tests")
+$summaryLines.Add("6. Go boundary tests")
+$summaryLines.Add("7. Rust API docs build")
+$summaryLines.Add("8. GitHub Pages preview bundle build")
+$summaryLines.Add("9. Criterion benchmark compile")
+$summaryLines.Add("10. Pilot launch validation pack")
+$summaryLines.Add("11. Packaged pilot bundle build")
 $summaryLines.Add("")
 $summaryLines.Add("## Primary artifacts")
 $summaryLines.Add("")
 $summaryLines.Add('- `artifacts/qa/release-readiness/latest.txt`')
+$summaryLines.Add('- `artifacts/qa/release-readiness/hardening-gates-latest.md`')
+$summaryLines.Add('- `artifacts/qa/release-readiness/hardening-gates-latest.json`')
 $summaryLines.Add('- `artifacts/pages-preview-release/`')
 $summaryLines.Add('- `artifacts/pilot/reports/latest.md`')
 $summaryLines.Add('- `artifacts/performance/latest.md`')
 $summaryLines.Add('- `artifacts/performance/latest-drift.md`')
 $summaryLines.Add('- `artifacts/pilot/launch/latest.txt`')
 $summaryLines.Add('- `artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip`')
+$summaryLines.Add("")
+$summaryLines.Add("## Hardening Gate State")
+$summaryLines.Add("")
+if (Test-Path $hardeningGateSummaryPath) {
+    $gateLines = Get-Content -Path $hardeningGateSummaryPath
+    foreach ($line in $gateLines) {
+        if ($line -eq "# AETHER Hardening Gate State") {
+            continue
+        }
+        $summaryLines.Add($line)
+    }
+} else {
+    $summaryLines.Add("Hardening gate-state summary was not generated.")
+}
 $summaryLines.Add("")
 $summaryLines.Add("## Result")
 $summaryLines.Add("")

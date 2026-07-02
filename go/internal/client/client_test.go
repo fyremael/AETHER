@@ -110,6 +110,79 @@ func TestRunDocumentCarriesPolicyContext(t *testing.T) {
 	}
 }
 
+func TestStatusDecodesOperationalFieldsAndNamespaceHeader(t *testing.T) {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/status" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := r.Header.Get("X-Aether-Namespace"); got != "acme" {
+			t.Fatalf("expected namespace header, got %q", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":                 "ok",
+			"build_version":          "0.1.0",
+			"config_version":         "pilot-v2",
+			"schema_version":         "v1",
+			"bind_addr":              "127.0.0.1:3000",
+			"effective_namespace":    "acme",
+			"service_mode":           "single_node",
+			"active_namespace_count": 1,
+			"storage": map[string]any{
+				"backend":         "postgres",
+				"postgres_schema": "aether_design_partner",
+				"sidecar_mode":    "sqlite_local",
+				"audit_log_path":  "/tmp/aether/audit.jsonl",
+			},
+			"namespaces": []map[string]any{
+				{"namespace": "acme", "principals": []string{"acme-operator"}},
+			},
+			"principals": []map[string]any{
+				{
+					"principal":    "acme-operator",
+					"principal_id": "principal:acme",
+					"token_id":     "token:acme",
+					"scopes":       []string{"append", "query", "ops"},
+					"namespaces":   []string{"acme"},
+					"source":       "file:/etc/aether/acme.token",
+				},
+			},
+			"replicas": []map[string]any{
+				{
+					"partition":       "authority",
+					"replica_id":      1,
+					"leader_replica":  1,
+					"role":            "leader",
+					"leader_epoch":    2,
+					"applied_element": 7,
+					"replication_lag": 0,
+					"healthy":         true,
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	api := New(server.URL, "pilot-token").WithNamespace("acme")
+	status, err := api.Status(context.Background())
+	if err != nil {
+		t.Fatalf("status failed: %v", err)
+	}
+	if status.EffectiveNamespace == nil || *status.EffectiveNamespace != "acme" {
+		t.Fatalf("unexpected effective namespace %#v", status.EffectiveNamespace)
+	}
+	if status.Storage.PostgresSchema == nil || *status.Storage.PostgresSchema != "aether_design_partner" {
+		t.Fatalf("unexpected storage %#v", status.Storage)
+	}
+	if len(status.Replicas) != 1 || status.Replicas[0].LeaderEpoch != 2 {
+		t.Fatalf("unexpected replicas %#v", status.Replicas)
+	}
+	if len(status.Principals) != 1 || status.Principals[0].TokenID != "token:acme" {
+		t.Fatalf("unexpected principals %#v", status.Principals)
+	}
+}
+
 func TestCoordinationPilotReportCarriesPolicyContextAndDecodes(t *testing.T) {
 	t.Helper()
 
@@ -243,6 +316,9 @@ func TestHistoryAuditAndExplainDecodeTypedModels(t *testing.T) {
 						"scope":        "query",
 						"outcome":      "ok",
 						"context": map[string]any{
+							"command_source":         "http",
+							"selected_report":        "coordination_pilot",
+							"selected_cut":           "current",
 							"temporal_view":          "coordination_pilot_report",
 							"row_count":              3,
 							"effective_capabilities": []string{"executor"},
@@ -314,6 +390,9 @@ func TestHistoryAuditAndExplainDecodeTypedModels(t *testing.T) {
 	}
 	if len(audit.Entries) != 1 || audit.Entries[0].Context.PolicyDecision == nil || *audit.Entries[0].Context.PolicyDecision != "token_default" {
 		t.Fatalf("unexpected audit response %#v", audit)
+	}
+	if audit.Entries[0].Context.SelectedReport == nil || *audit.Entries[0].Context.SelectedReport != "coordination_pilot" {
+		t.Fatalf("unexpected audit selected report %#v", audit.Entries[0].Context.SelectedReport)
 	}
 
 	explain, err := api.ExplainTupleWithPolicy(context.Background(), 7, &PolicyContext{

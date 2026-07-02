@@ -265,6 +265,11 @@ The matrix runner produces:
 - `artifacts/performance/matrix/latest.md`
 - `artifacts/performance/matrix/latest.json`
 
+The trend runner produces:
+
+- `artifacts/performance/trends/latest.md`
+- `artifacts/performance/trends/latest.json`
+
 Pilot coordination reports are written to:
 
 - `artifacts/pilot/reports/`
@@ -316,6 +321,7 @@ Use the pilot report when someone asks, “Why is this worker authorized, or why
 Use the pilot delta report when someone asks, “What changed between the earlier cut and now?”
 Use the launch validation pack when someone asks, “Is this exact pilot candidate ready to go?”
 Use the operations playbook when someone asks, “How do we deploy, rotate, upgrade, or roll back this pilot safely?”
+Use the trend index when someone asks, “What changed across recent benchmark runs without manually opening every bundle?”
 
 ## Replicated Prototype
 

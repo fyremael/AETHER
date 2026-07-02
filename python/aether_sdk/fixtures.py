@@ -13,6 +13,10 @@ from .models import (
 )
 
 
+COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT = 5
+COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT = 9
+
+
 def make_source_ref(uri: str = "", digest: str | None = None) -> SourceRef:
     return SourceRef(uri=uri, digest=digest)
 
@@ -155,3 +159,179 @@ def make_vector_record(
         provenance=provenance or make_provenance(),
         policy=policy,
     )
+
+
+def coordination_pilot_seed_history() -> list[Datom]:
+    """Return the canonical coordination pilot history used by reports/tests."""
+
+    return [
+        make_datom(
+            entity=1,
+            attribute=1,
+            value=value_entity(2),
+            element=1,
+            op="Add",
+        ),
+        make_datom(entity=2, attribute=2, value=value_string("done"), element=2),
+        make_datom(
+            entity=1,
+            attribute=3,
+            value=value_string("worker-a"),
+            element=3,
+            op="Claim",
+        ),
+        make_datom(
+            entity=1,
+            attribute=4,
+            value=value_u64(1),
+            element=4,
+            op="LeaseOpen",
+        ),
+        make_datom(
+            entity=1,
+            attribute=5,
+            value=value_string("active"),
+            element=5,
+            op="LeaseOpen",
+        ),
+        make_datom(
+            entity=1001,
+            attribute=6,
+            value=value_entity(1),
+            element=6,
+            op="LeaseRenew",
+        ),
+        make_datom(
+            entity=1001,
+            attribute=7,
+            value=value_string("worker-a"),
+            element=7,
+            op="LeaseRenew",
+        ),
+        make_datom(
+            entity=1001,
+            attribute=8,
+            value=value_u64(1),
+            element=8,
+            op="LeaseRenew",
+        ),
+        make_datom(
+            entity=1001,
+            attribute=9,
+            value=value_u64(100),
+            element=9,
+            op="LeaseRenew",
+        ),
+        make_datom(
+            entity=1,
+            attribute=3,
+            value=value_string("worker-b"),
+            element=10,
+            op="Claim",
+        ),
+        make_datom(
+            entity=1,
+            attribute=4,
+            value=value_u64(2),
+            element=11,
+            op="LeaseRenew",
+        ),
+        make_datom(
+            entity=1002,
+            attribute=6,
+            value=value_entity(1),
+            element=12,
+            op="LeaseRenew",
+        ),
+        make_datom(
+            entity=1002,
+            attribute=7,
+            value=value_string("worker-b"),
+            element=13,
+            op="LeaseRenew",
+        ),
+        make_datom(
+            entity=1002,
+            attribute=8,
+            value=value_u64(2),
+            element=14,
+            op="LeaseRenew",
+        ),
+        make_datom(
+            entity=1002,
+            attribute=9,
+            value=value_u64(200),
+            element=15,
+            op="LeaseRenew",
+        ),
+        make_datom(
+            entity=2001,
+            attribute=10,
+            value=value_entity(1),
+            element=16,
+            op="Annotate",
+        ),
+        make_datom(
+            entity=2001,
+            attribute=11,
+            value=value_string("worker-a"),
+            element=17,
+            op="Annotate",
+        ),
+        make_datom(
+            entity=2001,
+            attribute=12,
+            value=value_u64(1),
+            element=18,
+            op="Annotate",
+        ),
+        make_datom(
+            entity=2001,
+            attribute=13,
+            value=value_string("completed"),
+            element=19,
+            op="Annotate",
+        ),
+        make_datom(
+            entity=2001,
+            attribute=14,
+            value=value_string("stale-worker-a"),
+            element=20,
+            op="Annotate",
+        ),
+        make_datom(
+            entity=2002,
+            attribute=10,
+            value=value_entity(1),
+            element=21,
+            op="Annotate",
+        ),
+        make_datom(
+            entity=2002,
+            attribute=11,
+            value=value_string("worker-b"),
+            element=22,
+            op="Annotate",
+        ),
+        make_datom(
+            entity=2002,
+            attribute=12,
+            value=value_u64(2),
+            element=23,
+            op="Annotate",
+        ),
+        make_datom(
+            entity=2002,
+            attribute=13,
+            value=value_string("completed"),
+            element=24,
+            op="Annotate",
+        ),
+        make_datom(
+            entity=2002,
+            attribute=14,
+            value=value_string("current-worker-b"),
+            element=25,
+            op="Annotate",
+        ),
+    ]

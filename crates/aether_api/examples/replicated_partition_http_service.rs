@@ -108,6 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config_version: "replicated-prototype".into(),
             schema_version: "v1".into(),
             bind_addr: Some(bind_addr.to_string()),
+            effective_namespace: None,
             service_mode: ServiceMode::Partitioned,
             storage: ServiceStatusStorage {
                 database_path: None,

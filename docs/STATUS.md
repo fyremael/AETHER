@@ -82,6 +82,7 @@ Completed:
 - first real Go operator shell implemented against the HTTP API with typed client coverage
 - pilot-focused Go operator TUI implemented as the live cockpit for health, coordination state, audit entries, history, tuple proof traces, service status, and coordination diffs
 - broader typed Python SDK surface implemented against the HTTP API with fixture builders and live integration coverage
+- Colab notebook lane now boots the authenticated pilot boundary with notebook-local token, namespace, SQLite storage, service status, and audit context instead of the older unauthenticated in-memory HTTP example
 - semantic compliance matrix added to map `SPEC.md` sections `1-11` to implementation and acceptance evidence for the current v1 single-node closure claim
 - formal v1 closeout record added to anchor the semantic closure claim to the numbered ADR set, QA gate, and launch/release evidence posture
 - partition IDs, partition-qualified cuts, and federated-cut types implemented in the semantic model
@@ -103,10 +104,13 @@ Completed:
 - repository front-door docs, contribution guidance, and worked examples now exist
 - a governed incident blackboard commercialization document, runnable demo, and front-door docs/site packaging now exist as the canonical adjacent-next design-partner exemplar over the current pilot proof
 - an AI support resolution desk commercialization document, runnable demo, site page, and Colab notebook now exist as the flagship ML-facing working app pack over the current pilot proof
+- an M6 operating-proof Colab notebook now exists for status, coordination reports, cut diffs, tuple proof traces, audit intent, and benchmark trend artifacts
 - a post-v1 QA hardening program now exists with a governing rubric, responsible-disclosure policy, stronger issue templates, a repeatable persona sweep runner, and a scheduled/manual non-blocking hardening workflow
 - the scheduled hardening workflow now also publishes promotion metrics, updates a standing GitHub tracker issue, and can open a promotion PR when the next pack satisfies the documented streak threshold
+- release-readiness now emits an explicit hardening gate-state summary that separates blocking packs from diagnostic packs and reports the latest pass/fail/skipped evidence
 - a repeatable perturbation sweep now exists to run the persona pass, full-stack benchmark snapshot, host-aware drift checks, deeper ignored stress workloads, and single-node capacity projections in one artifact pack
 - a typed capacity-planning layer now exists over perturbation and matrix evidence, with measured board/closure/replay/concurrency ladders, concrete hardware-class guidance, explicit scale-out triggers, and a scheduled GitHub tracker workflow
+- a lightweight performance trend index now exists over saved run bundles and tracked accepted baselines so latest/prior/baseline context is visible without manually opening every benchmark artifact
 
 Still open:
 
@@ -114,7 +118,7 @@ Still open:
 - production hardening for the optional Postgres journal deployment path beyond current parity/concurrency coverage
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
 - mature Go/Python client ecosystems beyond the current first real boundary clients
-- historical benchmark dashboards and long-lived trend storage beyond the current run bundles, matrix summaries, perturbation artifacts, and uploaded workflow artifacts
+- persistent benchmark dashboards and long-lived trend storage beyond the current run bundles, matrix summaries, trend index, perturbation artifacts, and uploaded workflow artifacts
 
 ## Immediate focus
 

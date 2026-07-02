@@ -68,6 +68,12 @@ Service v2 storage examples:
 SQLite remains the package default. Postgres is journal-first only; sidecar
 catalogs remain local SQLite files in this slice.
 
+For Postgres deployments, restore discipline belongs to the database operator:
+export and restore the configured journal schema with normal Postgres tooling,
+then keep the local sidecar catalog and audit log with the service package or
+its host volume. AETHER does not treat Postgres as a SQL rule engine, a global
+`AsOf` clock, or an authoritative sidecar catalog.
+
 Each token must come from exactly one source:
 
 - `token`
@@ -229,6 +235,11 @@ selected snapshot.
 ## CI Posture
 
 The package path is now part of CI. Mainline GitHub Actions builds the pilot package and uploads it as an artifact. The same CI run also executes the full launch-validation pack so drift, soak, and stress regressions become hard gates rather than advisory side workflows.
+
+Release-readiness also emits a hardening gate-state summary. That summary
+shows which persona packs are blocking versus diagnostic and records the latest
+known pass/fail/skipped evidence without bypassing the configured promotion
+threshold.
 
 ## Playbooks
 

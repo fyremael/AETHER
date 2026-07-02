@@ -2,6 +2,9 @@
 
 from .client import AetherApiError, AetherClient
 from .fixtures import (
+    COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
+    COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
+    coordination_pilot_seed_history,
     make_artifact_reference,
     make_datom,
     make_policy,
@@ -34,6 +37,8 @@ __all__ = [
     "AetherApiError",
     "AetherClient",
     "ArtifactReference",
+    "COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT",
+    "COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT",
     "AsOfRequest",
     "CurrentStateRequest",
     "Datom",
@@ -47,6 +52,7 @@ __all__ = [
     "SourceRef",
     "VectorFactProjection",
     "VectorRecordMetadata",
+    "coordination_pilot_seed_history",
     "make_artifact_reference",
     "make_datom",
     "make_policy",

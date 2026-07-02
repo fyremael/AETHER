@@ -276,6 +276,52 @@ pub struct PerfMatrixReport {
     pub rows: Vec<PerfMatrixRow>,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct PerfTrendPoint {
+    pub label: String,
+    pub generated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_commit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_dirty: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mean_latency_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub throughput_per_second: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_bytes: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct PerfTrendEntry {
+    pub suite_id: PerfSuiteId,
+    pub host_id: String,
+    pub host_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<PerfSuiteId>,
+    pub workload: String,
+    pub scale: String,
+    pub kind: String,
+    pub unit: String,
+    pub gating_class: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted_baseline: Option<PerfTrendPoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous: Option<PerfTrendPoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest: Option<PerfTrendPoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_vs_previous_delta_pct: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_vs_baseline_delta_pct: Option<f64>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct PerfTrendIndex {
+    pub generated_at: String,
+    pub entries: Vec<PerfTrendEntry>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LatencyStats {
     pub samples: usize,
@@ -1550,6 +1596,7 @@ fn build_http_fixture() -> Result<HttpFixture, ApiError> {
             config_version: "pilot-v1".into(),
             schema_version: "v1".into(),
             bind_addr: Some("127.0.0.1:3000".into()),
+            effective_namespace: None,
             service_mode: ServiceMode::SingleNode,
             storage: ServiceStatusStorage::default(),
             active_namespace_count: 1,
@@ -3186,6 +3233,382 @@ pub fn render_markdown_matrix_report(report: &PerfMatrixReport) -> String {
     output
 }
 
+#[derive(Clone, Debug)]
+struct PerfTrendAccumulator {
+    suite_id: PerfSuiteId,
+    host_id: String,
+    host_name: String,
+    group: Option<PerfSuiteId>,
+    workload: String,
+    scale: String,
+    kind: String,
+    unit: String,
+    gating_class: String,
+    accepted_baseline: Option<PerfTrendPoint>,
+    points: Vec<PerfTrendPoint>,
+}
+
+pub fn build_trend_index(bundles: &[PerfRunBundle], baselines: &[PerfBaseline]) -> PerfTrendIndex {
+    let mut entries = BTreeMap::<String, PerfTrendAccumulator>::new();
+
+    for bundle in bundles {
+        let host_id = bundle_host_id(bundle);
+        let host_name = display_host_name(bundle);
+        for measurement in &bundle.report.measurements {
+            let group = measurement.group;
+            let entry_suite = group.unwrap_or(bundle.run.suite_id);
+            let key = trend_key(
+                entry_suite,
+                &host_id,
+                "measurement",
+                &measurement.workload,
+                &measurement.scale,
+                &measurement.unit_label,
+            );
+            let entry = entries.entry(key).or_insert_with(|| PerfTrendAccumulator {
+                suite_id: entry_suite,
+                host_id: host_id.clone(),
+                host_name: host_name.clone(),
+                group,
+                workload: measurement.workload.clone(),
+                scale: measurement.scale.clone(),
+                kind: "measurement".into(),
+                unit: measurement.unit_label.clone(),
+                gating_class: gating_class(entry_suite, group),
+                accepted_baseline: None,
+                points: Vec::new(),
+            });
+            entry.points.push(PerfTrendPoint {
+                label: bundle.label.clone(),
+                generated_at: bundle.generated_at.clone(),
+                git_commit: bundle.run.git_commit.clone(),
+                git_dirty: bundle.run.git_dirty,
+                mean_latency_ms: Some(measurement.latency.mean.as_secs_f64() * 1000.0),
+                throughput_per_second: Some(measurement.throughput_per_second),
+                estimated_bytes: None,
+            });
+        }
+
+        for footprint in &bundle.report.footprints {
+            let group = footprint.group;
+            let entry_suite = group.unwrap_or(bundle.run.suite_id);
+            let key = trend_key(
+                entry_suite,
+                &host_id,
+                "footprint",
+                &footprint.workload,
+                &footprint.scale,
+                "bytes",
+            );
+            let entry = entries.entry(key).or_insert_with(|| PerfTrendAccumulator {
+                suite_id: entry_suite,
+                host_id: host_id.clone(),
+                host_name: host_name.clone(),
+                group,
+                workload: footprint.workload.clone(),
+                scale: footprint.scale.clone(),
+                kind: "footprint".into(),
+                unit: "bytes".into(),
+                gating_class: gating_class(entry_suite, group),
+                accepted_baseline: None,
+                points: Vec::new(),
+            });
+            entry.points.push(PerfTrendPoint {
+                label: bundle.label.clone(),
+                generated_at: bundle.generated_at.clone(),
+                git_commit: bundle.run.git_commit.clone(),
+                git_dirty: bundle.run.git_dirty,
+                mean_latency_ms: None,
+                throughput_per_second: None,
+                estimated_bytes: Some(footprint.estimated_bytes),
+            });
+        }
+    }
+
+    for baseline in baselines {
+        let suite_id = baseline_suite_id(baseline);
+        let host_id = baseline_host_id(baseline);
+        let host_name = host_id.clone();
+        for measurement in &baseline.report.measurements {
+            let group = measurement.group;
+            let key = trend_key(
+                suite_id,
+                &host_id,
+                "measurement",
+                &measurement.workload,
+                &measurement.scale,
+                &measurement.unit_label,
+            );
+            let entry = entries.entry(key).or_insert_with(|| PerfTrendAccumulator {
+                suite_id,
+                host_id: host_id.clone(),
+                host_name: host_name.clone(),
+                group,
+                workload: measurement.workload.clone(),
+                scale: measurement.scale.clone(),
+                kind: "measurement".into(),
+                unit: measurement.unit_label.clone(),
+                gating_class: gating_class(suite_id, group),
+                accepted_baseline: None,
+                points: Vec::new(),
+            });
+            entry.accepted_baseline = Some(PerfTrendPoint {
+                label: baseline.label.clone(),
+                generated_at: baseline.generated_at.clone(),
+                git_commit: baseline
+                    .run_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.git_commit.clone()),
+                git_dirty: baseline
+                    .run_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.git_dirty),
+                mean_latency_ms: Some(measurement.latency.mean.as_secs_f64() * 1000.0),
+                throughput_per_second: Some(measurement.throughput_per_second),
+                estimated_bytes: None,
+            });
+        }
+
+        for footprint in &baseline.report.footprints {
+            let group = footprint.group;
+            let key = trend_key(
+                suite_id,
+                &host_id,
+                "footprint",
+                &footprint.workload,
+                &footprint.scale,
+                "bytes",
+            );
+            let entry = entries.entry(key).or_insert_with(|| PerfTrendAccumulator {
+                suite_id,
+                host_id: host_id.clone(),
+                host_name: host_name.clone(),
+                group,
+                workload: footprint.workload.clone(),
+                scale: footprint.scale.clone(),
+                kind: "footprint".into(),
+                unit: "bytes".into(),
+                gating_class: gating_class(suite_id, group),
+                accepted_baseline: None,
+                points: Vec::new(),
+            });
+            entry.accepted_baseline = Some(PerfTrendPoint {
+                label: baseline.label.clone(),
+                generated_at: baseline.generated_at.clone(),
+                git_commit: baseline
+                    .run_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.git_commit.clone()),
+                git_dirty: baseline
+                    .run_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.git_dirty),
+                mean_latency_ms: None,
+                throughput_per_second: None,
+                estimated_bytes: Some(footprint.estimated_bytes),
+            });
+        }
+    }
+
+    let mut trend_entries = entries
+        .into_values()
+        .map(|mut entry| {
+            entry.points.sort_by(|left, right| {
+                left.generated_at
+                    .cmp(&right.generated_at)
+                    .then_with(|| left.label.cmp(&right.label))
+            });
+            let latest = entry.points.last().cloned();
+            let previous = entry
+                .points
+                .len()
+                .checked_sub(2)
+                .and_then(|index| entry.points.get(index))
+                .cloned();
+            let latest_vs_previous_delta_pct = latest.as_ref().and_then(|latest| {
+                previous
+                    .as_ref()
+                    .and_then(|previous| trend_delta(previous, latest))
+            });
+            let latest_vs_baseline_delta_pct = latest.as_ref().and_then(|latest| {
+                entry
+                    .accepted_baseline
+                    .as_ref()
+                    .and_then(|baseline| trend_delta(baseline, latest))
+            });
+            PerfTrendEntry {
+                suite_id: entry.suite_id,
+                host_id: entry.host_id,
+                host_name: entry.host_name,
+                group: entry.group,
+                workload: entry.workload,
+                scale: entry.scale,
+                kind: entry.kind,
+                unit: entry.unit,
+                gating_class: entry.gating_class,
+                accepted_baseline: entry.accepted_baseline,
+                previous,
+                latest,
+                latest_vs_previous_delta_pct,
+                latest_vs_baseline_delta_pct,
+            }
+        })
+        .collect::<Vec<_>>();
+    trend_entries.sort_by(|left, right| {
+        left.suite_id
+            .as_str()
+            .cmp(right.suite_id.as_str())
+            .then_with(|| left.host_id.cmp(&right.host_id))
+            .then_with(|| left.kind.cmp(&right.kind))
+            .then_with(|| left.workload.cmp(&right.workload))
+            .then_with(|| left.scale.cmp(&right.scale))
+    });
+
+    PerfTrendIndex {
+        generated_at: timestamp_string(),
+        entries: trend_entries,
+    }
+}
+
+pub fn render_markdown_trend_index(index: &PerfTrendIndex) -> String {
+    let mut output = String::new();
+    let _ = writeln!(output, "# AETHER Performance Trend Index");
+    let _ = writeln!(output);
+    let _ = writeln!(output, "- Generated at: `{}`", index.generated_at);
+    let _ = writeln!(
+        output,
+        "- Purpose: latest/prior/baseline lookup for operator planning; same-host drift gates remain separate."
+    );
+    let _ = writeln!(output);
+    let _ = writeln!(
+        output,
+        "| Suite | Host | Gate | Kind | Workload | Scale | Latest | vs previous | vs baseline | Latest run |"
+    );
+    let _ = writeln!(
+        output,
+        "| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | --- |"
+    );
+    for entry in &index.entries {
+        let _ = writeln!(
+            output,
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            entry.suite_id,
+            entry.host_name,
+            entry.gating_class,
+            entry.kind,
+            entry.workload,
+            entry.scale,
+            entry
+                .latest
+                .as_ref()
+                .map(|point| format_trend_value(point, &entry.kind))
+                .unwrap_or_else(|| "-".into()),
+            entry
+                .latest_vs_previous_delta_pct
+                .map(format_pct)
+                .unwrap_or_else(|| "-".into()),
+            entry
+                .latest_vs_baseline_delta_pct
+                .map(format_pct)
+                .unwrap_or_else(|| "-".into()),
+            entry
+                .latest
+                .as_ref()
+                .map(|point| point.generated_at.as_str())
+                .unwrap_or("-"),
+        );
+    }
+    let _ = writeln!(output);
+    let _ = writeln!(
+        output,
+        "Blocking entries mirror currently release-gated suites. Observational entries are measured for trend learning, not release failure."
+    );
+    output
+}
+
+fn trend_key(
+    suite_id: PerfSuiteId,
+    host_id: &str,
+    kind: &str,
+    workload: &str,
+    scale: &str,
+    unit: &str,
+) -> String {
+    format!("{suite_id}|{host_id}|{kind}|{workload}|{scale}|{unit}")
+}
+
+fn bundle_host_id(bundle: &PerfRunBundle) -> String {
+    bundle
+        .run
+        .host_manifest_id
+        .clone()
+        .or_else(|| {
+            bundle
+                .host_manifest
+                .as_ref()
+                .map(|manifest| manifest.host_id.clone())
+        })
+        .unwrap_or_else(|| bundle.host_snapshot.fingerprint())
+}
+
+fn baseline_suite_id(baseline: &PerfBaseline) -> PerfSuiteId {
+    baseline
+        .run_metadata
+        .as_ref()
+        .map(|metadata| metadata.suite_id)
+        .or(baseline.suite_id)
+        .unwrap_or(PerfSuiteId::Legacy)
+}
+
+fn baseline_host_id(baseline: &PerfBaseline) -> String {
+    baseline
+        .run_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.host_manifest_id.clone())
+        .or_else(|| baseline.host_manifest_id.clone())
+        .or_else(|| {
+            baseline
+                .host_snapshot
+                .as_ref()
+                .map(PerfHostSnapshot::fingerprint)
+        })
+        .unwrap_or_else(|| "legacy".into())
+}
+
+fn gating_class(suite_id: PerfSuiteId, group: Option<PerfSuiteId>) -> String {
+    let gate = group.unwrap_or(suite_id);
+    if gate.is_release_gated() {
+        "blocking".into()
+    } else {
+        "observational".into()
+    }
+}
+
+fn trend_delta(baseline: &PerfTrendPoint, current: &PerfTrendPoint) -> Option<f64> {
+    let baseline_value = trend_primary_value(baseline)?;
+    let current_value = trend_primary_value(current)?;
+    Some(percent_delta(baseline_value, current_value))
+}
+
+fn trend_primary_value(point: &PerfTrendPoint) -> Option<f64> {
+    point
+        .throughput_per_second
+        .or_else(|| point.estimated_bytes.map(|bytes| bytes as f64))
+}
+
+fn format_trend_value(point: &PerfTrendPoint, kind: &str) -> String {
+    match kind {
+        "footprint" => point
+            .estimated_bytes
+            .map(format_count)
+            .unwrap_or_else(|| "-".into()),
+        _ => point
+            .throughput_per_second
+            .map(format_rate)
+            .unwrap_or_else(|| "-".into()),
+    }
+}
+
 pub fn expected_transitive_pairs(chain_len: usize) -> usize {
     chain_len.saturating_mul(chain_len.saturating_sub(1)) / 2
 }
@@ -3676,7 +4099,7 @@ fn unique_temp_dir(prefix: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        baseline_from_bundle, build_matrix_report, collect_host_snapshot,
+        baseline_from_bundle, build_matrix_report, build_trend_index, collect_host_snapshot,
         compare_perf_bundle_to_baseline, compare_perf_reports, DriftSeverity, FootprintEstimate,
         LatencyStats, PerfBaseline, PerfDriftBudget, PerfHostManifest, PerfHostSnapshot,
         PerfMeasurement, PerfReport, PerfRunBundle, PerfRunMetadata, PerfSuiteId,
@@ -3867,6 +4290,44 @@ mod tests {
         ]);
         assert!(!report.rows.is_empty());
         assert!(report.rows.iter().any(|row| row.cells.len() == 2));
+    }
+
+    #[test]
+    fn trend_index_compares_latest_previous_and_baseline() {
+        let baseline_bundle = fake_bundle("host-a", PerfSuiteId::CoreKernel);
+        let baseline = baseline_from_bundle("accepted", &baseline_bundle);
+        let mut previous = fake_bundle("host-a", PerfSuiteId::CoreKernel);
+        previous.label = "previous".into();
+        previous.generated_at = "2026-03-28".into();
+        previous.report.measurements[0].throughput_per_second = 9_000.0;
+        let mut latest = fake_bundle("host-a", PerfSuiteId::CoreKernel);
+        latest.label = "latest".into();
+        latest.generated_at = "2026-03-29".into();
+        latest.report.measurements[0].throughput_per_second = 11_000.0;
+
+        let trend = build_trend_index(&[previous, latest], &[baseline]);
+        let measurement = trend
+            .entries
+            .iter()
+            .find(|entry| entry.kind == "measurement")
+            .expect("measurement trend entry");
+        assert_eq!(measurement.gating_class, "blocking");
+        assert_eq!(
+            measurement
+                .latest
+                .as_ref()
+                .map(|point| point.label.as_str()),
+            Some("latest")
+        );
+        assert_eq!(
+            measurement
+                .previous
+                .as_ref()
+                .map(|point| point.label.as_str()),
+            Some("previous")
+        );
+        assert!(measurement.latest_vs_previous_delta_pct.unwrap() > 20.0);
+        assert!(measurement.latest_vs_baseline_delta_pct.unwrap() > 9.0);
     }
 
     fn fake_bundle(host_id: &str, suite_id: PerfSuiteId) -> PerfRunBundle {

@@ -136,12 +136,15 @@ jobs:
           printf '%s' 'ci-pilot-token' > "$workdir/config/pilot-operator.token"
           cat > "$workdir/config/pilot-service.json" <<'JSON'
           {
-            "config_version": "pilot-v1",
+            "config_version": "pilot-v2-container-smoke",
             "schema_version": "v1",
             "service_mode": "single_node",
             "bind_addr": "0.0.0.0:3000",
-            "database_path": "/tmp/aether/coordination.sqlite",
-            "audit_log_path": "/tmp/aether/audit.jsonl",
+            "storage": {
+              "kind": "sqlite",
+              "data_root": "/var/lib/aether/namespaces"
+            },
+            "audit_log_path": "/var/lib/aether/audit.jsonl",
             "auth": {
               "revoked_token_ids": [],
               "revoked_principal_ids": [],
@@ -156,6 +159,7 @@ jobs:
                     "visibilities": []
                   },
                   "token_file": "pilot-operator.token",
+                  "namespaces": ["acme"],
                   "revoked": false
                 }
               ]
@@ -182,7 +186,66 @@ jobs:
 
           curl -fsS \
             -H "Authorization: Bearer ci-pilot-token" \
+            -H "X-Aether-Namespace: acme" \
             "http://127.0.0.1:3000/v1/status" > /tmp/aether-status.json
+          cat > /tmp/aether-append.json <<'JSON'
+          {
+            "datoms": [
+              {
+                "entity": 1,
+                "attribute": 1,
+                "value": {"String": "container-smoke"},
+                "op": "Assert",
+                "element": 1,
+                "replica": 1,
+                "causal_context": {"frontier": []},
+                "provenance": {
+                  "author_principal": "ci",
+                  "agent_id": "github-actions",
+                  "tool_id": "container-smoke",
+                  "session_id": "ci",
+                  "source_ref": {"uri": "container-smoke", "digest": null},
+                  "parent_datom_ids": [],
+                  "confidence": 1.0,
+                  "trust_domain": "ci",
+                  "schema_version": "v1"
+                },
+                "policy": null
+              }
+            ]
+          }
+          JSON
+          curl -fsS \
+            -H "Authorization: Bearer ci-pilot-token" \
+            -H "X-Aether-Namespace: acme" \
+            -H "Content-Type: application/json" \
+            --data @/tmp/aether-append.json \
+            "http://127.0.0.1:3000/v1/append" > /tmp/aether-append-response.json
+          forbidden_status="$(curl -sS -o /tmp/aether-forbidden.json -w '%{http_code}' \
+            -H "Authorization: Bearer ci-pilot-token" \
+            -H "X-Aether-Namespace: other" \
+            "http://127.0.0.1:3000/v1/status")"
+          test "$forbidden_status" = "403"
+          docker stop "$container_id" >/dev/null
+          docker start "$container_id" >/dev/null
+          for attempt in $(seq 1 30); do
+            if curl -fsS "http://127.0.0.1:3000/health" >/tmp/aether-health-after-restart.json; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "container did not become healthy after restart" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          curl -fsS \
+            -H "Authorization: Bearer ci-pilot-token" \
+            -H "X-Aether-Namespace: acme" \
+            "http://127.0.0.1:3000/v1/history" > /tmp/aether-history-after-restart.json
+          curl -fsS \
+            -H "Authorization: Bearer ci-pilot-token" \
+            -H "X-Aether-Namespace: acme" \
+            "http://127.0.0.1:3000/v1/status" > /tmp/aether-status-after-restart.json
           python3 - <<'PY'
           import json
 
@@ -190,14 +253,25 @@ jobs:
               health = json.load(handle)
           with open("/tmp/aether-status.json", "r", encoding="utf-8") as handle:
               status = json.load(handle)
+          with open("/tmp/aether-history-after-restart.json", "r", encoding="utf-8") as handle:
+              history_after_restart = json.load(handle)
+          with open("/tmp/aether-status-after-restart.json", "r", encoding="utf-8") as handle:
+              status_after_restart = json.load(handle)
 
           assert health["status"] == "ok", health
           assert status["status"] == "ok", status
-          assert status["config_version"] == "pilot-v1", status
+          assert status["config_version"] == "pilot-v2-container-smoke", status
           assert status["schema_version"] == "v1", status
           assert status["service_mode"] == "single_node", status
           assert status["storage"]["backend"] == "sqlite", status
+          assert status["storage"]["data_root"] == "/var/lib/aether/namespaces", status
+          assert status["effective_namespace"] == "acme", status
           assert status["principals"][0]["token_id"] == "token:pilot-operator", status
+          assert status["principals"][0]["namespaces"] == ["acme"], status
+          assert len(history_after_restart["datoms"]) == 1, history_after_restart
+          assert history_after_restart["datoms"][0]["value"] == {"String": "container-smoke"}, history_after_restart
+          assert status_after_restart["effective_namespace"] == "acme", status_after_restart
+          assert status_after_restart["active_namespace_count"] == 1, status_after_restart
           PY
 
   python-sdk:

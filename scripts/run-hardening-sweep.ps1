@@ -473,10 +473,17 @@ function Invoke-AdminPack {
     $packageTokenPath = Join-Path $packageRoot "config\pilot-operator.token"
     $packageConfigPath = Join-Path $packageRoot "config\pilot-service.json"
     $packageBinaryPath = Join-Path $packageRoot "bin\aether_pilot_service.exe"
+    $operatorBinaryPath = Join-Path $packageRoot "bin\aetherctl.exe"
     $runScriptPath = Join-Path $packageRoot "run-pilot-service.ps1"
+    $runCmdPath = Join-Path $packageRoot "run-pilot-service.cmd"
+    $opsScriptPath = Join-Path $packageRoot "run-aether-ops.ps1"
+    $opsCmdPath = Join-Path $packageRoot "run-aether-ops.cmd"
     $backupScriptPath = Join-Path $packageRoot "backup-pilot-state.ps1"
+    $backupCmdPath = Join-Path $packageRoot "backup-pilot-state.cmd"
     $restoreScriptPath = Join-Path $packageRoot "restore-pilot-state.ps1"
+    $restoreCmdPath = Join-Path $packageRoot "restore-pilot-state.cmd"
     $rotateScriptPath = Join-Path $packageRoot "rotate-pilot-token.ps1"
+    $rotateCmdPath = Join-Path $packageRoot "rotate-pilot-token.cmd"
 
     Invoke-HardeningCheck `
         -Persona "admin" `
@@ -500,7 +507,18 @@ function Invoke-AdminPack {
                 }
                 Expand-Archive -Path $zipPath -DestinationPath $unpackedRoot -Force
                 Assert-PathExists (Join-Path $unpackedRoot "bin\aether_pilot_service.exe") "expanded pilot bundle"
+                Assert-PathExists (Join-Path $unpackedRoot "bin\aetherctl.exe") "expanded operator TUI binary"
                 Assert-PathExists $runScriptPath "packaged launch script"
+                Assert-PathExists $runCmdPath "packaged launch cmd"
+                Assert-PathExists $operatorBinaryPath "packaged operator TUI binary"
+                Assert-PathExists $opsScriptPath "packaged operator launch script"
+                Assert-PathExists $opsCmdPath "packaged operator launch cmd"
+                Assert-PathExists $backupScriptPath "packaged backup script"
+                Assert-PathExists $backupCmdPath "packaged backup cmd"
+                Assert-PathExists $restoreScriptPath "packaged restore script"
+                Assert-PathExists $restoreCmdPath "packaged restore cmd"
+                Assert-PathExists $rotateScriptPath "packaged token rotation script"
+                Assert-PathExists $rotateCmdPath "packaged token rotation cmd"
 
                 $serviceHandle = Start-ServiceProcess `
                     -PackName "admin" `

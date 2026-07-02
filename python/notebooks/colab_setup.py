@@ -6,6 +6,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,10 @@ class NotebookService:
     repo_root: Path
     base_url: str
     process: subprocess.Popen[str]
+    bearer_token: str | None = None
+    namespace: str | None = None
+    scratch_dir: Path | None = None
+    config_path: Path | None = None
 
 
 def bootstrap_repo(
@@ -98,6 +103,103 @@ def start_http_service(
     return NotebookService(repo_root=root, base_url=base_url, process=process)
 
 
+def start_pilot_service(
+    repo_root: str | os.PathLike[str],
+    *,
+    host: str = "127.0.0.1",
+    port: int | None = None,
+    namespace: str = "notebook",
+    bearer_token: str = "notebook-pilot-token",
+) -> NotebookService:
+    root = Path(repo_root)
+    _ensure_python_path(root)
+
+    service_port = port or _free_port()
+    base_url = f"http://{host}:{service_port}"
+    scratch_dir = Path(tempfile.mkdtemp(prefix="aether-notebook-pilot-"))
+    config_dir = scratch_dir / "config"
+    data_root = scratch_dir / "namespaces"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    data_root.mkdir(parents=True, exist_ok=True)
+
+    token_path = config_dir / "pilot-operator.token"
+    token_path.write_text(bearer_token, encoding="utf-8")
+    config_path = config_dir / "pilot-service.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "config_version": "pilot-v2-colab",
+                "schema_version": "v1",
+                "service_mode": "single_node",
+                "bind_addr": f"{host}:{service_port}",
+                "storage": {
+                    "kind": "sqlite",
+                    "data_root": str(data_root),
+                },
+                "audit_log_path": str(scratch_dir / "audit.jsonl"),
+                "auth": {
+                    "revoked_token_ids": [],
+                    "revoked_principal_ids": [],
+                    "tokens": [
+                        {
+                            "principal": "notebook-operator",
+                            "principal_id": "principal:notebook-operator",
+                            "token_id": "token:notebook-operator",
+                            "scopes": ["append", "query", "explain", "ops"],
+                            "policy_context": {
+                                "capabilities": ["executor", "memory_reader"],
+                                "visibilities": [],
+                            },
+                            "token_file": token_path.name,
+                            "namespaces": [namespace],
+                            "revoked": False,
+                        }
+                    ],
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["AETHER_PILOT_CONFIG"] = str(config_path)
+    cargo_bin = Path.home() / ".cargo" / "bin"
+    if cargo_bin.exists():
+        env["PATH"] = f"{cargo_bin}{os.pathsep}{env.get('PATH', '')}"
+
+    try:
+        process = subprocess.Popen(
+            [
+                "cargo",
+                "run",
+                "-p",
+                "aether_api",
+                "--example",
+                "pilot_http_kernel_service",
+            ],
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=env,
+        )
+        _wait_for_health(base_url, process)
+    except Exception:
+        shutil.rmtree(scratch_dir, ignore_errors=True)
+        raise
+
+    return NotebookService(
+        repo_root=root,
+        base_url=base_url,
+        process=process,
+        bearer_token=bearer_token,
+        namespace=namespace,
+        scratch_dir=scratch_dir,
+        config_path=config_path,
+    )
+
+
 def stop_http_service(service: NotebookService) -> None:
     service.process.terminate()
     try:
@@ -105,6 +207,8 @@ def stop_http_service(service: NotebookService) -> None:
     except subprocess.TimeoutExpired:
         service.process.kill()
         service.process.wait(timeout=10.0)
+    if service.scratch_dir is not None:
+        shutil.rmtree(service.scratch_dir, ignore_errors=True)
 
 
 def pretty_json(value: Any) -> None:

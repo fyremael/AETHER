@@ -92,6 +92,7 @@ Read and run:
 5. `python/notebooks/04_governed_incident_blackboard.ipynb`
 6. `python/notebooks/05_policy_and_sidecars.ipynb`
 7. `python/notebooks/06_ai_support_resolution_desk.ipynb`
+8. `python/notebooks/07_operating_proof_and_trends.ipynb`
 
 That path uses the Python SDK and the real HTTP example service so new users
 can learn by running the current boundary instead of only reading about it.

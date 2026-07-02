@@ -332,6 +332,103 @@ def build_promotion_issue_markdown(
     )
 
 
+def pack_status_from_results(results: list[dict[str, Any]], group_name: str) -> str:
+    matches = [item for item in results if item.get("persona") == group_name]
+    if not matches:
+        return "skipped"
+    statuses = {str(item.get("status", "missing")) for item in matches}
+    if "failed" in statuses:
+        return "failed"
+    if "passed" in statuses:
+        return "passed"
+    if "skipped" in statuses:
+        return "skipped"
+    return "missing"
+
+
+def build_gate_summary(
+    config: dict[str, Any],
+    hardening_payload: dict[str, Any] | None,
+    hardening_source: str | None,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    results = hardening_payload.get("results", []) if hardening_payload else []
+    groups = []
+    for name in config["promotion_order"]:
+        group = config["groups"][name]
+        mode = "blocking" if group.get("blocking") else "diagnostic"
+        latest_status = pack_status_from_results(results, name)
+        groups.append(
+            {
+                "group": name,
+                "label": group["label"],
+                "workflow_target": group["workflow_target"],
+                "mode": mode,
+                "latest_hardening_status": latest_status,
+                "release_readiness_status": latest_status
+                if mode == "blocking"
+                else "diagnostic",
+            }
+        )
+    return {
+        "generated_at": generated_at
+        or datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "promotion_threshold": config["minimum_consecutive_scheduled_green_runs"],
+        "workflow_file": config["workflow_file"],
+        "hardening_source": hardening_source,
+        "groups": groups,
+    }
+
+
+def render_gate_summary_markdown(summary: dict[str, Any]) -> str:
+    lines = [
+        "# AETHER Hardening Gate State",
+        "",
+        f"- Generated: `{summary['generated_at']}`",
+        f"- Workflow: `{summary['workflow_file']}`",
+        f"- Promotion threshold: `{summary['promotion_threshold']}` scheduled green runs",
+        f"- Latest hardening source: `{summary.get('hardening_source') or 'none'}`",
+        "",
+        "| Group | Mode | Latest hardening status | Release-readiness status | Target |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for group in summary["groups"]:
+        lines.append(
+            f"| `{group['group']}` | `{group['mode']}` | "
+            f"`{group['latest_hardening_status']}` | "
+            f"`{group['release_readiness_status']}` | `{group['workflow_target']}` |"
+        )
+    lines.extend(
+        [
+            "",
+            "Blocking packs are expected to fail CI/release promotion when their current evidence fails.",
+            "Diagnostic packs remain visible evidence until their scheduled streak satisfies the promotion threshold.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def cmd_gate_summary(args: argparse.Namespace) -> int:
+    config = load_config(Path(args.config))
+    hardening_payload = None
+    hardening_source = None
+    if args.hardening_json:
+        hardening_path = Path(args.hardening_json)
+        if hardening_path.exists():
+            hardening_payload = load_json(hardening_path)
+            hardening_source = str(hardening_path)
+    summary = build_gate_summary(
+        config=config,
+        hardening_payload=hardening_payload,
+        hardening_source=hardening_source,
+        generated_at=args.generated_at,
+    )
+    write_json(Path(args.out_json), summary)
+    write_text(Path(args.out_md), render_gate_summary_markdown(summary))
+    return 0
+
+
 def cmd_evaluate_streaks(args: argparse.Namespace) -> int:
     config = load_config(Path(args.config))
     current_metrics = load_json(Path(args.current_metrics))
@@ -444,6 +541,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--pack-status", action="append", default=[], metavar="GROUP=STATUS"
     )
     write_run.set_defaults(func=cmd_write_run_metrics)
+
+    gate_summary = subparsers.add_parser("gate-summary")
+    gate_summary.add_argument("--config", required=True)
+    gate_summary.add_argument("--hardening-json")
+    gate_summary.add_argument("--out-json", required=True)
+    gate_summary.add_argument("--out-md", required=True)
+    gate_summary.add_argument("--generated-at")
+    gate_summary.set_defaults(func=cmd_gate_summary)
 
     evaluate = subparsers.add_parser("evaluate-streaks")
     evaluate.add_argument("--config", required=True)

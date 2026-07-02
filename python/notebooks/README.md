@@ -11,8 +11,9 @@ These notebooks are designed for:
 
 Each notebook is independent and Colab-friendly.
 When opened in Colab, the setup cells clone the repository if needed, install
-Rust if `cargo` is not present, and start the real
-`crates/aether_api/examples/http_kernel_service.rs` boundary.
+Rust if `cargo` is not present, and start the authenticated pilot
+`crates/aether_api/examples/pilot_http_kernel_service.rs` boundary with a
+temporary SQLite namespace and notebook-local operator token.
 
 The first run in a fresh Colab session takes a few minutes because it installs
 the Rust toolchain and compiles the example service.
@@ -27,6 +28,7 @@ the Rust toolchain and compiles the example service.
 | `04_governed_incident_blackboard.ipynb` | Product-facing governed board walkthrough | [Open](https://colab.research.google.com/github/fyremael/AETHER/blob/main/python/notebooks/04_governed_incident_blackboard.ipynb) |
 | `05_policy_and_sidecars.ipynb` | Learn policy narrowing plus artifact/vector sidecars | [Open](https://colab.research.google.com/github/fyremael/AETHER/blob/main/python/notebooks/05_policy_and_sidecars.ipynb) |
 | `06_ai_support_resolution_desk.ipynb` | ML-facing support application walkthrough | [Open](https://colab.research.google.com/github/fyremael/AETHER/blob/main/python/notebooks/06_ai_support_resolution_desk.ipynb) |
+| `07_operating_proof_and_trends.ipynb` | M6 operator proof: status, reports, cut diffs, audit, trends | [Open](https://colab.research.google.com/github/fyremael/AETHER/blob/main/python/notebooks/07_operating_proof_and_trends.ipynb) |
 
 ## Suggested Order
 
@@ -40,6 +42,7 @@ That progression mirrors the wider education path:
 4. how governed coordination feels in a product story
 5. how policy and sidecar memory stay subordinate to semantic control
 6. how a buyer-relevant support application can be built honestly on that proof
+7. how the design-partner pilot is operated, audited, diffed, and measured
 
 ## Local Use
 

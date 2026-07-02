@@ -110,12 +110,32 @@ jobs:
           ) + $bundles
           & cargo @arguments
 
+      - name: Build trend index
+        shell: pwsh
+        run: |
+          $bundles = Get-ChildItem -Path artifacts/performance -Recurse -Include bundle.json,performance-bundle.json | Select-Object -ExpandProperty FullName
+          if (-not $bundles) {
+            throw "No performance bundles were downloaded for trend summarization."
+          }
+          $baselines = Get-ChildItem -Path fixtures/performance/baselines -Recurse -Filter *.json | Select-Object -ExpandProperty FullName
+          $baselineArgs = @()
+          foreach ($baseline in $baselines) {
+            $baselineArgs += @("--baseline", $baseline)
+          }
+          $arguments = @(
+            "run", "-p", "aether_api", "--example", "performance_trend_report", "--release", "--",
+            "--output-json", "artifacts/performance/trends/latest.json",
+            "--output-report", "artifacts/performance/trends/latest.md"
+          ) + $baselineArgs + $bundles
+          & cargo @arguments
+
       - name: Upload matrix summary
         uses: actions/upload-artifact@v4
         with:
           name: capacity-matrix-summary
           path: |
             artifacts/performance/matrix
+            artifacts/performance/trends
           if-no-files-found: error
 
   capacity-report:

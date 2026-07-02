@@ -27,6 +27,9 @@ func TestStartupLoadsOverviewData(t *testing.T) {
 	if loaded.status == nil || loaded.status.ServiceMode != "single_node" {
 		t.Fatalf("expected service status to load, got %#v", loaded.status)
 	}
+	if loaded.status.EffectiveNamespace == nil || *loaded.status.EffectiveNamespace != "default" {
+		t.Fatalf("expected effective namespace to load, got %#v", loaded.status)
+	}
 	if loaded.report == nil || loaded.report.HistoryLen != 2 {
 		t.Fatalf("expected report to load, got %#v", loaded.report)
 	}
@@ -35,6 +38,19 @@ func TestStartupLoadsOverviewData(t *testing.T) {
 	}
 	if loaded.lastLiveRefresh.IsZero() {
 		t.Fatalf("expected last live refresh to be set")
+	}
+
+	view := loaded.renderOverview()
+	for _, expected := range []string{
+		"Effective namespace: default",
+		"Current authorized: 1",
+		"Claimable: 1",
+		"Accepted outcomes: 1",
+		"Rejected outcomes: 1",
+	} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("expected overview to contain %q, got %q", expected, view)
+		}
 	}
 }
 
@@ -346,11 +362,12 @@ func baseHistory() *client.HistoryResponse {
 
 func baseStatus() *client.ServiceStatusResponse {
 	return &client.ServiceStatusResponse{
-		Status:        "ok",
-		BuildVersion:  "0.1.0",
-		ConfigVersion: "pilot-v1",
-		SchemaVersion: "v1",
-		ServiceMode:   "single_node",
+		Status:             "ok",
+		BuildVersion:       "0.1.0",
+		ConfigVersion:      "pilot-v1",
+		SchemaVersion:      "v1",
+		EffectiveNamespace: ptrString("default"),
+		ServiceMode:        "single_node",
 		Principals: []client.PrincipalStatusSummary{
 			{
 				Principal:   "pilot-operator",
@@ -456,11 +473,11 @@ func baseReport(currentCount int) *client.CoordinationPilotReport {
 
 func baseDelta() *client.CoordinationDeltaReport {
 	return &client.CoordinationDeltaReport{
-		GeneratedAtMS:    1000,
-		Left:             client.AsOfCut(9),
-		Right:            client.CurrentCut(),
-		LeftHistoryLen:   2,
-		RightHistoryLen:  2,
+		GeneratedAtMS:   1000,
+		Left:            client.AsOfCut(9),
+		Right:           client.CurrentCut(),
+		LeftHistoryLen:  2,
+		RightHistoryLen: 2,
 		CurrentAuthorized: client.ReportSectionDelta{
 			Changed: []client.ReportRowChange{
 				{

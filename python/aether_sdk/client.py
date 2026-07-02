@@ -52,6 +52,9 @@ class AetherClient:
     def status(self) -> dict[str, Any]:
         return self._request_json("GET", "/v1/status")
 
+    def audit_log(self) -> dict[str, Any]:
+        return self._request_json("GET", "/v1/audit")
+
     def history(self) -> dict[str, Any]:
         return self._request_json("GET", "/v1/history")
 
@@ -138,6 +141,39 @@ class AetherClient:
         if policy_context is not None:
             payload["policy_context"] = policy_context
         return self._request_json("POST", "/v1/explain/tuple", payload)
+
+    def coordination_report(
+        self,
+        *,
+        policy_context: PolicyContext | dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if policy_context is not None:
+            payload["policy_context"] = policy_context
+        return self._request_json(
+            "POST",
+            "/v1/reports/pilot/coordination",
+            payload,
+        )
+
+    def coordination_delta_report(
+        self,
+        *,
+        left: dict[str, Any] | None = None,
+        right: dict[str, Any] | None = None,
+        policy_context: PolicyContext | dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "left": left or {"kind": "current"},
+            "right": right or {"kind": "current"},
+        }
+        if policy_context is not None:
+            payload["policy_context"] = policy_context
+        return self._request_json(
+            "POST",
+            "/v1/reports/pilot/coordination-delta",
+            payload,
+        )
 
     def register_artifact_reference(
         self,

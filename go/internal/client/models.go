@@ -251,6 +251,7 @@ type ServiceStatusResponse struct {
 	ConfigVersion        string                   `json:"config_version"`
 	SchemaVersion        string                   `json:"schema_version"`
 	BindAddr             *string                  `json:"bind_addr,omitempty"`
+	EffectiveNamespace   *string                  `json:"effective_namespace,omitempty"`
 	ServiceMode          string                   `json:"service_mode"`
 	Storage              ServiceStatusStorage     `json:"storage"`
 	ActiveNamespaceCount int                      `json:"active_namespace_count"`
@@ -272,6 +273,9 @@ type AuthReloadResponse struct {
 
 type AuditContext struct {
 	Namespace             *string  `json:"namespace,omitempty"`
+	CommandSource         *string  `json:"command_source,omitempty"`
+	SelectedReport        *string  `json:"selected_report,omitempty"`
+	SelectedCut           *string  `json:"selected_cut,omitempty"`
 	TemporalView          *string  `json:"temporal_view"`
 	QueryGoal             *string  `json:"query_goal"`
 	TupleID               *uint64  `json:"tuple_id"`

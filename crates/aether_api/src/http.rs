@@ -1,7 +1,7 @@
 use crate::{
     deployment::PilotServiceConfig, ApiError, AppendRequest, AsOfRequest, AuthReloadResponse,
-    CoordinationDeltaReportRequest, CoordinationPilotReportRequest, CurrentStateRequest,
-    ExplainTupleRequest, FederatedExplainReport, FederatedHistoryRequest,
+    CoordinationCut, CoordinationDeltaReportRequest, CoordinationPilotReportRequest,
+    CurrentStateRequest, ExplainTupleRequest, FederatedExplainReport, FederatedHistoryRequest,
     FederatedRunDocumentRequest, GetArtifactReferenceRequest, HistoryRequest, KernelService,
     NamespaceId, ParseDocumentRequest, PartitionAppendRequest, PartitionHistoryRequest,
     PartitionStateRequest, PartitionStatusResponse, PostgresKernelService, PromoteReplicaRequest,
@@ -536,6 +536,12 @@ pub struct AuditEntry {
 pub struct AuditContext {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_report: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_cut: Option<String>,
     pub temporal_view: Option<String>,
     pub query_goal: Option<String>,
     pub tuple_id: Option<u64>,
@@ -1458,6 +1464,8 @@ async fn service_status(
         }
     };
     let response = state.status_snapshot()?;
+    let mut response = response;
+    response.effective_namespace = Some(namespace.to_string());
     state.audit.record(AuditEntry::for_request(
         "GET",
         "/v1/status",
@@ -1466,6 +1474,8 @@ async fn service_status(
         AuthScope::Ops,
         AuditContext {
             namespace: Some(namespace.to_string()),
+            command_source: Some("http".into()),
+            selected_report: Some("service_status".into()),
             temporal_view: Some("service_status".into()),
             ..Default::default()
         },
@@ -1478,6 +1488,8 @@ async fn history(
     headers: HeaderMap,
 ) -> Result<Json<crate::HistoryResponse>, HttpError> {
     let request_context = AuditContext {
+        command_source: Some("http".into()),
+        selected_report: Some("history".into()),
         temporal_view: Some("history".into()),
         ..Default::default()
     };
@@ -1682,7 +1694,10 @@ async fn coordination_pilot_report(
     Json(request): Json<CoordinationPilotReportRequest>,
 ) -> Result<Json<crate::CoordinationPilotReport>, HttpError> {
     let request_context = AuditContext {
+        command_source: Some("http".into()),
         temporal_view: Some("coordination_pilot_report".into()),
+        selected_report: Some("coordination_pilot".into()),
+        selected_cut: Some("current".into()),
         ..Default::default()
     };
     let response = state.execute(
@@ -1722,7 +1737,14 @@ async fn coordination_delta_report(
     Json(request): Json<CoordinationDeltaReportRequest>,
 ) -> Result<Json<crate::CoordinationDeltaReport>, HttpError> {
     let request_context = AuditContext {
+        command_source: Some("http".into()),
         temporal_view: Some("coordination_delta_report".into()),
+        selected_report: Some("coordination_delta".into()),
+        selected_cut: Some(format!(
+            "{} -> {}",
+            coordination_cut_label(&request.left),
+            coordination_cut_label(&request.right)
+        )),
         ..Default::default()
     };
     let response = state.execute(
@@ -1772,7 +1794,9 @@ async fn partition_status(
         "/v1/partitions/status",
         AuthScope::Ops,
         AuditContext {
+            command_source: Some("http".into()),
             temporal_view: Some("partition_status".into()),
+            selected_report: Some("partition_status".into()),
             ..Default::default()
         },
         move |service, _principal, context| {
@@ -1947,7 +1971,9 @@ async fn federated_run_document(
     Json(request): Json<FederatedRunDocumentRequest>,
 ) -> Result<Json<crate::FederatedRunDocumentResponse>, HttpError> {
     let request_context = AuditContext {
+        command_source: Some("http".into()),
         temporal_view: Some("federated_run_document".into()),
+        selected_report: Some("federated_run".into()),
         ..Default::default()
     };
     let response = state.execute_partitioned(
@@ -1985,7 +2011,9 @@ async fn federated_report(
     Json(request): Json<FederatedRunDocumentRequest>,
 ) -> Result<Json<FederatedExplainReport>, HttpError> {
     let request_context = AuditContext {
+        command_source: Some("http".into()),
         temporal_view: Some("federated_report".into()),
+        selected_report: Some("federated_report".into()),
         ..Default::default()
     };
     let response = state.execute_partitioned(
@@ -2026,6 +2054,8 @@ async fn explain_tuple(
 ) -> Result<Json<crate::ExplainTupleResponse>, HttpError> {
     let request_context = AuditContext {
         tuple_id: Some(request.tuple_id.0),
+        command_source: Some("http".into()),
+        selected_report: Some("tuple_explain".into()),
         ..Default::default()
     };
     let response = state.execute(
@@ -2156,15 +2186,24 @@ async fn search_vectors(
 
 fn audit_context_for_append(request: &AppendRequest) -> AuditContext {
     AuditContext {
+        command_source: Some("http".into()),
         datom_count: Some(request.datoms.len()),
         last_element: request.datoms.last().map(|datom| datom.element.0),
         ..Default::default()
     }
 }
 
+fn coordination_cut_label(cut: &CoordinationCut) -> String {
+    match cut {
+        CoordinationCut::Current => "current".into(),
+        CoordinationCut::AsOf { element } => format!("as_of(e{})", element.0),
+    }
+}
+
 fn audit_context_for_document(dsl: &str) -> AuditContext {
     let summary = summarize_document_dsl(dsl);
     AuditContext {
+        command_source: Some("http".into()),
         temporal_view: summary.temporal_view,
         query_goal: summary.query_goal,
         requested_element: summary.requested_element,

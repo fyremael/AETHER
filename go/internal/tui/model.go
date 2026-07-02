@@ -751,6 +751,9 @@ func (m Model) renderOverview() string {
 		if m.status.BindAddr != nil {
 			lines = append(lines, fmt.Sprintf("Bind: %s", *m.status.BindAddr))
 		}
+		if m.status.EffectiveNamespace != nil {
+			lines = append(lines, fmt.Sprintf("Effective namespace: %s", *m.status.EffectiveNamespace))
+		}
 		lines = append(lines, fmt.Sprintf("Storage: %s", stringOrDefault(m.status.Storage.Backend, "-")))
 		if m.status.Storage.DatabasePath != nil {
 			lines = append(lines, fmt.Sprintf("Database: %s", *m.status.Storage.DatabasePath))

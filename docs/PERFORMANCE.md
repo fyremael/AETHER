@@ -16,7 +16,7 @@ whole system. Instead we record:
 
 ## What Exists Today
 
-The performance program now has nine aligned layers:
+The performance program now has ten aligned layers:
 
 1. a live console dashboard in `crates/aether_api/examples/performance_dashboard.rs`
 2. a host-aware release-mode report example in `crates/aether_api/examples/performance_report.rs`
@@ -24,9 +24,10 @@ The performance program now has nine aligned layers:
 4. a host-aware drift comparison example in `crates/aether_api/examples/performance_drift_report.rs`
 5. a host snapshot example in `crates/aether_api/examples/performance_host_snapshot.rs`
 6. a matrix summary example in `crates/aether_api/examples/performance_matrix_report.rs`
-7. a capacity-curve example in `crates/aether_api/examples/performance_capacity_curves.rs`
-8. a capacity-report example in `crates/aether_api/examples/performance_capacity_report.rs`
-9. Criterion benchmarks in `crates/aether_api/benches/kernel_perf.rs`
+7. a trend-index example in `crates/aether_api/examples/performance_trend_report.rs`
+8. a capacity-curve example in `crates/aether_api/examples/performance_capacity_curves.rs`
+9. a capacity-report example in `crates/aether_api/examples/performance_capacity_report.rs`
+10. Criterion benchmarks in `crates/aether_api/benches/kernel_perf.rs`
 
 All of them share the same fixture builders, suite taxonomy, drift logic, and
 run-catalog types in `crates/aether_api/src/perf.rs`.
@@ -144,6 +145,11 @@ The latest matrix surfaces live under:
 
 - `artifacts/performance/matrix/latest.json`
 - `artifacts/performance/matrix/latest.md`
+
+The latest trend-index surfaces live under:
+
+- `artifacts/performance/trends/latest.json`
+- `artifacts/performance/trends/latest.md`
 
 The latest perturbation and capacity surfaces now also live under:
 
@@ -273,6 +279,29 @@ cargo run -p aether_api --example performance_matrix_report --release -- \
   <bundle-path-1> <bundle-path-2> ...
 ```
 
+### Build a trend index from run bundles
+
+Windows operator path:
+
+```text
+double-click scripts/run-performance-trends.cmd
+```
+
+Technical path:
+
+```bash
+cargo run -p aether_api --example performance_trend_report --release -- \
+  --output-json artifacts/performance/trends/latest.json \
+  --output-report artifacts/performance/trends/latest.md \
+  --baseline fixtures/performance/baselines/core_kernel/dev-chad-windows-native.json \
+  --baseline fixtures/performance/baselines/service_in_process/dev-chad-windows-native.json \
+  <bundle-path-1> <bundle-path-2> ...
+```
+
+The trend index is an artifact index, not a new gate. It answers “what was the
+latest value, what was the prior value, and what accepted baseline applies?”
+without replacing same-host drift comparison.
+
 ### Run the perturbation sweep
 
 Windows operator path:
@@ -369,13 +398,14 @@ The current rollout is:
 - native Windows dev host remains the first accepted release baseline
 - `release-readiness` and `pilot-launch-validation` remain anchored to the mature Windows `core_kernel` and `service_in_process` slices
 - the `Performance Matrix` workflow publishes Windows and Ubuntu run bundles plus a comparative summary
+- the same workflow now publishes a trend index over the downloaded bundles and tracked accepted baselines
 - HTTP and replicated-partition measurements are emitted into artifacts immediately, but they do not fail the release gate yet
 
 ## Current Gaps
 
 The matrix is real, but it is not the end of the story.
 
-- Historical trend storage is still artifact-based rather than a persistent benchmark database.
+- Historical trend storage is now indexed from saved artifacts, but it is still not a persistent benchmark database.
 - GitHub-host accepted baselines are not yet promoted into tracked fixture references.
 - HTTP and replicated-partition suites are measured, but they are still observational rather than fail-level release gates.
 - Memory figures remain structural lower-bound estimates rather than allocator-exact telemetry.

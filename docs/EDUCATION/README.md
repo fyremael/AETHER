@@ -42,6 +42,8 @@ If you want runnable onboarding instead of prose-first onboarding, use:
 4. `python/notebooks/03_recursive_closure_and_explain.ipynb`
 5. `python/notebooks/04_governed_incident_blackboard.ipynb`
 6. `python/notebooks/05_policy_and_sidecars.ipynb`
+7. `python/notebooks/06_ai_support_resolution_desk.ipynb`
+8. `python/notebooks/07_operating_proof_and_trends.ipynb`
 
 That path stays inside the current Python boundary and HTTP example service,
 so readers can touch the real v1 surfaces while they learn.

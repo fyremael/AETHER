@@ -27,11 +27,11 @@ implemented system.
 
 ## Performance, Storage, And Release Discipline
 
-- The performance suite now supports host-aware run bundles, suite-specific drift comparison, stress fixtures, and matrix summaries across the dev host, WSL, and GitHub runners, but it does not yet maintain historical benchmark trends beyond saved artifacts and uploaded workflow bundles.
+- The performance suite now supports host-aware run bundles, suite-specific drift comparison, stress fixtures, matrix summaries, and a lightweight trend index across saved bundles, but it is still artifact-based rather than a persistent benchmark database.
 - The new capacity planner now produces concrete node-class guidance and explicit scale-out triggers, but those envelopes are still internal planning outputs from single-host calibration rather than public guarantees or cloud-SKU-specific commitments.
 - The accepted regression gate is still deliberately narrow: `core_kernel` and `service_in_process` on the canonical native Windows dev host are the tracked release baselines, while HTTP and replicated-partition suites remain observational until their variance is better understood.
 - The current measured default `M` envelope is conservative: it presently recommends `1,024` pilot-board tasks even though larger ladders run correctly, because operator/report latency degrades before replay or local storage become the limiting factor.
-- The structured release-readiness suite now produces a coherent QA evidence pack, but it is still a pre-release verification flow rather than a signed artifact and promotion pipeline.
+- The structured release-readiness suite now produces a coherent QA evidence pack plus hardening gate-state summary, but it is still a pre-release verification flow rather than a signed artifact and promotion pipeline.
 - The new QA hardening workflow is intentionally non-blocking in phase one. It is a diagnostic program for surfacing admin, operator, user, and exec defects before stable subchecks are promoted into `CI` or release-readiness.
 - The repository now has a responsible-disclosure policy, but it is not yet advertising a paid public bug bounty.
 - Memory figures in the performance report are structural lower-bound estimates rather than allocator-exact telemetry.
@@ -45,7 +45,7 @@ implemented system.
 - The AI support resolution desk app pack is a flagship ML-facing reference application over current proof, not a claim that AETHER is already a finished ML orchestration platform, autonomous support SaaS, or authoritative vector-truth layer.
 - The blackboard / TupleSpace language remains a reference pattern and explanation aid. It is not yet a stable top-level product API, facade contract, or replacement public identity for AETHER.
 - The Go shell and Python SDK are now real, but both remain early boundary clients rather than mature ecosystem surfaces with richer async/notebook/admin layers.
-- The new notebook hardening checks validate structure, bootstrap assumptions, and path integrity, but they do not yet execute full Colab notebook runs as a release blocker.
+- The notebook hardening checks validate structure, bootstrap assumptions, path integrity, and Python code-cell syntax, but they do not yet execute full Colab notebook runs as a release blocker.
 - Artifact and vector sidecar federation is now journal-subordinated and temporally exact on the SQLite-backed pilot path, but it is still a single-node backend and does not yet replicate or fail over independently of the kernel process.
 - Vector search can now project provenance-bearing semantic facts back into the rule layer, but the current projection is deliberately narrow: a three-field `(query_entity, matched_entity, score)` extensional fact shape.
 - The first partition-aware distributed-truth slice now includes imported-fact reasoning, federated explain/report surfaces, a SQLite-backed durable backend, and a single-host leader/follower replicated authority-partition prototype with restart-safe metadata, manual promotion, stale-epoch fencing, lag/degraded status, and divergent-prefix rejection. What it still does not include is follower-read contracts, automatic election, quorum consensus, multi-host replication, or a managed failover plane.

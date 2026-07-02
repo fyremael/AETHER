@@ -87,6 +87,8 @@ pub struct ServiceStatusResponse {
     pub schema_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bind_addr: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_namespace: Option<String>,
     pub service_mode: ServiceMode,
     pub storage: ServiceStatusStorage,
     #[serde(default)]
@@ -115,6 +117,7 @@ impl ServiceStatusResponse {
             config_version: config_version.into(),
             schema_version: schema_version.into(),
             bind_addr: None,
+            effective_namespace: None,
             service_mode: ServiceMode::SingleNode,
             storage: ServiceStatusStorage::default(),
             active_namespace_count: 1,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import sys
@@ -34,6 +35,16 @@ class NotebookOnboardingTest(unittest.TestCase):
                 self.assertTrue(data.get("cells"))
                 self.assertTrue(any(cell.get("source") for cell in data["cells"]))
 
+    def test_notebook_code_cells_compile(self) -> None:
+        for notebook_path in sorted(NOTEBOOK_ROOT.glob("*.ipynb")):
+            data = json.loads(notebook_path.read_text(encoding="utf-8"))
+            for index, cell in enumerate(data.get("cells", [])):
+                if cell.get("cell_type") != "code":
+                    continue
+                source = "".join(cell.get("source", []))
+                with self.subTest(notebook=notebook_path.name, cell=index):
+                    ast.parse(source)
+
     def test_notebook_readme_links_point_at_tracked_series(self) -> None:
         readme = (NOTEBOOK_ROOT / "README.md").read_text(encoding="utf-8")
         for notebook_name in (
@@ -43,6 +54,7 @@ class NotebookOnboardingTest(unittest.TestCase):
             "04_governed_incident_blackboard.ipynb",
             "05_policy_and_sidecars.ipynb",
             "06_ai_support_resolution_desk.ipynb",
+            "07_operating_proof_and_trends.ipynb",
         ):
             with self.subTest(notebook=notebook_name):
                 self.assertIn(notebook_name, readme)
@@ -56,6 +68,7 @@ class NotebookOnboardingTest(unittest.TestCase):
 
         self.assertTrue(hasattr(module, "bootstrap_repo"))
         self.assertTrue(hasattr(module, "start_http_service"))
+        self.assertTrue(hasattr(module, "start_pilot_service"))
         self.assertTrue(hasattr(module, "stop_http_service"))
 
         repo_root = module.bootstrap_repo(repo_root=REPO_ROOT)
