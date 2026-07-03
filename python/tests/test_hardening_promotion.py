@@ -18,6 +18,22 @@ def load_module():
 
 
 class HardeningPromotionSummaryTests(unittest.TestCase):
+    def test_tracked_admin_operator_promotion_has_evidence(self) -> None:
+        module = load_module()
+        config = module.load_config(REPO_ROOT / ".github" / "hardening-promotion-state.json")
+
+        for group_name in ("admin", "operator"):
+            group = config["groups"][group_name]
+            evidence = group.get("promotion_evidence", {})
+            scheduled_runs = evidence.get("scheduled_green_runs", [])
+
+            self.assertTrue(group["blocking"], f"{group_name} should be blocking")
+            self.assertGreaterEqual(
+                len(scheduled_runs),
+                config["minimum_consecutive_scheduled_green_runs"],
+            )
+            self.assertTrue(group.get("promoted_at"))
+
     def test_gate_summary_marks_blocking_and_diagnostic_statuses(self) -> None:
         module = load_module()
         config = {

@@ -56,6 +56,7 @@ For documentation publishing:
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1 -BaselinePath <accepted-baseline-path>`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1 -BaselinePath <accepted-baseline-path>`
+- run `powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1 -CommercialBetaCandidate`
 
 ### Deployment and auth helpers
 
@@ -95,6 +96,12 @@ Pilot reports are written to `artifacts/pilot/reports/`.
 Pilot launch-validation transcripts are written to `artifacts/pilot/launch/`.
 
 Structured release-readiness transcripts and summaries are written to `artifacts/qa/release-readiness/`.
+Performance beta gate artifacts are written to `artifacts/qa/release-readiness/performance-beta-latest.md` and `artifacts/qa/release-readiness/performance-beta-latest.json`.
+Security and key lifecycle artifacts are written to `artifacts/qa/release-readiness/security-key-lifecycle-latest.md` and `artifacts/qa/release-readiness/security-key-lifecycle-latest.json`.
+Service v2 operability proof artifacts are written to `artifacts/qa/release-readiness/service-v2-operability-latest.md` and `artifacts/qa/release-readiness/service-v2-operability-latest.json`.
+Release rollback record artifacts are written to `artifacts/qa/release-readiness/rollback-record-latest.md` and `artifacts/qa/release-readiness/rollback-record-latest.json`.
+Customer workflow acceptance artifacts are written to `artifacts/qa/release-readiness/customer-workflow-latest.md` and `artifacts/qa/release-readiness/customer-workflow-latest.json`.
+Commercial readiness ledger artifacts are written to `artifacts/qa/release-readiness/commercial-readiness-latest.md` and `artifacts/qa/release-readiness/commercial-readiness-latest.json`.
 
 Structured hardening summaries and JSON triage artifacts are written to `artifacts/qa/hardening/`.
 

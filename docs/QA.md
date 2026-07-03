@@ -10,7 +10,7 @@ That program is complementary to this release gate, not a replacement for it.
 
 ## QA Layers
 
-AETHER now verifies itself in eight layers.
+AETHER now verifies itself in nine layers.
 
 1. **Core semantic unit tests**
    Rust crate tests cover the substrate, resolver, rules, runtime, explainability, storage, and API seams.
@@ -26,7 +26,9 @@ AETHER now verifies itself in eight layers.
    The Windows launch pack generates the operator report, performance report, drift comparison, release-mode API tests, soak suite, and stress suite.
 7. **Packaging and documentation checks**
    The release-readiness suite builds the packaged pilot bundle and a GitHub Pages preview bundle from the same tree.
-8. **Release-readiness orchestration**
+8. **Commercial readiness ledger**
+   The commercial release ledger separates design-partner alpha, commercial beta, and GA so release output cannot quietly overclaim the current posture.
+9. **Release-readiness orchestration**
    A single runner now executes the full structured-release contract and writes a saved transcript and summary.
 
 ## Standing Development Gate
@@ -129,18 +131,28 @@ or:
 powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1
 ```
 
+For a stricter beta-candidate run that fails on incomplete Service v2
+commercial-beta proof, add `-CommercialBetaCandidate`.
+
 That suite executes, in order:
 
-1. Rust format check
-2. Rust clippy
-3. Full Rust workspace tests
-4. Python SDK tests
-5. Go boundary tests
-6. Rust API docs build
-7. GitHub Pages preview bundle build
-8. Criterion benchmark compile
-9. Pilot launch validation pack
-10. Packaged pilot bundle build
+1. Hardening gate-state summary
+2. Rust format check
+3. Rust clippy
+4. Full Rust workspace tests
+5. Python SDK tests
+6. Go boundary tests
+7. Rust API docs build
+8. GitHub Pages preview bundle build
+9. Criterion benchmark compile
+10. Pilot launch validation pack
+11. Performance beta gate
+12. Packaged pilot bundle build
+13. Security and key lifecycle gate
+14. Service v2 operability proof
+15. Release rollback record
+16. Customer workflow acceptance
+17. Commercial release readiness ledger
 
 The runner resolves the accepted performance baseline in this order:
 
@@ -154,6 +166,18 @@ The release-readiness runner writes:
 
 - `artifacts/qa/release-readiness/latest.txt`
 - `artifacts/qa/release-readiness/latest.md`
+- `artifacts/qa/release-readiness/performance-beta-latest.md`
+- `artifacts/qa/release-readiness/performance-beta-latest.json`
+- `artifacts/qa/release-readiness/security-key-lifecycle-latest.md`
+- `artifacts/qa/release-readiness/security-key-lifecycle-latest.json`
+- `artifacts/qa/release-readiness/service-v2-operability-latest.md`
+- `artifacts/qa/release-readiness/service-v2-operability-latest.json`
+- `artifacts/qa/release-readiness/rollback-record-latest.md`
+- `artifacts/qa/release-readiness/rollback-record-latest.json`
+- `artifacts/qa/release-readiness/customer-workflow-latest.md`
+- `artifacts/qa/release-readiness/customer-workflow-latest.json`
+- `artifacts/qa/release-readiness/commercial-readiness-latest.md`
+- `artifacts/qa/release-readiness/commercial-readiness-latest.json`
 - `artifacts/pages-preview-release/`
 - `artifacts/pilot/reports/latest.md`
 - `artifacts/performance/latest.md`
@@ -161,9 +185,10 @@ The release-readiness runner writes:
 - `artifacts/pilot/launch/latest.txt`
 - `artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip`
 
-Those files answer four different release questions:
+Those files answer five different release questions:
 
 - did the code pass the cross-language regression gate?
+- what commercial stage can this tree honestly claim?
 - did the pilot pass the operator and stress gate?
 - did the docs and Pages bundle build from the candidate tree?
 - did the packaged Windows pilot bundle build from the same candidate?
@@ -187,6 +212,8 @@ The repository now has five quality-automation paths:
 
 Treat any of these as release blockers:
 
+- current commercial target stage is not ready in `fixtures/release/commercial-readiness-ledger.json`
+- `-CommercialBetaCandidate` is set and the Service v2 beta proof or rollback record is not green
 - format, lint, or test failures
 - Python or Go boundary-client regressions
 - GitHub Pages preview build failure
@@ -203,6 +230,7 @@ The suite is comprehensive for the current single-node pilot release shape, but 
 Still open:
 
 - promotion of stable hardening subchecks into blocking CI
+- turning the commercial beta Service v2 ledger blockers green
 - public bug-bounty launch posture
 - signed artifacts
 - multi-platform packaged bundles beyond the current Windows pilot package

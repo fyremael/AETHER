@@ -108,6 +108,15 @@ Completed:
 - a post-v1 QA hardening program now exists with a governing rubric, responsible-disclosure policy, stronger issue templates, a repeatable persona sweep runner, and a scheduled/manual non-blocking hardening workflow
 - the scheduled hardening workflow now also publishes promotion metrics, updates a standing GitHub tracker issue, and can open a promotion PR when the next pack satisfies the documented streak threshold
 - release-readiness now emits an explicit hardening gate-state summary that separates blocking packs from diagnostic packs and reports the latest pass/fail/skipped evidence
+- admin and operator hardening packs are now promoted into blocking CI/release-readiness gates after five downloaded scheduled QA Hardening metrics artifacts showed consecutive `passed` statuses, exceeding the configured three-run threshold
+- a tracked commercial release readiness ledger now separates design-partner alpha, commercial beta, and GA, and release-readiness renders that ledger into saved markdown/JSON evidence while enforcing only the current target stage
+- release-readiness now also emits a Service v2 operability proof artifact with a direct SQLite namespace restart/replay drill, Postgres availability status, CI container-smoke coverage, current-run package backup/restore-through-restart proof, and admin/operator promotion status
+- release-readiness now emits a versioned rollback record that ties the packaged bundle, package-local backup/restore proof, restart/replay evidence, packaged upgrade/rollback playbook, and Postgres export/restore boundary into one release artifact
+- release-readiness now emits a customer workflow acceptance artifact that runs the AI support resolution desk demo and checks the buyer-facing workflow markers
+- release-readiness now emits a performance beta gate artifact that enforces explicit canonical-host thresholds for gated drift, restart/replay, in-process report latency, and pilot HTTP read paths
+- release-readiness now emits a security/key lifecycle artifact that verifies package token rotation, token-command/auth-reload tests, secret-manager documentation, and package SBOM/checksum generation
+- release-readiness now enforces Service v2 beta proof and rollback evidence whenever the ledger target is `commercial_beta`, with `-CommercialBetaCandidate` retained as an explicit operator override
+- the commercial readiness ledger now targets selected commercial beta, while GA remains blocked by signed release, support/security, multi-platform distribution, and distributed-truth gates
 - a repeatable perturbation sweep now exists to run the persona pass, full-stack benchmark snapshot, host-aware drift checks, deeper ignored stress workloads, and single-node capacity projections in one artifact pack
 - a typed capacity-planning layer now exists over perturbation and matrix evidence, with measured board/closure/replay/concurrency ladders, concrete hardware-class guidance, explicit scale-out triggers, and a scheduled GitHub tracker workflow
 - a lightweight performance trend index now exists over saved run bundles and tracked accepted baselines so latest/prior/baseline context is visible without manually opening every benchmark artifact
@@ -125,7 +134,8 @@ Still open:
 The most immediate work now sits just beyond the launch-ready pilot slice and
 the formally closed v1 single-node semantic core:
 
-- let the new hardening tracker accumulate enough scheduled green evidence to promote admin first, then operator, user, and exec checks into blocking CI in order
+- keep admin and operator hardening gates blocking, and do not promote user or exec checks until their release-blocking criteria are explicitly accepted
+- keep the commercial readiness ledger current and avoid broad GA/commercial-platform language until the GA gates are backed by current evidence
 - continue hardening the single-host replicated authority-partition prototype with longer recovery drills, clearer operator presets, and measured promotion/follower-replay evidence without pretending it is a generalized cluster manager
 - continue Service v2 hardening around namespace isolation, Postgres journal parity, container smoke, and design-partner deployment docs while keeping SQLite the package default and sidecars local/journal-subordinated
 - add longer-duration scheduled operability evidence beyond the current release and launch gates

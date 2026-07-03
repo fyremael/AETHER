@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+import importlib.util
+import unittest
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCRIPT_PATH = REPO_ROOT / "scripts" / "service_v2_operability.py"
+
+
+def load_module():
+    spec = importlib.util.spec_from_file_location("service_v2_operability", SCRIPT_PATH)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class ServiceV2OperabilityTests(unittest.TestCase):
+    def test_container_ci_smoke_has_required_markers(self) -> None:
+        module = load_module()
+        ok, missing = module.file_contains_all(
+            REPO_ROOT / ".github" / "workflows" / "ci.yml",
+            [
+                "container-smoke",
+                "Boot image and verify authenticated status",
+                "docker stop",
+                "docker start",
+                "X-Aether-Namespace",
+                "/v1/status",
+                "/v1/history",
+            ],
+        )
+
+        self.assertTrue(ok, missing)
+
+    def test_postgres_ci_has_required_markers(self) -> None:
+        module = load_module()
+        ok, missing = module.file_contains_all(
+            REPO_ROOT / ".github" / "workflows" / "ci.yml",
+            [
+                "postgres-journal",
+                "postgres:16",
+                "AETHER_POSTGRES_TEST_URL",
+                "cargo test -p aether_storage postgres_journal",
+                "cargo test -p aether_api --test http_service http_service_postgres_namespaces",
+            ],
+        )
+
+        self.assertTrue(ok, missing)
+
+    def test_hardening_promotion_status_reads_admin_operator_flags(self) -> None:
+        module = load_module()
+        status = module.promotion_blocking_status(
+            REPO_ROOT / ".github" / "hardening-promotion-state.json"
+        )
+
+        self.assertIn("admin", status)
+        self.assertIn("operator", status)
+        self.assertIsInstance(status["admin"], bool)
+        self.assertIsInstance(status["operator"], bool)
+
+    def test_hardening_pack_status_defaults_missing_without_latest_json(self) -> None:
+        module = load_module()
+        status = module.hardening_latest_status(REPO_ROOT, REPO_ROOT / "does-not-exist.json")
+
+        self.assertEqual(status["admin"], "missing")
+        self.assertEqual(status["operator"], "missing")
+
+
+if __name__ == "__main__":
+    unittest.main()

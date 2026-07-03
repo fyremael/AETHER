@@ -93,6 +93,7 @@ Focus:
 - repeated perturbation/capacity evidence across hosts and time
 - mature the new capacity tracker until node-class, ceiling, and envelope drift are visible without manual artifact archaeology
 - stronger release promotion evidence
+- keep the commercial release readiness ledger green only for stages backed by current evidence
 - eventually signed artifacts and provenance
 
 ### 6. Product legibility and design-partner packaging

@@ -1,7 +1,8 @@
 param(
     [switch]$PauseOnExit,
     [string]$BaselinePath,
-    [string]$HostManifestPath
+    [string]$HostManifestPath,
+    [switch]$CommercialBetaCandidate
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,13 +22,51 @@ $hardeningGateJsonPath = Join-Path $reportDir "hardening-gates-$outputTimestamp.
 $hardeningGateSummaryPath = Join-Path $reportDir "hardening-gates-$outputTimestamp.md"
 $latestHardeningGateJsonPath = Join-Path $reportDir "hardening-gates-latest.json"
 $latestHardeningGateSummaryPath = Join-Path $reportDir "hardening-gates-latest.md"
+$latestHardeningJsonPath = Join-Path $repoRoot "artifacts\qa\hardening\latest.json"
+$performanceBetaJsonPath = Join-Path $reportDir "performance-beta-$outputTimestamp.json"
+$performanceBetaSummaryPath = Join-Path $reportDir "performance-beta-$outputTimestamp.md"
+$latestPerformanceBetaJsonPath = Join-Path $reportDir "performance-beta-latest.json"
+$latestPerformanceBetaSummaryPath = Join-Path $reportDir "performance-beta-latest.md"
+$performanceBetaThresholdsPath = Join-Path $repoRoot "fixtures\release\performance-beta-thresholds.json"
+$latestPerformanceBundlePath = Join-Path $repoRoot "artifacts\performance\latest.json"
+$serviceV2JsonPath = Join-Path $reportDir "service-v2-operability-$outputTimestamp.json"
+$serviceV2SummaryPath = Join-Path $reportDir "service-v2-operability-$outputTimestamp.md"
+$latestServiceV2JsonPath = Join-Path $reportDir "service-v2-operability-latest.json"
+$latestServiceV2SummaryPath = Join-Path $reportDir "service-v2-operability-latest.md"
+$rollbackJsonPath = Join-Path $reportDir "rollback-record-$outputTimestamp.json"
+$rollbackSummaryPath = Join-Path $reportDir "rollback-record-$outputTimestamp.md"
+$latestRollbackJsonPath = Join-Path $reportDir "rollback-record-latest.json"
+$latestRollbackSummaryPath = Join-Path $reportDir "rollback-record-latest.md"
+$customerWorkflowJsonPath = Join-Path $reportDir "customer-workflow-$outputTimestamp.json"
+$customerWorkflowSummaryPath = Join-Path $reportDir "customer-workflow-$outputTimestamp.md"
+$latestCustomerWorkflowJsonPath = Join-Path $reportDir "customer-workflow-latest.json"
+$latestCustomerWorkflowSummaryPath = Join-Path $reportDir "customer-workflow-latest.md"
+$securityKeyJsonPath = Join-Path $reportDir "security-key-lifecycle-$outputTimestamp.json"
+$securityKeySummaryPath = Join-Path $reportDir "security-key-lifecycle-$outputTimestamp.md"
+$latestSecurityKeyJsonPath = Join-Path $reportDir "security-key-lifecycle-latest.json"
+$latestSecurityKeySummaryPath = Join-Path $reportDir "security-key-lifecycle-latest.md"
+$commercialLedgerPath = Join-Path $repoRoot "fixtures\release\commercial-readiness-ledger.json"
+$commercialReadinessJsonPath = Join-Path $reportDir "commercial-readiness-$outputTimestamp.json"
+$commercialReadinessSummaryPath = Join-Path $reportDir "commercial-readiness-$outputTimestamp.md"
+$latestCommercialReadinessJsonPath = Join-Path $reportDir "commercial-readiness-latest.json"
+$latestCommercialReadinessSummaryPath = Join-Path $reportDir "commercial-readiness-latest.md"
 $pagesPreviewDir = Join-Path $repoRoot "artifacts\pages-preview-release"
+$pilotPackageRoot = Join-Path $repoRoot "artifacts\pilot\packages\aether-pilot-service-windows-x86_64"
+$pilotPackageZip = "$pilotPackageRoot.zip"
+$serviceV2PackageProofDir = Join-Path $reportDir ("service-v2-package-proof-" + $outputTimestamp)
+$securityKeyProofDir = Join-Path $reportDir ("security-key-proof-" + $outputTimestamp)
 $transcript = [System.Collections.Generic.List[string]]::new()
 if (-not $HostManifestPath) {
     $HostManifestPath = Join-Path $repoRoot "fixtures\performance\hosts\dev-chad-windows-native.json"
 }
 $hostManifest = Get-Content -Path $HostManifestPath | ConvertFrom-Json
 $hostId = $hostManifest.host_id
+$commercialTargetStage = "unknown"
+if (Test-Path $commercialLedgerPath) {
+    $commercialLedger = Get-Content -Path $commercialLedgerPath -Raw | ConvertFrom-Json
+    $commercialTargetStage = $commercialLedger.current_target_stage
+}
+$enforceCommercialBeta = $CommercialBetaCandidate -or ($commercialTargetStage -eq "commercial_beta")
 
 function Close-Runner([int]$ExitCode) {
     if ($PauseOnExit) {
@@ -211,11 +250,13 @@ Add-TranscriptLine("Commit: $commit")
 Add-TranscriptLine("Host manifest: $HostManifestPath")
 Add-TranscriptLine("Baseline: $($baseline.Path)")
 Add-TranscriptLine("Baseline source: $($baseline.Source)")
+Add-TranscriptLine("Commercial target stage: $commercialTargetStage")
 Add-TranscriptLine("")
 
 Write-Host "Baseline: $($baseline.Path) [$($baseline.Source)]"
 Write-Host "Host:     $hostId"
 Write-Host "Commit:   $commit"
+Write-Host "Target:   $commercialTargetStage"
 Write-Host ""
 
 $failed = $false
@@ -229,7 +270,6 @@ try {
         "--out-json", $hardeningGateJsonPath,
         "--out-md", $hardeningGateSummaryPath
     )
-    $latestHardeningJsonPath = Join-Path $repoRoot "artifacts\qa\hardening\latest.json"
     if (Test-Path $latestHardeningJsonPath) {
         $hardeningGateArgs += @("--hardening-json", $latestHardeningJsonPath)
     }
@@ -249,7 +289,109 @@ try {
     Invoke-Step "Pages preview" $python.Source @("scripts/build_pages.py", "--out-dir", $pagesPreviewDir)
     Invoke-Step "Benchmark compile" $cargo.Source @("bench", "-p", "aether_api", "--no-run")
     Invoke-Step "Pilot launch validation" $pwsh.Source @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $repoRoot "scripts/run-pilot-launch-validation.ps1"), "-BaselinePath", $baseline.Path, "-HostManifestPath", (Resolve-Path $HostManifestPath).Path)
+    $performanceBetaArgs = @(
+        (Join-Path $repoRoot "scripts\performance_beta_gate.py"),
+        "run",
+        "--thresholds", $performanceBetaThresholdsPath,
+        "--bundle", $latestPerformanceBundlePath,
+        "--out-json", $performanceBetaJsonPath,
+        "--out-md", $performanceBetaSummaryPath,
+        "--enforce"
+    )
+    Invoke-Step "Performance beta gate" $python.Source $performanceBetaArgs
+    if (Test-Path $performanceBetaJsonPath) {
+        Copy-Item -Force $performanceBetaJsonPath $latestPerformanceBetaJsonPath
+    }
+    if (Test-Path $performanceBetaSummaryPath) {
+        Copy-Item -Force $performanceBetaSummaryPath $latestPerformanceBetaSummaryPath
+    }
     Invoke-Step "Pilot package build" $pwsh.Source @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $repoRoot "scripts/build-pilot-package.ps1"))
+    $securityKeyArgs = @(
+        (Join-Path $repoRoot "scripts\security_key_lifecycle.py"),
+        "run",
+        "--package-root", $pilotPackageRoot,
+        "--artifact-dir", $securityKeyProofDir,
+        "--out-json", $securityKeyJsonPath,
+        "--out-md", $securityKeySummaryPath,
+        "--enforce"
+    )
+    Invoke-Step "Security and key lifecycle gate" $python.Source $securityKeyArgs
+    if (Test-Path $securityKeyJsonPath) {
+        Copy-Item -Force $securityKeyJsonPath $latestSecurityKeyJsonPath
+    }
+    if (Test-Path $securityKeySummaryPath) {
+        Copy-Item -Force $securityKeySummaryPath $latestSecurityKeySummaryPath
+    }
+    $serviceV2Args = @(
+        (Join-Path $repoRoot "scripts\service_v2_operability.py"),
+        "run",
+        "--out-json", $serviceV2JsonPath,
+        "--out-md", $serviceV2SummaryPath,
+        "--package-root", $pilotPackageRoot,
+        "--artifact-dir", $serviceV2PackageProofDir,
+        "--accept-ci-postgres"
+    )
+    if ($enforceCommercialBeta) {
+        $serviceV2Args += @("--enforce-beta")
+    }
+    if (Test-Path $latestHardeningJsonPath) {
+        $serviceV2Args += @("--hardening-json", $latestHardeningJsonPath)
+    }
+    Invoke-Step "Service v2 operability proof" $python.Source $serviceV2Args
+    if (Test-Path $serviceV2JsonPath) {
+        Copy-Item -Force $serviceV2JsonPath $latestServiceV2JsonPath
+    }
+    if (Test-Path $serviceV2SummaryPath) {
+        Copy-Item -Force $serviceV2SummaryPath $latestServiceV2SummaryPath
+    }
+    $rollbackArgs = @(
+        (Join-Path $repoRoot "scripts\release_rollback_record.py"),
+        "render",
+        "--service-v2-json", $serviceV2JsonPath,
+        "--package-root", $pilotPackageRoot,
+        "--package-zip", $pilotPackageZip,
+        "--out-json", $rollbackJsonPath,
+        "--out-md", $rollbackSummaryPath
+    )
+    if ($enforceCommercialBeta) {
+        $rollbackArgs += @("--enforce")
+    }
+    Invoke-Step "Release rollback record" $python.Source $rollbackArgs
+    if (Test-Path $rollbackJsonPath) {
+        Copy-Item -Force $rollbackJsonPath $latestRollbackJsonPath
+    }
+    if (Test-Path $rollbackSummaryPath) {
+        Copy-Item -Force $rollbackSummaryPath $latestRollbackSummaryPath
+    }
+    $customerWorkflowArgs = @(
+        (Join-Path $repoRoot "scripts\customer_workflow_acceptance.py"),
+        "run",
+        "--out-json", $customerWorkflowJsonPath,
+        "--out-md", $customerWorkflowSummaryPath,
+        "--enforce"
+    )
+    Invoke-Step "Customer workflow acceptance" $python.Source $customerWorkflowArgs
+    if (Test-Path $customerWorkflowJsonPath) {
+        Copy-Item -Force $customerWorkflowJsonPath $latestCustomerWorkflowJsonPath
+    }
+    if (Test-Path $customerWorkflowSummaryPath) {
+        Copy-Item -Force $customerWorkflowSummaryPath $latestCustomerWorkflowSummaryPath
+    }
+    $commercialReadinessArgs = @(
+        (Join-Path $repoRoot "scripts\commercial_readiness.py"),
+        "render",
+        "--ledger", $commercialLedgerPath,
+        "--out-json", $commercialReadinessJsonPath,
+        "--out-md", $commercialReadinessSummaryPath,
+        "--enforce-current-target"
+    )
+    Invoke-Step "Commercial release readiness ledger" $python.Source $commercialReadinessArgs
+    if (Test-Path $commercialReadinessJsonPath) {
+        Copy-Item -Force $commercialReadinessJsonPath $latestCommercialReadinessJsonPath
+    }
+    if (Test-Path $commercialReadinessSummaryPath) {
+        Copy-Item -Force $commercialReadinessSummaryPath $latestCommercialReadinessSummaryPath
+    }
 } catch {
     $failed = $true
     $failureMessage = $_.Exception.Message
@@ -278,13 +420,31 @@ $summaryLines.Add("7. Rust API docs build")
 $summaryLines.Add("8. GitHub Pages preview bundle build")
 $summaryLines.Add("9. Criterion benchmark compile")
 $summaryLines.Add("10. Pilot launch validation pack")
-$summaryLines.Add("11. Packaged pilot bundle build")
+$summaryLines.Add("11. Performance beta gate")
+$summaryLines.Add("12. Packaged pilot bundle build")
+$summaryLines.Add("13. Security and key lifecycle gate")
+$summaryLines.Add("14. Service v2 operability proof")
+$summaryLines.Add("15. Release rollback record")
+$summaryLines.Add("16. Customer workflow acceptance")
+$summaryLines.Add("17. Commercial release readiness ledger")
 $summaryLines.Add("")
 $summaryLines.Add("## Primary artifacts")
 $summaryLines.Add("")
 $summaryLines.Add('- `artifacts/qa/release-readiness/latest.txt`')
 $summaryLines.Add('- `artifacts/qa/release-readiness/hardening-gates-latest.md`')
 $summaryLines.Add('- `artifacts/qa/release-readiness/hardening-gates-latest.json`')
+$summaryLines.Add('- `artifacts/qa/release-readiness/performance-beta-latest.md`')
+$summaryLines.Add('- `artifacts/qa/release-readiness/performance-beta-latest.json`')
+$summaryLines.Add('- `artifacts/qa/release-readiness/security-key-lifecycle-latest.md`')
+$summaryLines.Add('- `artifacts/qa/release-readiness/security-key-lifecycle-latest.json`')
+$summaryLines.Add('- `artifacts/qa/release-readiness/service-v2-operability-latest.md`')
+$summaryLines.Add('- `artifacts/qa/release-readiness/service-v2-operability-latest.json`')
+$summaryLines.Add('- `artifacts/qa/release-readiness/rollback-record-latest.md`')
+$summaryLines.Add('- `artifacts/qa/release-readiness/rollback-record-latest.json`')
+$summaryLines.Add('- `artifacts/qa/release-readiness/customer-workflow-latest.md`')
+$summaryLines.Add('- `artifacts/qa/release-readiness/customer-workflow-latest.json`')
+$summaryLines.Add('- `artifacts/qa/release-readiness/commercial-readiness-latest.md`')
+$summaryLines.Add('- `artifacts/qa/release-readiness/commercial-readiness-latest.json`')
 $summaryLines.Add('- `artifacts/pages-preview-release/`')
 $summaryLines.Add('- `artifacts/pilot/reports/latest.md`')
 $summaryLines.Add('- `artifacts/performance/latest.md`')
@@ -304,6 +464,90 @@ if (Test-Path $hardeningGateSummaryPath) {
     }
 } else {
     $summaryLines.Add("Hardening gate-state summary was not generated.")
+}
+$summaryLines.Add("")
+$summaryLines.Add("## Performance Beta Gate")
+$summaryLines.Add("")
+if (Test-Path $performanceBetaSummaryPath) {
+    $performanceBetaLines = Get-Content -Path $performanceBetaSummaryPath
+    foreach ($line in $performanceBetaLines) {
+        if ($line -eq "# AETHER Performance Beta Gate") {
+            continue
+        }
+        $summaryLines.Add($line)
+    }
+} else {
+    $summaryLines.Add("Performance beta summary was not generated.")
+}
+$summaryLines.Add("")
+$summaryLines.Add("## Security And Key Lifecycle Gate")
+$summaryLines.Add("")
+if (Test-Path $securityKeySummaryPath) {
+    $securityKeyLines = Get-Content -Path $securityKeySummaryPath
+    foreach ($line in $securityKeyLines) {
+        if ($line -eq "# AETHER Security And Key Lifecycle Gate") {
+            continue
+        }
+        $summaryLines.Add($line)
+    }
+} else {
+    $summaryLines.Add("Security and key lifecycle summary was not generated.")
+}
+$summaryLines.Add("")
+$summaryLines.Add("## Service V2 Operability Proof")
+$summaryLines.Add("")
+if (Test-Path $serviceV2SummaryPath) {
+    $serviceLines = Get-Content -Path $serviceV2SummaryPath
+    foreach ($line in $serviceLines) {
+        if ($line -eq "# AETHER Service v2 Operability Proof") {
+            continue
+        }
+        $summaryLines.Add($line)
+    }
+} else {
+    $summaryLines.Add("Service v2 operability summary was not generated.")
+}
+$summaryLines.Add("")
+$summaryLines.Add("## Release Rollback Record")
+$summaryLines.Add("")
+if (Test-Path $rollbackSummaryPath) {
+    $rollbackLines = Get-Content -Path $rollbackSummaryPath
+    foreach ($line in $rollbackLines) {
+        if ($line -eq "# AETHER Release Rollback Record") {
+            continue
+        }
+        $summaryLines.Add($line)
+    }
+} else {
+    $summaryLines.Add("Release rollback record was not generated.")
+}
+$summaryLines.Add("")
+$summaryLines.Add("## Customer Workflow Acceptance")
+$summaryLines.Add("")
+if (Test-Path $customerWorkflowSummaryPath) {
+    $customerWorkflowLines = Get-Content -Path $customerWorkflowSummaryPath
+    foreach ($line in $customerWorkflowLines) {
+        if ($line -eq "# AETHER Customer Workflow Acceptance") {
+            continue
+        }
+        $summaryLines.Add($line)
+    }
+} else {
+    $summaryLines.Add("Customer workflow acceptance summary was not generated.")
+}
+$summaryLines.Add("")
+$summaryLines.Add("## Commercial Release Readiness")
+$summaryLines.Add("")
+if (Test-Path $commercialReadinessSummaryPath) {
+    $commercialLines = Get-Content -Path $commercialReadinessSummaryPath
+    foreach ($line in $commercialLines) {
+        if ($line -eq "# AETHER Commercial Release Readiness") {
+            continue
+        }
+        $summaryLines.Add($line)
+    }
+} else {
+    $summaryLines.Add("Commercial release readiness summary was not generated.")
 }
 $summaryLines.Add("")
 $summaryLines.Add("## Result")

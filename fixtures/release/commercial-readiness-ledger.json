@@ -1,0 +1,425 @@
+{
+  "schema_version": 1,
+  "current_target_stage": "commercial_beta",
+  "review_cadence": "review before every release-readiness run and after any Service v2 gate promotion",
+  "stages": [
+    {
+      "id": "design_partner_alpha",
+      "label": "Design-partner alpha",
+      "intent": "Controlled, named design-partner pilots over the current single-node semantic kernel and packaged pilot service.",
+      "claim_boundary": "AETHER can be sold or shown as a paid, closely supported pilot for exact single-node semantic coordination. It is not a generalized distributed runtime or managed SaaS.",
+      "gates": [
+        {
+          "id": "v1_semantic_closure",
+          "title": "Core v1 semantic closure is defensible",
+          "owner": "kernel",
+          "gate_class": "blocking",
+          "status": "ready",
+          "evidence": [
+            {
+              "label": "V1 closeout",
+              "path": "docs/V1_CLOSEOUT.md"
+            },
+            {
+              "label": "Semantic compliance matrix",
+              "path": "docs/SEMANTIC_COMPLIANCE_MATRIX.md"
+            },
+            {
+              "label": "Semantic closure tests",
+              "path": "crates/aether_api/tests/semantic_closure.rs"
+            }
+          ],
+          "blockers": [],
+          "next_actions": []
+        },
+        {
+          "id": "pilot_release_evidence",
+          "title": "Pilot release-readiness evidence exists",
+          "owner": "release",
+          "gate_class": "blocking",
+          "status": "ready",
+          "evidence": [
+            {
+              "label": "Release-readiness runner",
+              "path": "scripts/run-release-readiness.ps1"
+            },
+            {
+              "label": "Release-readiness workflow",
+              "path": ".github/workflows/release-readiness.yml"
+            },
+            {
+              "label": "QA contract",
+              "path": "docs/QA.md"
+            }
+          ],
+          "blockers": [],
+          "next_actions": []
+        },
+        {
+          "id": "operator_package_path",
+          "title": "Operator package path is usable",
+          "owner": "ops",
+          "gate_class": "blocking",
+          "status": "ready",
+          "evidence": [
+            {
+              "label": "Pilot deployment guide",
+              "path": "docs/PILOT_DEPLOYMENT.md"
+            },
+            {
+              "label": "Pilot operations playbook",
+              "path": "docs/PILOT_OPERATIONS_PLAYBOOK.md"
+            },
+            {
+              "label": "Package builder",
+              "path": "scripts/build-pilot-package.ps1"
+            }
+          ],
+          "blockers": [],
+          "next_actions": []
+        },
+        {
+          "id": "service_v2_alpha_boundary",
+          "title": "Service v2 boundary is visible but scoped",
+          "owner": "service",
+          "gate_class": "blocking",
+          "status": "ready",
+          "evidence": [
+            {
+              "label": "Service v2 ADR",
+              "path": "docs/ADR/0009-service-v2-namespaces-and-postgres-journal.md"
+            },
+            {
+              "label": "HTTP namespace and Postgres integration tests",
+              "path": "crates/aether_api/tests/http_service.rs"
+            },
+            {
+              "label": "Container boot/auth/status CI job",
+              "path": ".github/workflows/ci.yml"
+            }
+          ],
+          "blockers": [],
+          "next_actions": [
+            "Keep SQLite as the packaged default.",
+            "Present Postgres as optional journal-first infrastructure only."
+          ]
+        },
+        {
+          "id": "hardening_tracker_visible",
+          "title": "Hardening promotion state is explicit",
+          "owner": "qa",
+          "gate_class": "diagnostic",
+          "status": "diagnostic",
+          "evidence": [
+            {
+              "label": "Hardening promotion state",
+              "path": ".github/hardening-promotion-state.json"
+            },
+            {
+              "label": "Hardening program",
+              "path": "docs/QA_HARDENING_PROGRAM.md"
+            }
+          ],
+          "blockers": [
+            "Admin and operator hardening packs are not yet promoted to blocking release gates."
+          ],
+          "next_actions": [
+            "Accumulate the required scheduled green streaks.",
+            "Promote admin first, then operator, while keeping user and exec diagnostic until stable."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "commercial_beta",
+      "label": "Commercial beta",
+      "intent": "Paid commercial beta for selected customers with a repeatable deployment contract, explicit support boundaries, and blocking operational evidence.",
+      "claim_boundary": "AETHER can be sold as a supported single-node or Service v2 deployment for bounded production-adjacent workflows. Distributed truth remains prototype-grade unless explicitly scoped.",
+      "gates": [
+        {
+          "id": "service_v2_blocking_gates",
+          "title": "Service v2 operational proof is blocking",
+          "owner": "service",
+          "gate_class": "blocking",
+          "status": "ready",
+          "evidence": [
+            {
+              "label": "Service v2 current status",
+              "path": "docs/STATUS.md"
+            },
+            {
+              "label": "Current limitations",
+              "path": "docs/KNOWN_LIMITATIONS.md"
+            },
+            {
+              "label": "Service v2 operability proof runner",
+              "path": "scripts/service_v2_operability.py"
+            },
+            {
+              "label": "Postgres journal CI job",
+              "path": ".github/workflows/ci.yml"
+            },
+            {
+              "label": "Hardening promotion state",
+              "path": ".github/hardening-promotion-state.json"
+            }
+          ],
+          "blockers": [],
+          "next_actions": [
+            "Keep release-readiness -CommercialBetaCandidate green after package build.",
+            "Keep Postgres and container evidence blocking in CI, with live local reruns when customer deployment context requires them.",
+            "Do not promote user or exec hardening packs until their own release-blocking criteria are explicitly accepted."
+          ]
+        },
+        {
+          "id": "backup_restore_upgrade_contract",
+          "title": "Backup, restore, and upgrade contract is customer-grade",
+          "owner": "ops",
+          "gate_class": "blocking",
+          "status": "ready",
+          "evidence": [
+            {
+              "label": "Pilot deployment guide",
+              "path": "docs/PILOT_DEPLOYMENT.md"
+            },
+            {
+              "label": "Pilot operations playbook",
+              "path": "docs/PILOT_OPERATIONS_PLAYBOOK.md"
+            },
+            {
+              "label": "Service v2 operability proof runner",
+              "path": "scripts/service_v2_operability.py"
+            },
+            {
+              "label": "Release rollback record renderer",
+              "path": "scripts/release_rollback_record.py"
+            }
+          ],
+          "blockers": [],
+          "next_actions": [
+            "Keep the generated rollback record attached to every beta-candidate release-readiness run.",
+            "Use the Service v2 proof artifact as the package-local SQLite backup/restore/restart evidence.",
+            "Keep Postgres export/restore documented as external database-operator responsibility until a live customer deployment requires a stronger drill."
+          ]
+        },
+        {
+          "id": "security_key_lifecycle",
+          "title": "Security and key lifecycle are beta-ready",
+          "owner": "security",
+          "gate_class": "blocking",
+          "status": "ready",
+          "evidence": [
+            {
+              "label": "Responsible disclosure policy",
+              "path": "SECURITY.md"
+            },
+            {
+              "label": "Pilot operations playbook",
+              "path": "docs/PILOT_OPERATIONS_PLAYBOOK.md"
+            },
+            {
+              "label": "Known limitations",
+              "path": "docs/KNOWN_LIMITATIONS.md"
+            },
+            {
+              "label": "Security and key lifecycle gate",
+              "path": "scripts/security_key_lifecycle.py"
+            }
+          ],
+          "blockers": [],
+          "next_actions": [
+            "Keep the package token-rotation drill, token-command tests, auth reload test, and SBOM/checksum manifest green in release-readiness.",
+            "Treat SBOM/checksum as commercial-beta evidence only; signed artifact provenance remains a GA gate.",
+            "Validate customer-specific external secret-manager commands during deployment onboarding without changing policy semantics."
+          ]
+        },
+        {
+          "id": "performance_trends_and_slos",
+          "title": "Performance trends support beta commitments",
+          "owner": "performance",
+          "gate_class": "blocking",
+          "status": "ready",
+          "evidence": [
+            {
+              "label": "Performance guide",
+              "path": "docs/PERFORMANCE.md"
+            },
+            {
+              "label": "Capacity planning",
+              "path": "docs/CAPACITY_PLANNING.md"
+            },
+            {
+              "label": "Performance trend runner",
+              "path": "scripts/run-performance-trends.ps1"
+            },
+            {
+              "label": "Service v2 operability proof runner",
+              "path": "scripts/service_v2_operability.py"
+            },
+            {
+              "label": "Performance beta thresholds",
+              "path": "fixtures/release/performance-beta-thresholds.json"
+            },
+            {
+              "label": "Performance beta gate",
+              "path": "scripts/performance_beta_gate.py"
+            }
+          ],
+          "blockers": [],
+          "next_actions": [
+            "Keep core and service drift non-failing on the canonical Windows host.",
+            "Keep restart/replay, report, and pilot HTTP read-path latencies under the tracked beta ceilings.",
+            "Keep replicated-partition measurements observational until variance is understood."
+          ]
+        },
+        {
+          "id": "customer_workflow_pack",
+          "title": "One design-partner workflow is packaged end to end",
+          "owner": "product",
+          "gate_class": "blocking",
+          "status": "ready",
+          "evidence": [
+            {
+              "label": "AI support resolution desk",
+              "path": "docs/COMMERCIALIZATION/AI_SUPPORT_RESOLUTION_DESK.md"
+            },
+            {
+              "label": "Commercialization hub",
+              "path": "docs/COMMERCIALIZATION/README.md"
+            },
+            {
+              "label": "Notebook lane",
+              "path": "python/notebooks"
+            },
+            {
+              "label": "Customer workflow acceptance runner",
+              "path": "scripts/customer_workflow_acceptance.py"
+            }
+          ],
+          "blockers": [],
+          "next_actions": [
+            "Keep the Demo 05 customer workflow acceptance artifact attached to release-readiness output.",
+            "Promote full notebook execution from structural smoke to blocking only after the Colab runtime path is stable enough for CI.",
+            "Add customer-specific evidence appendices per design partner without changing the canonical workflow gate."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "general_availability",
+      "label": "General availability",
+      "intent": "Broad commercial release with repeatable artifact promotion, support posture, security posture, and conservative public claims.",
+      "claim_boundary": "AETHER can be sold beyond named design partners with supported deployment, upgrade, security, observability, and incident-response commitments. Distributed runtime claims still require separately gated evidence.",
+      "gates": [
+        {
+          "id": "signed_release_pipeline",
+          "title": "Signed artifact and promotion pipeline",
+          "owner": "release",
+          "gate_class": "blocking",
+          "status": "blocked",
+          "evidence": [
+            {
+              "label": "QA current frontier",
+              "path": "docs/QA.md"
+            },
+            {
+              "label": "Known limitations",
+              "path": "docs/KNOWN_LIMITATIONS.md"
+            }
+          ],
+          "blockers": [
+            "Release-readiness is still a pre-release verification flow, not a signed artifact promotion pipeline.",
+            "No GA-grade versioned changelog, artifact signing, or provenance attestation is enforced."
+          ],
+          "next_actions": [
+            "Add signed artifact generation and verification.",
+            "Tie release promotion to a versioned changelog and immutable release evidence bundle."
+          ]
+        },
+        {
+          "id": "support_and_incident_posture",
+          "title": "Support, incident, and disclosure posture",
+          "owner": "support",
+          "gate_class": "blocking",
+          "status": "blocked",
+          "evidence": [
+            {
+              "label": "Security policy",
+              "path": "SECURITY.md"
+            },
+            {
+              "label": "Operations guide",
+              "path": "docs/OPERATIONS.md"
+            },
+            {
+              "label": "Known limitations",
+              "path": "docs/KNOWN_LIMITATIONS.md"
+            }
+          ],
+          "blockers": [
+            "Responsible disclosure exists, but public bug bounty and customer support commitments are not yet in force.",
+            "Incident response and escalation playbooks are not yet formalized for external customers."
+          ],
+          "next_actions": [
+            "Create customer incident-response and escalation playbooks.",
+            "Decide if and when to launch a paid public bug bounty."
+          ]
+        },
+        {
+          "id": "multi_platform_distribution",
+          "title": "Multi-platform distribution is supported",
+          "owner": "release",
+          "gate_class": "blocking",
+          "status": "blocked",
+          "evidence": [
+            {
+              "label": "QA current frontier",
+              "path": "docs/QA.md"
+            },
+            {
+              "label": "Pilot package builder",
+              "path": "scripts/build-pilot-package.ps1"
+            }
+          ],
+          "blockers": [
+            "The first-class package is Windows-first.",
+            "Linux/macOS package parity and installation verification are not yet GA gates."
+          ],
+          "next_actions": [
+            "Add Linux and macOS package builders or explicitly scope GA to one supported platform.",
+            "Publish install and rollback evidence per supported platform."
+          ]
+        },
+        {
+          "id": "distributed_truth_claims",
+          "title": "Distributed truth claims are separately gated",
+          "owner": "architecture",
+          "gate_class": "blocking",
+          "status": "blocked",
+          "evidence": [
+            {
+              "label": "Federated truth implementation plan",
+              "path": "docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md"
+            },
+            {
+              "label": "Authority partition ADR",
+              "path": "docs/ADR/0001-authority-partitions-and-federated-cuts.md"
+            },
+            {
+              "label": "Known limitations",
+              "path": "docs/KNOWN_LIMITATIONS.md"
+            }
+          ],
+          "blockers": [
+            "Replicated authority partitions are a single-host manual-failover prototype.",
+            "No automatic election, quorum consensus, multi-host failover, or replicated sidecar plane is implemented."
+          ],
+          "next_actions": [
+            "Keep distributed runtime language out of GA claims until separately proven.",
+            "Continue exact-provenance partition work without pulling Raft or broad consensus into the beta gate."
+          ]
+        }
+      ]
+    }
+  ]
+}

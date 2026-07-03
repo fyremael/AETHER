@@ -13,7 +13,16 @@
     "admin": {
       "label": "Admin package boot, auth reload, backup/restore, and restart/replay",
       "workflow_target": "CI",
-      "blocking": false,
+      "blocking": true,
+      "promoted_at": "2026-07-03T03:30:00Z",
+      "promotion_evidence": {
+        "scheduled_green_runs": [
+          "https://github.com/fyremael/AETHER/actions/runs/28390449801",
+          "https://github.com/fyremael/AETHER/actions/runs/27975531108",
+          "https://github.com/fyremael/AETHER/actions/runs/27569238263"
+        ],
+        "local_metrics_artifact": "artifacts/qa/hardening/promotion/scheduled-check"
+      },
       "manual_validation": {
         "confirmed": true,
         "confirmed_at": "2026-03-29",
@@ -23,7 +32,16 @@
     "operator": {
       "label": "Operator report, delta, explain, and redaction checks",
       "workflow_target": "CI",
-      "blocking": false,
+      "blocking": true,
+      "promoted_at": "2026-07-03T03:30:00Z",
+      "promotion_evidence": {
+        "scheduled_green_runs": [
+          "https://github.com/fyremael/AETHER/actions/runs/28390449801",
+          "https://github.com/fyremael/AETHER/actions/runs/27975531108",
+          "https://github.com/fyremael/AETHER/actions/runs/27569238263"
+        ],
+        "local_metrics_artifact": "artifacts/qa/hardening/promotion/scheduled-check"
+      },
       "manual_validation": {
         "confirmed": true,
         "confirmed_at": "2026-03-29",

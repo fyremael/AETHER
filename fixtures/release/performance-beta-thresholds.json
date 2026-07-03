@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "host_id": "dev-chad-windows-native",
+  "suite_id": "full_stack",
+  "drift_reports": [
+    {
+      "suite": "core_kernel",
+      "path": "artifacts/performance/latest-drift-core_kernel.md",
+      "allowed_gated_overall": [
+        "ok",
+        "warn"
+      ]
+    },
+    {
+      "suite": "service_in_process",
+      "path": "artifacts/performance/latest-drift-service_in_process.md",
+      "allowed_gated_overall": [
+        "ok",
+        "warn"
+      ]
+    }
+  ],
+  "latency_thresholds": [
+    {
+      "id": "core_restart_replay",
+      "group": "core_kernel",
+      "workload": "Durable restart current replay",
+      "scale": "1,000 entities",
+      "max_mean_ms": 250.0,
+      "why": "Single-node restart/replay should remain comfortably inside the design-partner recovery envelope."
+    },
+    {
+      "id": "service_restart_replay",
+      "group": "service_in_process",
+      "workload": "Durable restart coordination replay",
+      "scale": "128 tasks",
+      "max_mean_ms": 150.0,
+      "why": "The pilot coordination surface must replay fast enough for operator restart drills."
+    },
+    {
+      "id": "service_coordination_run",
+      "group": "service_in_process",
+      "workload": "Kernel service coordination run",
+      "scale": "128 tasks",
+      "max_mean_ms": 50.0,
+      "why": "The in-process coordination report path should stay interactive for the current pilot scale."
+    },
+    {
+      "id": "http_status",
+      "group": "http_pilot_boundary",
+      "workload": "HTTP service status endpoint",
+      "scale": "pilot boundary",
+      "max_mean_ms": 10.0,
+      "why": "Operator status polling must stay effectively instant on the local pilot boundary."
+    },
+    {
+      "id": "http_history",
+      "group": "http_pilot_boundary",
+      "workload": "HTTP history endpoint",
+      "scale": "25 datoms",
+      "max_mean_ms": 10.0,
+      "why": "The small-history operator path should stay comfortably interactive."
+    },
+    {
+      "id": "http_coordination_report",
+      "group": "http_pilot_boundary",
+      "workload": "HTTP coordination report endpoint",
+      "scale": "pilot coordination",
+      "max_mean_ms": 50.0,
+      "why": "The live coordination report is the primary operator read path."
+    },
+    {
+      "id": "http_coordination_delta",
+      "group": "http_pilot_boundary",
+      "workload": "HTTP coordination delta endpoint",
+      "scale": "4 changed rows",
+      "max_mean_ms": 75.0,
+      "why": "Cut-diff should remain interactive for customer conversations."
+    }
+  ]
+}

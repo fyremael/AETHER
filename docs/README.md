@@ -267,6 +267,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 | `docs/PILOT_OPERATIONS_PLAYBOOK.md` | Deployment, rotation, upgrade, rollback, and restart/replay playbooks for the pilot service |
 | `docs/PERFORMANCE.md` | Performance workloads, runner commands, benchmark harness, and interpretation guidance |
 | `docs/CAPACITY_PLANNING.md` | Internal node classes, measured single-node envelopes, scale-out triggers, and capacity workflow guidance |
+| `docs/COMMERCIAL_RELEASE_READINESS.md` | Commercial stage ledger and release-claim boundary |
 | `docs/QA.md` | Structured QA and regression suite, release-readiness runner, and artifact contract |
 | `docs/QA_HARDENING_PROGRAM.md` | Persona-based hardening rubric, severity model, and phased promotion policy |
 | `docs/COMMERCIALIZATION/README.md` | Hub for commercialization, product framing, buyer narrative, and messaging |
