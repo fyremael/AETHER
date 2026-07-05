@@ -19,6 +19,8 @@ Use the docs by question, not by sheer volume.
   together with `docs/QA.md`.
 - If you need the new live sizing lane, use `docs/CAPACITY_PLANNING.md`
   together with `docs/PERFORMANCE.md`.
+- If you need the AETHER-POL institutional vocabulary, use
+  `docs/POLITY/README.md` and `examples/demo-07-aether-pol-semantic-layer.md`.
 
 The set is written in layers on purpose: plain orientation first, current-state
 truth second, operating detail third.
@@ -233,7 +235,8 @@ Read:
 2. `docs/SEMANTIC_COMPLIANCE_MATRIX.md`
 3. `docs/V1_CLOSEOUT.md`
 4. `docs/ROADMAP.md`
-5. `docs/KNOWN_LIMITATIONS.md`
+5. `docs/POLITY/README.md`
+6. `docs/KNOWN_LIMITATIONS.md`
 
 That set answers “what exists now, what does not yet exist, and what comes next.”
 
@@ -258,6 +261,7 @@ That set answers “what exists now, what does not yet exist, and what comes nex
 | `docs/ARCHITECTURE.md` | How the current kernel is shaped and how data moves through it |
 | `docs/SEMANTIC_COMPLIANCE_MATRIX.md` | Defensible mapping from `SPEC.md` sections `1-11` to implemented v1 single-node semantics |
 | `docs/V1_CLOSEOUT.md` | Formal closeout record for the v1 single-node semantic thesis and pilot release posture |
+| `docs/POLITY/README.md` | AETHER-POL institutional semantic layer and object vocabulary |
 | `docs/EDUCATION/README.md` | Plain-language education hub for new users, evaluators, and non-specialists |
 | `docs/DEVELOPER_WORKFLOW.md` | Day-to-day engineering loop, verification contract, and definition of done |
 | `docs/OPERATIONS.md` | Operator-facing guidance for demos, reports, and presentations |
@@ -297,7 +301,3 @@ The documentation system follows a few non-negotiable rules:
 ## Maintenance
 
 Documentation quality is not a cleanup phase after implementation. It is part of the implementation.
-
-The working rule is simple: if a change affects behavior, architecture, workflow, operator experience, or public expectations, the relevant documentation should change in the same commit.
-
-The full maintenance standard lives in `docs/DOCUMENTATION_STANDARD.md`.

@@ -8,6 +8,7 @@ Start here:
 
 | Example | Best use | What it teaches |
 | --- | --- | --- |
+| `demo-07-aether-pol-semantic-layer.md` | Post-v1 institutional vocabulary | AETHER-POL object flow, fact projection, and the governed-polity framing |
 | `demo-06-aether-learn-routing.md` | AETHER-Learn routing proof | No-regret routing ledger plus service-backed routing update reporting |
 | `demo-05-ai-support-resolution-desk.md` | ML-facing design-partner and focus-group walkthrough | A governed support case desk with retrieved evidence, candidate resolutions, selected ownership, replay, and proof |
 | `demo-04-governed-incident-blackboard.md` | Design-partner and sponsor walkthrough | A governed shared workspace for agents and operators, ready-action derivation, authority handoff, replay, and proof in plain language |
