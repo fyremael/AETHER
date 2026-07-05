@@ -9,6 +9,7 @@ members = [
     "crates/aether_runtime",
     "crates/aether_explain",
     "crates/aether_api",
+    "crates/aether_pol",
 ]
 resolver = "2"
 
