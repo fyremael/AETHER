@@ -537,11 +537,12 @@ fn optional_id(value: Option<&str>) -> Value {
     value.map_or(Value::Null, s)
 }
 
-fn string_list<'a, I>(values: I) -> Value
+fn string_list<I, S>(values: I) -> Value
 where
-    I: IntoIterator<Item = &'a str>,
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
 {
-    Value::List(values.into_iter().map(s).collect())
+    Value::List(values.into_iter().map(|value| s(value.as_ref())).collect())
 }
 
 fn kind_label(kind: WorkObjectKind) -> &'static str {
