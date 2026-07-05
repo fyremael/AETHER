@@ -97,7 +97,7 @@ The crate emits the following extensional predicates:
 
 ```text
 polity_declared
-uild_declared
+guild_declared
 agent_contracted
 work_object_declared
 claim_posted
