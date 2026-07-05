@@ -20,7 +20,7 @@ Use the docs by question, not by sheer volume.
 - If you need the new live sizing lane, use `docs/CAPACITY_PLANNING.md`
   together with `docs/PERFORMANCE.md`.
 - If you need the AETHER-POL institutional vocabulary, use
-  `docs/POLITY/README.md` and `examples/demo-06-aether-pol-semantic-layer.md`.
+  `docs/POLITY/README.md` and `examples/demo-07-aether-pol-semantic-layer.md`.
 
 The set is written in layers on purpose: plain orientation first, current-state
 truth second, operating detail third.
