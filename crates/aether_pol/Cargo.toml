@@ -1,0 +1,10 @@
+[package]
+name = "aether_pol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+aether_ast = { path = "../aether_ast" }
+serde.workspace = true
