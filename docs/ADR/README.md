@@ -37,3 +37,4 @@ The current numbered ADR set is:
 - `docs/ADR/0007-sidecars-remain-subordinate-to-semantic-control.md`
 - `docs/ADR/0008-ai-support-resolution-desk-is-reference-app-packaging.md`
 - `docs/ADR/0009-service-v2-namespaces-and-postgres-journal.md`
+- `docs/ADR/0010-aether-pol-is-semantic-layer-not-runtime.md`
