@@ -666,7 +666,7 @@ mod tests {
         assert_eq!(facts[1].predicate.name, "claim_posted");
         assert_eq!(facts[2].predicate.name, "verification_posted");
         assert_eq!(facts[3].predicate.name, "decision_posted");
-        assert!(facts.iter().all(|fact| fact.policy == Some(policy.clone())));
+        assert!(facts.iter().all(|fact| fact.policy.as_ref() == Some(&policy)));
     }
 
     #[test]
