@@ -1,23 +1,23 @@
 {
   "schema_version": 1,
-  "current_target_stage": "commercial_beta",
-  "review_cadence": "review before every release-readiness run and after any Service v2 gate promotion",
+  "current_target_stage": "design_partner_alpha",
+  "review_cadence": "review before every release-readiness run, after every remediation gate transition, and before any external claim change",
   "stages": [
     {
       "id": "design_partner_alpha",
       "label": "Design-partner alpha",
-      "intent": "Controlled, named design-partner pilots over the current single-node semantic kernel and packaged pilot service.",
-      "claim_boundary": "AETHER can be sold or shown as a paid, closely supported pilot for exact single-node semantic coordination. It is not a generalized distributed runtime or managed SaaS.",
+      "intent": "Controlled, named design-partner evaluation of the current single-node semantic kernel while the remediation programme is executed.",
+      "claim_boundary": "Controlled single-node alpha with a real Rust semantic kernel, limited to one visibility domain, trusted appenders, and explicitly supported deployment boundaries.",
       "gates": [
         {
-          "id": "v1_semantic_closure",
-          "title": "Core v1 semantic closure is defensible",
+          "id": "controlled_alpha_semantic_boundary",
+          "title": "The controlled-alpha semantic boundary is explicit",
           "owner": "kernel",
           "gate_class": "blocking",
           "status": "ready",
           "evidence": [
             {
-              "label": "V1 closeout",
+              "label": "Reopened v1 closeout",
               "path": "docs/V1_CLOSEOUT.md"
             },
             {
@@ -27,10 +27,20 @@
             {
               "label": "Semantic closure tests",
               "path": "crates/aether_api/tests/semantic_closure.rs"
+            },
+            {
+              "label": "Comprehensive audit",
+              "path": "docs/COMPREHENSIVE_AUDIT_2026-07-09.md"
+            },
+            {
+              "label": "Binding remediation programme",
+              "path": "docs/REMEDIATION_PROGRAMME.md"
             }
           ],
           "blockers": [],
-          "next_actions": []
+          "next_actions": [
+            "Keep the claim limited to one visibility domain and trusted appenders until the R1-R3 semantic gates pass."
+          ]
         },
         {
           "id": "pilot_release_evidence",
@@ -79,29 +89,29 @@
           "next_actions": []
         },
         {
-          "id": "service_v2_alpha_boundary",
-          "title": "Service v2 boundary is visible but scoped",
+          "id": "controlled_alpha_deployment_boundary",
+          "title": "The supported alpha deployment boundary is explicit",
           "owner": "service",
           "gate_class": "blocking",
           "status": "ready",
           "evidence": [
             {
-              "label": "Service v2 ADR",
-              "path": "docs/ADR/0009-service-v2-namespaces-and-postgres-journal.md"
+              "label": "Pilot deployment guide",
+              "path": "docs/PILOT_DEPLOYMENT.md"
             },
             {
-              "label": "HTTP namespace and Postgres integration tests",
-              "path": "crates/aether_api/tests/http_service.rs"
+              "label": "Known limitations",
+              "path": "docs/KNOWN_LIMITATIONS.md"
             },
             {
-              "label": "Container boot/auth/status CI job",
-              "path": ".github/workflows/ci.yml"
+              "label": "Binding remediation programme",
+              "path": "docs/REMEDIATION_PROGRAMME.md"
             }
           ],
           "blockers": [],
           "next_actions": [
             "Keep SQLite as the packaged default.",
-            "Present Postgres as optional journal-first infrastructure only."
+            "Keep optional Postgres and non-loopback network paths outside the supported external claim until the transport-security gate passes."
           ]
         },
         {
@@ -121,11 +131,10 @@
             }
           ],
           "blockers": [
-            "Admin and operator hardening packs are not yet promoted to blocking release gates."
+            "Hardening evidence does not promote the claim beyond controlled alpha while the remediation gates remain blocked."
           ],
           "next_actions": [
-            "Accumulate the required scheduled green streaks.",
-            "Promote admin first, then operator, while keeping user and exec diagnostic until stable."
+            "Keep hardening findings visible and feed correctness-relevant failures into the stable remediation gates."
           ]
         }
       ]
@@ -133,174 +142,159 @@
     {
       "id": "commercial_beta",
       "label": "Commercial beta",
-      "intent": "Paid commercial beta for selected customers with a repeatable deployment contract, explicit support boundaries, and blocking operational evidence.",
-      "claim_boundary": "AETHER can be sold as a supported single-node or Service v2 deployment for bounded production-adjacent workflows. Distributed truth remains prototype-grade unless explicitly scoped.",
+      "intent": "Future selected commercial beta, requalified only after every non-waivable remediation gate passes for one exact candidate and package.",
+      "claim_boundary": "Blocked. Commercial beta must not be claimed until the R7 exact-candidate qualification bundle verifies.",
       "gates": [
         {
-          "id": "service_v2_blocking_gates",
-          "title": "Service v2 operational proof is blocking",
+          "id": "semantic.policy_noninterference",
+          "title": "Policy-scoped semantic correctness",
+          "owner": "kernel",
+          "gate_class": "blocking",
+          "waivable": false,
+          "status": "blocked",
+          "evidence": [
+            {
+              "label": "Comprehensive audit",
+              "path": "docs/COMPREHENSIVE_AUDIT_2026-07-09.md"
+            },
+            {
+              "label": "Remediation R1",
+              "path": "docs/REMEDIATION_PROGRAMME.md"
+            }
+          ],
+          "blockers": [
+            "Policy is still applied after resolution or derivation on correctness-bearing paths, so hidden facts can alter visible truth."
+          ],
+          "next_actions": [
+            "Complete R1 and pass semantic.policy_noninterference without retrying correctness failures into green."
+          ]
+        },
+        {
+          "id": "semantic.trace_handle_identity",
+          "title": "Execution-scoped trace identity",
           "owner": "service",
           "gate_class": "blocking",
-          "status": "ready",
+          "waivable": false,
+          "status": "blocked",
           "evidence": [
             {
-              "label": "Service v2 current status",
-              "path": "docs/STATUS.md"
+              "label": "Comprehensive audit",
+              "path": "docs/COMPREHENSIVE_AUDIT_2026-07-09.md"
             },
             {
-              "label": "Current limitations",
-              "path": "docs/KNOWN_LIMITATIONS.md"
-            },
-            {
-              "label": "Service v2 operability proof runner",
-              "path": "scripts/service_v2_operability.py"
-            },
-            {
-              "label": "Postgres journal CI job",
-              "path": ".github/workflows/ci.yml"
-            },
-            {
-              "label": "Hardening promotion state",
-              "path": ".github/hardening-promotion-state.json"
+              "label": "Remediation R2",
+              "path": "docs/REMEDIATION_PROGRAMME.md"
             }
           ],
-          "blockers": [],
+          "blockers": [
+            "Service-level explanation identity is process-local and tuple IDs can alias across executions."
+          ],
           "next_actions": [
-            "Keep release-readiness -CommercialBetaCandidate green after package build.",
-            "Keep Postgres and container evidence blocking in CI, with live local reruns when customer deployment context requires them.",
-            "Do not promote user or exec hardening packs until their own release-blocking criteria are explicitly accepted."
+            "Complete R2 and pass semantic.trace_handle_identity across runs, appends, restarts, namespaces, and policy scopes."
           ]
         },
         {
-          "id": "backup_restore_upgrade_contract",
-          "title": "Backup, restore, and upgrade contract is customer-grade",
-          "owner": "ops",
+          "id": "storage.transactional_schema_append",
+          "title": "Transactional schema-valid append",
+          "owner": "storage",
           "gate_class": "blocking",
-          "status": "ready",
+          "waivable": false,
+          "status": "blocked",
           "evidence": [
             {
-              "label": "Pilot deployment guide",
-              "path": "docs/PILOT_DEPLOYMENT.md"
+              "label": "Comprehensive audit",
+              "path": "docs/COMPREHENSIVE_AUDIT_2026-07-09.md"
             },
             {
-              "label": "Pilot operations playbook",
-              "path": "docs/PILOT_OPERATIONS_PLAYBOOK.md"
-            },
-            {
-              "label": "Service v2 operability proof runner",
-              "path": "scripts/service_v2_operability.py"
-            },
-            {
-              "label": "Release rollback record renderer",
-              "path": "scripts/release_rollback_record.py"
-            }
-          ],
-          "blockers": [],
-          "next_actions": [
-            "Keep the generated rollback record attached to every beta-candidate release-readiness run.",
-            "Use the Service v2 proof artifact as the package-local SQLite backup/restore/restart evidence.",
-            "Keep Postgres export/restore documented as external database-operator responsibility until a live customer deployment requires a stronger drill."
-          ]
-        },
-        {
-          "id": "security_key_lifecycle",
-          "title": "Security and key lifecycle are beta-ready",
-          "owner": "security",
-          "gate_class": "blocking",
-          "status": "ready",
-          "evidence": [
-            {
-              "label": "Responsible disclosure policy",
-              "path": "SECURITY.md"
-            },
-            {
-              "label": "Pilot operations playbook",
-              "path": "docs/PILOT_OPERATIONS_PLAYBOOK.md"
+              "label": "Remediation R3",
+              "path": "docs/REMEDIATION_PROGRAMME.md"
             },
             {
               "label": "Known limitations",
               "path": "docs/KNOWN_LIMITATIONS.md"
-            },
-            {
-              "label": "Security and key lifecycle gate",
-              "path": "scripts/security_key_lifecycle.py"
             }
           ],
-          "blockers": [],
+          "blockers": [
+            "Append accepts data before namespace-schema validation and can poison later replay."
+          ],
           "next_actions": [
-            "Keep the package token-rotation drill, token-command tests, auth reload test, and SBOM/checksum manifest green in release-readiness.",
-            "Treat SBOM/checksum as commercial-beta evidence only; signed artifact provenance remains a GA gate.",
-            "Validate customer-specific external secret-manager commands during deployment onboarding without changing policy semantics."
+            "Complete R3 and pass storage.transactional_schema_append on every backend and write ingress."
           ]
         },
         {
-          "id": "performance_trends_and_slos",
-          "title": "Performance trends support beta commitments",
-          "owner": "performance",
+          "id": "release.evidence_integrity",
+          "title": "Immutable release evidence",
+          "owner": "release",
           "gate_class": "blocking",
-          "status": "ready",
+          "waivable": false,
+          "status": "blocked",
           "evidence": [
             {
-              "label": "Performance guide",
-              "path": "docs/PERFORMANCE.md"
+              "label": "Comprehensive audit",
+              "path": "docs/COMPREHENSIVE_AUDIT_2026-07-09.md"
             },
             {
-              "label": "Capacity planning",
-              "path": "docs/CAPACITY_PLANNING.md"
-            },
-            {
-              "label": "Performance trend runner",
-              "path": "scripts/run-performance-trends.ps1"
-            },
-            {
-              "label": "Service v2 operability proof runner",
-              "path": "scripts/service_v2_operability.py"
-            },
-            {
-              "label": "Performance beta thresholds",
-              "path": "fixtures/release/performance-beta-thresholds.json"
-            },
-            {
-              "label": "Performance beta gate",
-              "path": "scripts/performance_beta_gate.py"
+              "label": "Remediation R4",
+              "path": "docs/REMEDIATION_PROGRAMME.md"
             }
           ],
-          "blockers": [],
+          "blockers": [
+            "Readiness is derived from authored statuses and path existence rather than immutable outcomes for the exact candidate."
+          ],
           "next_actions": [
-            "Keep core and service drift non-failing on the canonical Windows host.",
-            "Keep restart/replay, report, and pilot HTTP read-path latencies under the tracked beta ceilings.",
-            "Keep replicated-partition measurements observational until variance is understood."
+            "Complete R4 and verify one exact-SHA evidence bundle independently."
           ]
         },
         {
-          "id": "customer_workflow_pack",
-          "title": "One design-partner workflow is packaged end to end",
-          "owner": "product",
+          "id": "security.dependency_supply_chain",
+          "title": "Dependency SBOM, vulnerability, and license evidence",
+          "owner": "security",
           "gate_class": "blocking",
-          "status": "ready",
+          "waivable": false,
+          "status": "blocked",
           "evidence": [
             {
-              "label": "AI support resolution desk",
-              "path": "docs/COMMERCIALIZATION/AI_SUPPORT_RESOLUTION_DESK.md"
+              "label": "Comprehensive audit",
+              "path": "docs/COMPREHENSIVE_AUDIT_2026-07-09.md"
             },
             {
-              "label": "Commercialization hub",
-              "path": "docs/COMMERCIALIZATION/README.md"
-            },
-            {
-              "label": "Notebook lane",
-              "path": "python/notebooks"
-            },
-            {
-              "label": "Customer workflow acceptance runner",
-              "path": "scripts/customer_workflow_acceptance.py"
+              "label": "Remediation R5",
+              "path": "docs/REMEDIATION_PROGRAMME.md"
             }
           ],
-          "blockers": [],
+          "blockers": [
+            "The current package manifest is not a dependency SBOM, and vulnerability, license, and code-scanning gates are absent."
+          ],
           "next_actions": [
-            "Keep the Demo 05 customer workflow acceptance artifact attached to release-readiness output.",
-            "Promote full notebook execution from structural smoke to blocking only after the Colab runtime path is stable enough for CI.",
-            "Add customer-specific evidence appendices per design partner without changing the canonical workflow gate."
+            "Complete the R5 supply-chain controls and verify the final package and SBOM provenance."
+          ]
+        },
+        {
+          "id": "service.transport_security",
+          "title": "Supported transport-security boundary",
+          "owner": "security",
+          "gate_class": "blocking",
+          "waivable": false,
+          "status": "blocked",
+          "evidence": [
+            {
+              "label": "Comprehensive audit",
+              "path": "docs/COMPREHENSIVE_AUDIT_2026-07-09.md"
+            },
+            {
+              "label": "Remediation R5",
+              "path": "docs/REMEDIATION_PROGRAMME.md"
+            },
+            {
+              "label": "Pilot deployment guide",
+              "path": "docs/PILOT_DEPLOYMENT.md"
+            }
+          ],
+          "blockers": [
+            "Remote Postgres cannot verify TLS and the supported non-loopback HTTP transport boundary is not yet enforced."
+          ],
+          "next_actions": [
+            "Complete the R5 transport contract and pass TLS identity, downgrade-rejection, and secret-redaction tests."
           ]
         }
       ]

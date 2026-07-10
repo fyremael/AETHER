@@ -1,14 +1,26 @@
 # Semantic Compliance Matrix
 
-This document is the defensible claim for AETHER's **v1 single-node semantic
-closure** against sections `1-11` of [SPEC.md](../SPEC.md).
+This document records AETHER's v1 single-node compliance against sections
+`1-11` of [SPEC.md](../SPEC.md). The unrestricted kernel slice remains
+substantial; the policy-aware portion of semantic closure is reopened following
+the July 2026 comprehensive audit.
+
+The active external claim is:
+
+> Controlled single-node alpha with a real Rust semantic kernel, limited to one
+> visibility domain, trusted appenders, and explicitly supported deployment
+> boundaries.
+
+See `docs/COMPREHENSIVE_AUDIT_2026-07-09.md` for the reproduced failures and
+`docs/REMEDIATION_PROGRAMME.md` for the binding R0-R7 gates.
 
 The bar here is intentionally narrow and strict:
 
 - exact local truth on a single-node kernel
 - deterministic `History`, `Current`, and `AsOf`
 - recursive derivation, stratified negation, bounded aggregation, provenance,
-  policy-aware derivation, and sidecar subordination
+  policy plumbing, and sidecar subordination, with policy noninterference still
+  open
 - no implied claim of distributed runtime completion, multitenancy, or
   production platform completeness
 
@@ -19,23 +31,24 @@ called out explicitly instead of hidden.
 
 | SPEC section | Status | Evidence | v1 interpretation |
 | --- | --- | --- | --- |
-| `1. Objective` | Complete | `crates/aether_storage`, `crates/aether_resolver`, `crates/aether_runtime`, `crates/aether_api/tests/semantic_closure.rs` | Single-node semantic closure only; broader platform posture remains out of scope |
+| `1. Objective` | Reopened for policy-aware paths | `crates/aether_storage`, `crates/aether_resolver`, `crates/aether_runtime`, `crates/aether_api/tests/semantic_closure.rs`, comprehensive audit | Unrestricted single-node acceptance exists; policy-scoped replay, derivation, and observable metadata remain open |
 | `2. Implementation language strategy` | Complete | Rust kernel crates, Go client/shell, Python SDK, CI in `.github/workflows/ci.yml` | Rust remains authoritative; Go/Python are boundary layers |
 | `3. Architectural thesis` | Complete | `docs/ARCHITECTURE.md`, `crates/aether_runtime`, `crates/aether_api/src/sidecar.rs` | Two-center kernel thesis is implemented locally |
 | `4. Design stance on Janus` | Complete | Repo layout and implementation shape | Janus remains reference-only, not a compatibility target |
-| `5. Core data model` | Complete for v1 single-node | `crates/aether_ast`, `crates/aether_resolver`, resolver tests | Operation/class semantics are explicit and validated |
-| `6. Provenance model` | Complete for v1 slice | `crates/aether_ast`, `crates/aether_runtime`, `crates/aether_explain`, sidecar tests | Datom and derived provenance are carried end to end |
-| `7. Temporal model` | Complete | `crates/aether_storage`, `crates/aether_resolver`, API/service tests | Deterministic replay is exact within one journal |
-| `8. Query and phase model` | Complete for v1 slice | `crates/aether_rules`, `crates/aether_plan`, `crates/aether_api` | Phase-graph and query execution are implemented; no extra post-v1 ergonomics implied |
-| `9. Rule model` | Complete for v1 slice | `crates/aether_rules`, `crates/aether_runtime`, runtime and API tests | Bounded aggregation is the current non-recursive grouped slice |
-| `10. Coordination model` | Complete for pilot-grade v1 slice | `crates/aether_api/src/pilot.rs`, pilot/report tests | Tasks, claims, leases, heartbeats, fencing, and outcomes are native semantic facts |
-| `11. Sidecar model` | Complete for single-node v1 slice | `crates/aether_api/src/sidecar.rs`, sidecar federation tests | Sidecars are journal-subordinated, temporally exact, and policy/provenance-bearing locally |
+| `5. Core data model` | Reopened at append admission | `crates/aether_ast`, `crates/aether_resolver`, resolver tests, comprehensive audit | Resolver validation exists, but namespace-schema validity is not enforced transactionally before append |
+| `6. Provenance model` | Kernel provenance complete; service proof identity reopened | `crates/aether_ast`, `crates/aether_runtime`, `crates/aether_explain`, sidecar tests, comprehensive audit | Datom and derived provenance exist, but a bare process-local tuple ID is not a durable service proof identity |
+| `7. Temporal model` | Complete unrestricted; policy scope reopened | `crates/aether_storage`, `crates/aether_resolver`, API/service tests, comprehensive audit | Deterministic replay is exact for an unrestricted journal prefix; policy projection must move before replay |
+| `8. Query and phase model` | Complete unrestricted; policy scope reopened | `crates/aether_rules`, `crates/aether_plan`, `crates/aether_api` | Phase-graph and query execution exist, but scoped program facts must be projected before compilation |
+| `9. Rule model` | Complete unrestricted; policy scope reopened | `crates/aether_rules`, `crates/aether_runtime`, runtime and API tests, comprehensive audit | Recursion/negation/aggregation execute, but protected inputs must be projected before compilation and evaluation |
+| `10. Coordination model` | Complete unrestricted; policy scope reopened | `crates/aether_api/src/pilot.rs`, pilot/report tests, comprehensive audit | Tasks, claims, leases, heartbeats, fencing, and outcomes exist, but policy-scoped readiness/reporting must be recomputed from visible inputs |
+| `11. Sidecar model` | Complete unrestricted; policy scope reopened | `crates/aether_api/src/sidecar.rs`, sidecar federation tests, comprehensive audit | Sidecars remain journal-subordinated, but policy dependency closure and noninterference are not yet proven |
 
 ## Section Detail
 
 ### `1. Objective`
 
-**Status:** Complete for v1 single-node semantics.
+**Status:** Reopened for policy-aware service semantics; complete only for the
+unrestricted single-node acceptance slice.
 
 Implemented:
 
@@ -43,7 +56,8 @@ Implemented:
 - deterministic temporal replay
 - cardinality-aware resolution across scalar, set, and sequence classes
 - Datalog-native recursive rule execution
-- provenance- and policy-aware derivation
+- provenance-bearing derivation and policy plumbing; policy noninterference is
+  not yet satisfied
 - sidecar federation for artifacts and vectors
 - narrow Go/Python/API boundaries around the Rust kernel
 
@@ -78,7 +92,7 @@ Implemented:
 
 - authoritative semantic substrate: datoms, storage, resolver, sidecar anchors
 - recursive semantic closure: rules, SCC planning, semi-naive runtime,
-  explanation, policy-aware filtering
+  explanation, and current policy filtering, which is not yet semantic input
 
 Primary evidence:
 
@@ -95,13 +109,15 @@ compatibility as a product constraint.
 
 ### `5. Core data model`
 
-**Status:** Complete for the v1 single-node interpretation.
+**Status:** Complete for resolver-time operation/class interpretation; reopened
+for transactional namespace-schema append admission.
 
 Implemented:
 
 - all v1 operation kinds are represented in the AST
 - attribute classes drive deterministic resolver behavior
-- op/class compatibility is validated explicitly
+- op/class compatibility is validated during resolution, but invalid batches
+  are not yet rejected atomically before append
 - `InsertAfter` is anchored and replay-stable for `SequenceRGA`
 
 Primary evidence:
@@ -115,7 +131,8 @@ Normalization note:
 
 ### `6. Provenance model`
 
-**Status:** Complete for the current semantic slice.
+**Status:** Kernel provenance is complete for the current slice; durable
+service-level proof identity is reopened.
 
 Implemented:
 
@@ -132,7 +149,7 @@ Primary evidence:
 
 ### `7. Temporal model`
 
-**Status:** Complete.
+**Status:** Complete for unrestricted replay; reopened for policy-scoped replay.
 
 Implemented:
 
@@ -149,7 +166,8 @@ Primary evidence:
 
 ### `8. Query and phase model`
 
-**Status:** Complete for the current v1 slice.
+**Status:** Complete unrestricted; reopened for policy-scoped program/query
+execution.
 
 Implemented:
 
@@ -166,7 +184,8 @@ Primary evidence:
 
 ### `9. Rule model`
 
-**Status:** Complete for the v1 slice.
+**Status:** Complete for the unrestricted v1 slice; reopened for policy-scoped
+recursion, negation, and aggregation.
 
 Implemented:
 
@@ -191,7 +210,8 @@ Normalization note:
 
 ### `10. Coordination model`
 
-**Status:** Complete for the pilot-grade v1 slice.
+**Status:** Complete for the unrestricted pilot slice; reopened for
+policy-scoped coordination and reporting.
 
 Implemented:
 
@@ -215,7 +235,8 @@ Normalization note:
 
 ### `11. Sidecar model`
 
-**Status:** Complete for the single-node v1 slice.
+**Status:** Complete unrestricted for the single-node slice; reopened for
+policy-scoped sidecar projection and dependency closure.
 
 Implemented:
 
@@ -223,7 +244,8 @@ Implemented:
 - vector metadata outside the inline journal payload
 - journal-subordinated sidecar registration and `AsOf` visibility
 - provenance-bearing semantic projection back into the rule layer
-- policy-aware sidecar fetch and search filtering
+- policy-related sidecar fetch and search filtering, pending R1
+  noninterference proof across anchors, projection, derivation, and metadata
 
 Primary evidence:
 
@@ -257,7 +279,8 @@ Together they cover:
 - recursive closure
 - stratified negation
 - bounded aggregation
-- policy-aware derivation
+- policy-related derivation coverage that does not yet prove pre-evaluation
+  projection or noninterference
 - coordination fencing
 - sidecar projection
 - explanation
@@ -272,5 +295,6 @@ This matrix does **not** claim:
 - replicated sidecar backends
 - production platform completeness
 
-Those remain important, but they are outside the bar for **full v1 single-node
-semantic closure**.
+Those remain important, but they are outside the unrestricted kernel slice.
+Policy-scoped replay, proof identity, and append admission are inside the
+reopened correctness boundary and must not be described as completed closure.

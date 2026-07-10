@@ -3,7 +3,12 @@
 ## Current state
 
 The repository has advanced from a pure specification bundle to a functioning
-full-v1 single-node semantic kernel with a launch-ready design-partner pilot.
+single-node semantic kernel. Its active claim is deliberately contained while
+the July 2026 audit findings are remediated:
+
+> Controlled single-node alpha with a real Rust semantic kernel, limited to one
+> visibility domain, trusted appenders, and explicitly supported deployment
+> boundaries.
 
 In plain terms: AETHER can now journal facts, replay exact cuts, derive
 recursive truths, explain them, and serve them through authenticated boundaries
@@ -34,9 +39,12 @@ That scaling lane now also has a first-class live sizing system: typed
 capacity curves, concrete `S`/`M`/`L`/`XL` node classes, a recurring capacity
 bundle, and a scheduled GitHub tracker issue for headroom and ceiling drift.
 
-The v1 single-node semantic thesis is now also formally closed in
-`docs/V1_CLOSEOUT.md`, which ties the semantic compliance matrix, QA contract,
-launch gate, and architectural ADR set into one explicit release posture.
+The unrestricted kernel acceptance slice remains substantial, but the
+policy-aware portion of v1 closure is reopened. The reproduced defects and
+binding repair sequence are recorded in
+`docs/COMPREHENSIVE_AUDIT_2026-07-09.md` and
+`docs/REMEDIATION_PROGRAMME.md`. `docs/V1_CLOSEOUT.md` and the semantic
+compliance matrix now carry that reopened boundary explicitly.
 
 Completed:
 
@@ -49,9 +57,9 @@ Completed:
 - first recursive tuple explainer implemented
 - whole-document DSL parser implemented for the current canonical v1 surface: schema, attribute classes, facts, repeated queries, explain directives, temporal views, and policy annotations
 - `Current` and `AsOf` query execution implemented
-- policy annotations turned into executable behavior through explicit policy-context filtering on state resolution, document execution, derived tuples, explanation traces, reports, and sidecar reads/searches
+- policy annotations wired through state, document, explanation, report, and sidecar paths, with the policy-aware correctness claim reopened because several paths filter after resolution or derivation
 - authenticated HTTP tokens now bind maximum semantic policy visibility, with request policy contexts only allowed to narrow that bound
-- explain, visible history, audit entries, and operator reports now all follow the same effective-policy cut instead of widening past the caller's semantic visibility
+- policy context is carried through explain, history, audit, and report surfaces, but policy-scoped replay and derivation are not yet proven noninterfering
 - strict v1 operation/class validation implemented across scalar, set, and sequence attributes, with anchored `InsertAfter` semantics and deterministic replay for `SequenceRGA`
 - semi-naive delta execution implemented for recursive SCC evaluation
 - executable stratified negation implemented for stratified programs
@@ -83,16 +91,16 @@ Completed:
 - pilot-focused Go operator TUI implemented as the live cockpit for health, coordination state, audit entries, history, tuple proof traces, service status, and coordination diffs
 - broader typed Python SDK surface implemented against the HTTP API with fixture builders and live integration coverage
 - Colab notebook lane now boots the authenticated pilot boundary with notebook-local token, namespace, SQLite storage, service status, and audit context instead of the older unauthenticated in-memory HTTP example
-- semantic compliance matrix added to map `SPEC.md` sections `1-11` to implementation and acceptance evidence for the current v1 single-node closure claim
-- formal v1 closeout record added to anchor the semantic closure claim to the numbered ADR set, QA gate, and launch/release evidence posture
+- semantic compliance matrix added to map `SPEC.md` sections `1-11` to implementation and acceptance evidence, with policy-aware closure now explicitly reopened
+- formal v1 closeout record retained as the historical acceptance record, with its policy-aware and release-claim portions reopened pending the remediation gates
 - partition IDs, partition-qualified cuts, and federated-cut types implemented in the semantic model
 - single-process partition-aware in-memory service implemented for exact per-partition append/history/state reads plus explicit federated-history reads
 - imported-fact federation implemented over explicit partition cuts, including provenance-bearing extensional facts that carry source partition/cut context into derived tuples
 - federated document execution, explain traces, and markdown report generation implemented on top of the partition-aware in-memory service
 - SQLite-backed partition-aware service implemented for durable per-partition replay and restart-safe federated imported-fact / explain / report execution
 - single-host leader/follower replicated authority partitions implemented as an operable manual-failover prototype with leader epochs, follower replay, restart-safe metadata reload, stale-epoch fencing, explicit leader/lag/degraded replica status, divergent-prefix rejection, HTTP status surfaces, and federated HTTP routes
-- AETHER Service v2 groundwork implemented as a service-plane widening over the closed v1 kernel: `X-Aether-Namespace` request isolation, namespace-bound bearer tokens, namespace-bearing audit/status surfaces, legacy pilot config compatibility, tagged v2 SQLite/Postgres storage config, and a Postgres journal backend behind the existing `Journal` contract
-- coordination delta reports implemented in JSON and markdown for cut-to-cut operator comparisons, including policy-aware trace-handle redaction instead of hard failure
+- AETHER Service v2 groundwork implemented as a service-plane widening over the Rust kernel: `X-Aether-Namespace` request isolation, namespace-bound bearer tokens, namespace-bearing audit/status surfaces, legacy pilot config compatibility, tagged v2 SQLite/Postgres storage config, and a Postgres journal backend behind the existing `Journal` contract
+- coordination delta reports implemented in JSON and markdown for cut-to-cut operator comparisons, including policy-related trace-metadata redaction instead of hard failure; these are not yet execution-scoped proof handles
 - federated run/report HTTP surfaces implemented for the replicated prototype, with imported-cut provenance carried into explain and report artifacts
 - lightweight exact-response reuse implemented for repeated replicated federated run/report requests, invalidated on append and promotion
 - structured release-readiness QA suite implemented with a dedicated runner, Pages preview build, package build, and uploaded workflow artifacts for manual/tagged release preparation
@@ -109,20 +117,26 @@ Completed:
 - the scheduled hardening workflow now also publishes promotion metrics, updates a standing GitHub tracker issue, and can open a promotion PR when the next pack satisfies the documented streak threshold
 - release-readiness now emits an explicit hardening gate-state summary that separates blocking packs from diagnostic packs and reports the latest pass/fail/skipped evidence
 - admin and operator hardening packs are now promoted into blocking CI/release-readiness gates after five downloaded scheduled QA Hardening metrics artifacts showed consecutive `passed` statuses, exceeding the configured three-run threshold
-- a tracked commercial release readiness ledger now separates design-partner alpha, commercial beta, and GA, and release-readiness renders that ledger into saved markdown/JSON evidence while enforcing only the current target stage
+- a tracked commercial release readiness ledger separates design-partner alpha, commercial beta, and GA; its active target is now controlled design-partner alpha, and authored ledger state is not accepted as proof of beta readiness
 - release-readiness now also emits a Service v2 operability proof artifact with a direct SQLite namespace restart/replay drill, Postgres availability status, CI container-smoke coverage, current-run package backup/restore-through-restart proof, and admin/operator promotion status
 - release-readiness now emits a versioned rollback record that ties the packaged bundle, package-local backup/restore proof, restart/replay evidence, packaged upgrade/rollback playbook, and Postgres export/restore boundary into one release artifact
 - release-readiness now emits a customer workflow acceptance artifact that runs the AI support resolution desk demo and checks the buyer-facing workflow markers
 - release-readiness now emits a performance beta gate artifact that enforces explicit canonical-host thresholds for gated drift, restart/replay, in-process report latency, and pilot HTTP read paths
-- release-readiness now emits a security/key lifecycle artifact that verifies package token rotation, token-command/auth-reload tests, secret-manager documentation, and package SBOM/checksum generation
-- release-readiness now enforces Service v2 beta proof and rollback evidence whenever the ledger target is `commercial_beta`, with `-CommercialBetaCandidate` retained as an explicit operator override
-- the commercial readiness ledger now targets selected commercial beta, while GA remains blocked by signed release, support/security, multi-platform distribution, and distributed-truth gates
+- release-readiness emits a security/key lifecycle artifact that verifies package token rotation, token-command/auth-reload tests, secret-manager documentation, and a package file/checksum manifest; that manifest is not a dependency SBOM
+- the existing beta-candidate runner remains available for diagnostics, but it does not qualify a commercial beta until R4 replaces authored/path-based readiness with exact-candidate immutable evidence
+- the commercial readiness ledger now targets controlled design-partner alpha; commercial beta is blocked by six non-waivable remediation gates, and GA remains blocked by its separate release, support/security, distribution, and distributed-truth gates
 - a repeatable perturbation sweep now exists to run the persona pass, full-stack benchmark snapshot, host-aware drift checks, deeper ignored stress workloads, and single-node capacity projections in one artifact pack
 - a typed capacity-planning layer now exists over perturbation and matrix evidence, with measured board/closure/replay/concurrency ladders, concrete hardware-class guidance, explicit scale-out triggers, and a scheduled GitHub tracker workflow
 - a lightweight performance trend index now exists over saved run bundles and tracked accepted baselines so latest/prior/baseline context is visible without manually opening every benchmark artifact
 
 Still open:
 
+- policy-scoped semantic correctness before replay, negation, aggregation, and fixed-point execution
+- execution-scoped, durable, non-aliasing trace identity
+- transactional namespace-schema validation before append reaches journal authority
+- immutable exact-candidate release evidence rather than authored status and path existence
+- real dependency SBOM, vulnerability, license, and code-scanning evidence
+- a supported transport-security boundary for remote Postgres and non-loopback HTTP
 - post-v1 DSL ergonomics and document modularity beyond the current canonical surface
 - production hardening for the optional Postgres journal deployment path beyond current parity/concurrency coverage
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
@@ -131,11 +145,16 @@ Still open:
 
 ## Immediate focus
 
-The most immediate work now sits just beyond the launch-ready pilot slice and
-the formally closed v1 single-node semantic core:
+The immediate work is the ordered R0-R5 sequence in
+`docs/REMEDIATION_PROGRAMME.md`. Feature broadening across policy, service
+execution, append, proof identity, or release claims stays frozen until the
+relevant repaired contract is green:
 
+- keep the temporary controlled-alpha claim identical across status, roadmap, limitations, commercialization, and site source
+- complete policy noninterference, then proof identity, then transactional append admission in that order
+- replace self-authored readiness with immutable exact-candidate evidence before restoring any beta language
 - keep admin and operator hardening gates blocking, and do not promote user or exec checks until their release-blocking criteria are explicitly accepted
-- keep the commercial readiness ledger current and avoid broad GA/commercial-platform language until the GA gates are backed by current evidence
+- keep commercial beta and GA blocked until their separate programme gates are backed by current evidence
 - continue hardening the single-host replicated authority-partition prototype with longer recovery drills, clearer operator presets, and measured promotion/follower-replay evidence without pretending it is a generalized cluster manager
 - continue Service v2 hardening around namespace isolation, Postgres journal parity, container smoke, and design-partner deployment docs while keeping SQLite the package default and sidecars local/journal-subordinated
 - add longer-duration scheduled operability evidence beyond the current release and launch gates

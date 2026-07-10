@@ -10,6 +10,21 @@ drifting away from the current pilot proof.
 The writing standard is simple: plain claims first, larger vision second.
 Assume the reader is smart, busy, and appropriately skeptical.
 
+## Current Claim Boundary
+
+The July 2026 audit reopened policy-aware closure and commercial-beta
+qualification. Until the remediation programme reaches its R7 gate, use this
+sentence verbatim:
+
+> Controlled single-node alpha with a real Rust semantic kernel, limited to one
+> visibility domain, trusted appenders, and explicitly supported deployment
+> boundaries.
+
+Commercial beta and GA are blocked. Read
+`docs/COMPREHENSIVE_AUDIT_2026-07-09.md` for the reproduced defects and
+`docs/REMEDIATION_PROGRAMME.md` for the binding repair sequence before using
+any broader product or release language.
+
 ## Reading Paths
 
 ### If you are an executive sponsor or design partner
@@ -18,13 +33,14 @@ Read these in order:
 
 1. `docs/COMMERCIALIZATION/EXECUTIVE_BRIEF.md`
 2. `docs/COMMERCIALIZATION/EXECUTIVE_SUMMARY.md`
-3. `docs/COMMERCIALIZATION/AI_SUPPORT_RESOLUTION_DESK.md`
-4. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
-5. `docs/COMMERCIALIZATION/VISION.md`
-6. `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md`
-7. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
-8. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
-9. `docs/PILOT_COORDINATION.md`
+3. `docs/COMMERCIALIZATION/AGENTIC_POSITIONING_OPTIONS.md`
+4. `docs/COMMERCIALIZATION/AI_SUPPORT_RESOLUTION_DESK.md`
+5. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
+6. `docs/COMMERCIALIZATION/VISION.md`
+7. `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md`
+8. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
+9. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
+10. `docs/PILOT_COORDINATION.md`
 
 That path answers what AETHER is for, why it matters, where it can go, and what
 the current pilot already proves.
@@ -34,16 +50,17 @@ the current pilot already proves.
 Read these in order:
 
 1. `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md`
-2. `docs/COMMERCIALIZATION/AI_SUPPORT_RESOLUTION_DESK.md`
-3. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
-4. `docs/COMMERCIALIZATION/CUSTOMER_DECK.md`
-5. `docs/COMMERCIALIZATION/SEED_INVESTOR_PITCH.md`
-6. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
-7. `docs/COMMERCIALIZATION/MESSAGING_ARCHITECTURE.md`
-8. `docs/COMMERCIALIZATION/CONCEPT_TRANSLATION.md`
-9. `docs/COMMERCIALIZATION/TUPLESPACE_OVER_AETHER.md`
-10. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
-11. `docs/COMMERCIALIZATION/PITCH_DECK_OUTLINE.md`
+2. `docs/COMMERCIALIZATION/AGENTIC_POSITIONING_OPTIONS.md`
+3. `docs/COMMERCIALIZATION/AI_SUPPORT_RESOLUTION_DESK.md`
+4. `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md`
+5. `docs/COMMERCIALIZATION/CUSTOMER_DECK.md`
+6. `docs/COMMERCIALIZATION/SEED_INVESTOR_PITCH.md`
+7. `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md`
+8. `docs/COMMERCIALIZATION/MESSAGING_ARCHITECTURE.md`
+9. `docs/COMMERCIALIZATION/CONCEPT_TRANSLATION.md`
+10. `docs/COMMERCIALIZATION/TUPLESPACE_OVER_AETHER.md`
+11. `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md`
+12. `docs/COMMERCIALIZATION/PITCH_DECK_OUTLINE.md`
 
 That path gives you the narrative, language discipline, buyer map, and
 presentation structure.
@@ -61,6 +78,8 @@ Read these in order:
 7. `docs/ARCHITECTURE.md`
 8. `docs/PERFORMANCE.md`
 9. `docs/KNOWN_LIMITATIONS.md`
+10. `docs/COMPREHENSIVE_AUDIT_2026-07-09.md`
+11. `docs/REMEDIATION_PROGRAMME.md`
 
 That path grounds the company story in present proof, scaling sequence, system
 shape, and remaining hard constraints.
@@ -88,6 +107,7 @@ That path keeps the visual system, copy system, and public front door aligned.
 | `docs/COMMERCIALIZATION/AI_SUPPORT_RESOLUTION_DESK.md` | Flagship ML-facing working app pack for AI-assisted support operations over the current pilot proof |
 | `docs/COMMERCIALIZATION/GOVERNED_INCIDENT_BLACKBOARD.md` | Canonical adjacent-next exemplar for presenting AETHER as a governed shared workspace for agents and operators |
 | `docs/COMMERCIALIZATION/EXECUTIVE_SUMMARY.md` | CEO- and board-grade strategic summary for early company framing |
+| `docs/COMMERCIALIZATION/AGENTIC_POSITIONING_OPTIONS.md` | Executive options memo for AETHER-Core, AETHER-Coordinate, AETHER-Memory, AETHER-Learn, and adjacent first-story choices |
 | `docs/COMMERCIALIZATION/PRODUCT_NARRATIVE.md` | Main commercial story: what problem AETHER solves and how to explain it |
 | `docs/COMMERCIALIZATION/CANONICAL_USE_CASES.md` | Canonical ladder of increasing use-case complexity and scale for external storytelling |
 | `docs/COMMERCIALIZATION/BUYER_USE_CASE_MATRIX.md` | Buyer personas, pains, use cases, and wedge-entry motions |
@@ -108,6 +128,8 @@ That path keeps the visual system, copy system, and public front door aligned.
 ## Guardrails
 
 - Treat the current pilot as the proof anchor.
+- Keep controlled design-partner alpha as the active claim; do not describe the
+  current tree as commercial beta.
 - Lead the ML-facing story with the support resolution desk before the broader blackboard reference pattern.
 - Separate present capability from scaled platform vision.
 - Do not present AETHER as a general-purpose production platform yet.

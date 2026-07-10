@@ -1,74 +1,72 @@
 # Commercial Release Readiness
 
-AETHER is currently positioned for **selected commercial beta**, not broad
-general availability.
+AETHER's active target is **controlled design-partner alpha**. Commercial beta
+is blocked, and general availability remains separately blocked.
 
-The tracked source of truth is
-`fixtures/release/commercial-readiness-ledger.json`. The release-readiness
-runner renders that ledger into saved JSON and markdown artifacts on every run.
+The only authorized external claim during remediation is:
+
+> Controlled single-node alpha with a real Rust semantic kernel, limited to one
+> visibility domain, trusted appenders, and explicitly supported deployment
+> boundaries.
+
+The reproduced failures are recorded in
+`docs/COMPREHENSIVE_AUDIT_2026-07-09.md`. The binding repair and
+requalification sequence is `docs/REMEDIATION_PROGRAMME.md`.
 
 ## Stage Boundary
 
 | Stage | Current posture | Meaning |
 | --- | --- | --- |
-| Design-partner alpha | Ready | Controlled, closely supported pilots over the single-node semantic kernel and packaged pilot service |
-| Commercial beta | Ready target | Paid, selected beta deployments with explicit support boundaries, Service v2 proof, rollback evidence, performance thresholds, security/key lifecycle evidence, and a tested customer workflow |
-| General availability | Blocked | Needs signed artifact promotion, support/security posture, multi-platform distribution, and separately gated distributed-truth claims |
+| Controlled design-partner alpha | Active target | Closely supported single-node evaluation inside the exact visibility, append-authority, and deployment limits above |
+| Commercial beta | Blocked | Cannot be restored until all six non-waivable remediation gates pass and one exact-candidate evidence bundle verifies independently |
+| General availability | Blocked | Still needs its separate signed-promotion, support/incident, distribution, and distributed-truth gates |
 
-## Operating Rule
+## Commercial-Beta Blockers
 
-Do not sell past the green stage.
+All six gates are non-waivable:
 
-For the current tree, that means:
+1. `semantic.policy_noninterference` — policy-scoped semantic correctness
+2. `semantic.trace_handle_identity` — execution-scoped trace identity
+3. `storage.transactional_schema_append` — transactional schema-valid append
+4. `release.evidence_integrity` — immutable release evidence
+5. `security.dependency_supply_chain` — dependency SBOM, vulnerability, and license evidence
+6. `service.transport_security` — supported transport-security boundary
 
-- we may claim a defensible selected commercial beta for exact single-node semantic coordination deployments
-- we must not claim GA or broad managed-platform readiness
-- we must not claim GA until the release, security, support, and distribution posture is product-grade
+The tracked policy source is
+`fixtures/release/commercial-readiness-ledger.json`. During R0 that ledger
+records the contained posture and blockers; it does not prove that a gate ran.
+R4 replaces authored/path-based readiness with computation over immutable
+outcomes for an exact commit, tree, package, inputs, and workflow run.
 
-## Release Evidence
+## Existing Release Artifacts
 
-Run:
+The current runner remains useful for development diagnostics:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1
 ```
 
-For a stricter commercial-beta candidate run, use:
+It can produce package, performance, recovery, customer-workflow, and
+security/key-lifecycle artifacts under `artifacts/`. Those artifacts are not a
+commercial-beta qualification because they are mutable/ignored, are not all
+bound to one exact candidate, and the current ledger renderer trusts authored
+statuses and path existence.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1 -CommercialBetaCandidate
-```
+The file currently called a package SBOM is a file/checksum manifest, not a
+dependency SBOM. Likewise, a `ci_blocking` marker or workflow source path is not
+evidence that the matching job succeeded for the candidate.
 
-The runner now also enforces beta-specific Service v2 and rollback checks when
-the ledger target is `commercial_beta`, so the flag is retained mainly as an
-explicit operator override.
+## Promotion Rule
 
-The generated release summary includes:
+Do not sell or publish past the active controlled-alpha boundary. Commercial
+beta may be reconsidered only after:
 
-- `artifacts/qa/release-readiness/service-v2-operability-latest.md`
-- `artifacts/qa/release-readiness/service-v2-operability-latest.json`
-- `artifacts/qa/release-readiness/performance-beta-latest.md`
-- `artifacts/qa/release-readiness/performance-beta-latest.json`
-- `artifacts/qa/release-readiness/security-key-lifecycle-latest.md`
-- `artifacts/qa/release-readiness/security-key-lifecycle-latest.json`
-- `artifacts/qa/release-readiness/rollback-record-latest.md`
-- `artifacts/qa/release-readiness/rollback-record-latest.json`
-- `artifacts/qa/release-readiness/customer-workflow-latest.md`
-- `artifacts/qa/release-readiness/customer-workflow-latest.json`
-- `artifacts/qa/release-readiness/commercial-readiness-latest.md`
-- `artifacts/qa/release-readiness/commercial-readiness-latest.json`
-- a commercial readiness section inside `artifacts/qa/release-readiness/latest.md`
+- R1-R5 exit gates are green in order;
+- every non-waivable gate has a passed exact-candidate result;
+- the final package, dependency SBOM, provenance, documentation, and site name
+  the same SHA;
+- the evidence bundle verifies from a fresh environment;
+- protected release approval completes at R7.
 
-## Service V2 Hardening Focus
-
-Commercial beta remains green only while the ledger evidence proves:
-
-- Service v2 namespace, Postgres, and container behavior remain named blocking gates
-- SQLite restart/replay is captured directly in the Service v2 proof artifact
-- Postgres restart/replay is accepted as blocking CI evidence by default and captured live when `AETHER_POSTGRES_TEST_URL` is present
-- package backup/restore through restart is captured after the pilot package build
-- rollback is captured in a versioned release record per candidate
-- the AI support resolution desk customer workflow executes as a release acceptance artifact
-- token lifecycle and package integrity evidence are release-visible
-- package SBOM/checksum evidence exists for beta; signed artifact provenance remains a GA gate
-- performance trends have explicit beta thresholds rather than one-off benchmark snapshots
+No previous local artifact, `latest` file, ledger status, or workflow
+declaration can substitute for that qualification.

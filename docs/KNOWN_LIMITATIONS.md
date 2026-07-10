@@ -1,11 +1,40 @@
 # KNOWN_LIMITATIONS
 
-The v1 **single-node semantic thesis** is now closed. The formal closeout
-record is `docs/V1_CLOSEOUT.md`. The limitations below are the remaining
-post-v1, platform-breadth, or operability gaps around that core.
+The unrestricted v1 single-node kernel slice remains implemented, but the
+policy-aware portion of semantic closure is reopened. The active external claim
+is:
+
+> Controlled single-node alpha with a real Rust semantic kernel, limited to one
+> visibility domain, trusted appenders, and explicitly supported deployment
+> boundaries.
+
+The historical closeout is `docs/V1_CLOSEOUT.md`; the audit and binding repair
+sequence are `docs/COMPREHENSIVE_AUDIT_2026-07-09.md` and
+`docs/REMEDIATION_PROGRAMME.md`.
 
 These are real boundaries, not hidden footnotes. They mark the edge of the
 implemented system.
+
+## External Review Defects
+
+The July 2026 external reviews are recorded in
+`docs/V2_EXTERNAL_REVIEW.md` and
+`docs/COMPREHENSIVE_AUDIT_2026-07-09.md`. These findings are defects, not
+ordinary feature backlog:
+
+- Policy contexts are currently applied after full journal resolution and
+  derivation in several service paths. That means hidden retracts or hidden
+  negated facts can affect visible state or derivations before response
+  filtering. Policy-scoped replay needs to become semantic input to resolver and
+  runtime execution.
+- Tuple explanation requests are backed by a process-local last-derived cache
+  keyed only by tuple ID. Appends and different document runs can leave stale or
+  ambiguous explanation state. Explanations need explicit cut/program/policy
+  trace handles.
+- Append accepts datoms before a canonical namespace schema validates the whole
+  batch. Invalid records can reach journal authority and poison later replay.
+- Commercial readiness is computed from authored statuses and path existence,
+  not immutable outcomes for the exact candidate commit and package.
 
 ## Language And Runtime Scope
 
@@ -18,9 +47,9 @@ implemented system.
 
 - The kernel service now has in-memory, SQLite-backed, and optional Postgres-journal execution paths. Service v2 namespaces isolate HTTP service state and token authorization, but they are not DSL semantics, authority partitions, cross-partition transactions, or a full managed multi-tenant platform.
 - Coordination semantics now cover heartbeats and execution outcomes in the pilot slice, but expiry still relies on explicit semantic state rather than clock-driven timeout windows or distributed failure detection.
-- HTTP authorization still uses coarse endpoint scopes, but tokens now also bind maximum semantic policy visibility for history, state, documents, explanation, sidecar access, and reports. The remaining gap is richer governance ergonomics, not the absence of token-bound semantic policy or policy-aware derivation.
+- HTTP authorization still uses coarse endpoint scopes. Tokens bind maximum policy visibility, but several correctness-bearing paths apply that policy after resolution or derivation; token-bound policy therefore does not yet establish semantic noninterference.
 - Audit entries now capture effective policy decisions plus requested, granted, and effective semantic visibility, but they still do not capture full operator intent or semantic diffs between cuts.
-- Operator reports are now policy-aware fixed-format incident summaries in markdown and JSON, but they are still not interactive investigation tools.
+- Operator reports carry policy context in fixed-format markdown and JSON, but they are not yet proven to be computed entirely from a policy-projected semantic snapshot.
 - Coordination delta reports now compare explicit cuts and carry trace handles where visible, but they still summarize fixed pilot sections rather than arbitrary user-defined investigative views.
 - The Go operator TUI is now implemented as the primary live pilot cockpit, but it is intentionally pilot-focused and read-only in v1 rather than a general workflow IDE or mutation surface.
 - The pilot service now has a packaged deployment path with config-backed startup, package-local rotation tooling, backup/restore helpers, auth reload, explicit token/principal identities, and secret-file/env/command token resolution, but it is still a single-node bundle rather than a fully managed deployment story with automated rotation services, distributed revocation, or native cloud secret-manager integrations.
@@ -31,9 +60,11 @@ implemented system.
 - The new capacity planner now produces concrete node-class guidance and explicit scale-out triggers, but those envelopes are still internal planning outputs from single-host calibration rather than public guarantees or cloud-SKU-specific commitments.
 - The accepted regression gate is still deliberately narrow: `core_kernel` and `service_in_process` on the canonical native Windows dev host are the tracked release baselines, while HTTP and replicated-partition suites remain observational until their variance is better understood.
 - The current measured default `M` envelope is conservative: it presently recommends `1,024` pilot-board tasks even though larger ladders run correctly, because operator/report latency degrades before replay or local storage become the limiting factor.
-- The structured release-readiness suite now produces a coherent QA evidence pack plus hardening gate-state summary, but it is still a pre-release verification flow rather than a signed artifact and promotion pipeline.
-- The commercial release readiness ledger currently targets selected commercial beta. GA remains explicitly blocked until signed release promotion, support/security posture, multi-platform distribution, and separately gated distributed-truth evidence mature.
-- Service v2 operability now has named release-readiness proof artifacts, including promoted admin/operator hardening gates, current-run package backup/restore evidence after package build, a versioned rollback record, CI-backed Postgres/container evidence, explicit beta performance thresholds, an acceptance-tested AI support resolution desk workflow, and a security/key lifecycle gate. This is beta evidence, not GA-grade signed artifact promotion or managed-platform security posture.
+- The structured release-readiness suite produces useful QA artifacts, but it does not bind every conclusion to an immutable exact-candidate evidence bundle. Authored statuses, source-path existence, and `latest` artifacts cannot qualify a release.
+- The commercial release readiness ledger targets controlled design-partner alpha. Commercial beta is blocked by six non-waivable gates: policy correctness, execution-scoped trace identity, transactional schema-valid append, immutable evidence, dependency SBOM/vulnerability/license evidence, and a supported transport-security boundary. GA remains separately blocked.
+- Existing Service v2 operability, backup/restore, performance, package, and customer-workflow artifacts are useful partial evidence only. They do not override the six blockers or qualify commercial beta.
+- The current package “SBOM” is a file/checksum manifest rather than a dependency SBOM; dependency versions, package identifiers, licenses, vulnerability scanning, and code scanning are not yet release gates.
+- The optional Postgres journal uses plaintext `NoTls`, and a supported non-loopback HTTP TLS/ingress boundary is not yet enforced. Remote Postgres and non-loopback HTTP are outside the controlled-alpha claim.
 - The new QA hardening workflow is intentionally non-blocking in phase one. It is a diagnostic program for surfacing admin, operator, user, and exec defects before stable subchecks are promoted into `CI` or release-readiness.
 - The repository now has a responsible-disclosure policy, but it is not yet advertising a paid public bug bounty.
 - Memory figures in the performance report are structural lower-bound estimates rather than allocator-exact telemetry.

@@ -7,20 +7,27 @@ next without disturbing the semantic center.”
 
 ## Milestone Spine
 
-The original v1 milestone spine is now substantially closed and formally
-recorded in `docs/V1_CLOSEOUT.md`.
+The original unrestricted v1 milestone spine is substantially implemented and
+recorded in `docs/V1_CLOSEOUT.md`. Policy-aware closure is reopened under the
+July 2026 remediation programme.
+
+The active external claim during remediation is:
+
+> Controlled single-node alpha with a real Rust semantic kernel, limited to one
+> visibility domain, trusted appenders, and explicitly supported deployment
+> boundaries.
 
 | Milestone | Status | Meaning now |
 | --- | --- | --- |
 | `M0` | Complete | Rust substrate core exists |
 | `M1` | Complete | Deterministic resolver core exists |
 | `M2` | Complete | Rule compiler and planning exist |
-| `M3` | Complete for v1 | Recursive runtime, stratified negation, provenance, and bounded aggregation are implemented for the v1 slice |
-| `M4` | Complete for pilot scope | Stable boundary, authenticated service, reports, and pilot launch workflow exist |
+| `M3` | Reopened for policy-aware execution | Recursive runtime, stratified negation, provenance, and bounded aggregation work unrestricted; policy projection must move before compilation/evaluation |
+| `M4` | Controlled-alpha boundary only | Authenticated service, reports, and pilot workflows exist, but proof identity, append admission, transport, and release evidence remain blocked |
 | `M5` | Complete for first boundary layer | Go shell and Python SDK are real, but still early ecosystems |
 
-That means the roadmap is no longer about proving the kernel can exist. It is
-about widening the system carefully around a settled semantic core.
+The roadmap is no longer about proving the kernel can exist. Its immediate job
+is to repair the correctness and claim boundaries before widening resumes.
 
 ## Current Planning Rule
 
@@ -31,6 +38,13 @@ Every next-step decision should preserve three properties:
 - outer layers do not quietly redefine inner semantics
 
 If a proposed feature weakens one of those, it is the wrong next step.
+
+The July 2026 review record is
+`docs/COMPREHENSIVE_AUDIT_2026-07-09.md`, with supporting detail in
+`docs/V2_EXTERNAL_REVIEW.md`. `docs/REMEDIATION_PROGRAMME.md` is the binding
+execution sequence. Feature broadening that touches policy, service execution,
+append, proof identity, or release claims stays frozen until its prerequisite
+programme gate is green.
 
 ## Active Tracks
 
@@ -83,7 +97,8 @@ Focus:
 
 Non-goal:
 
-- do not reopen the v1 semantic closure claim unless a real semantic defect is found
+- do not treat the reopened policy-aware closure as ordinary ergonomics work;
+  finish the R1 correctness gate first
 
 ### 5. Operational evidence and release discipline
 
@@ -93,8 +108,10 @@ Focus:
 - repeated perturbation/capacity evidence across hosts and time
 - mature the new capacity tracker until node-class, ceiling, and envelope drift are visible without manual artifact archaeology
 - stronger release promotion evidence
-- keep the commercial release readiness ledger green only for stages backed by current evidence
-- eventually signed artifacts and provenance
+- keep controlled design-partner alpha as the active target until R7
+- replace authored/path-based readiness with immutable exact-candidate evidence
+- add a real dependency SBOM, vulnerability/license/code gates, and verified
+  package provenance
 
 ### 6. Product legibility and design-partner packaging
 
@@ -121,16 +138,15 @@ Deliberately not the near-term center:
 
 If the team needs a practical ordering, use this one:
 
-1. harden the current pilot boundary
-2. promote the most stable hardening checks into the mainline gates
-3. deepen operator-facing proof and reporting
-4. finish Service v2 namespace/Postgres deployment evidence over the same append/history contract
-5. execute replicated authority partitions
-6. widen distributed truth only where provenance remains exact
-7. improve ergonomics and optimization around the already-settled core
+1. `R0`: contain claims and freeze scope
+2. `R1`: make policy semantic input and prove noninterference
+3. `R2`: replace process-local tuple explanation with execution-scoped handles
+4. `R3`: enforce transactional namespace-schema append admission
+5. `R4`: compute readiness from immutable exact-candidate evidence
+6. `R5`: harden supply chain, transport, concurrency, resource controls, and operational automation
+7. `R7`: requalify one selected commercial-beta candidate only after independent bundle verification
+8. `R6`: reorganize ownership boundaries after the repaired contracts stabilize
 
-The first pass through that order is now in motion: pilot hardening, delta
-reporting, replicated authority partitions, federated HTTP surfaces, and the
-new hardening program now exist. The next roadmap pass is to make those
-surfaces calmer, more operable, and better evidenced rather than immediately
-broader.
+Distributed-truth widening, DSL ergonomics, and broad product expansion remain
+behind this sequence unless a separate accepted ADR proves they do not touch a
+frozen contract.
