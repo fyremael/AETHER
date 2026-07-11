@@ -31,17 +31,17 @@ called out explicitly instead of hidden.
 
 | SPEC section | Status | Evidence | v1 interpretation |
 | --- | --- | --- | --- |
-| `1. Objective` | Reopened for policy-aware paths | `crates/aether_storage`, `crates/aether_resolver`, `crates/aether_runtime`, `crates/aether_api/tests/semantic_closure.rs`, comprehensive audit | Unrestricted single-node acceptance exists; policy-scoped replay, derivation, and observable metadata remain open |
+| `1. Objective` | Policy repair implemented; immutable evidence pending | `crates/aether_resolver/tests/policy_scoped_replay.rs`, `crates/aether_runtime/tests/policy_scoped_execution.rs`, `crates/aether_api/tests/policy_noninterference.rs` | Scoped replay, derivation, and projection-local metadata pass locally; Postgres/performance/exact-candidate evidence remains open |
 | `2. Implementation language strategy` | Complete | Rust kernel crates, Go client/shell, Python SDK, CI in `.github/workflows/ci.yml` | Rust remains authoritative; Go/Python are boundary layers |
 | `3. Architectural thesis` | Complete | `docs/ARCHITECTURE.md`, `crates/aether_runtime`, `crates/aether_api/src/sidecar.rs` | Two-center kernel thesis is implemented locally |
 | `4. Design stance on Janus` | Complete | Repo layout and implementation shape | Janus remains reference-only, not a compatibility target |
 | `5. Core data model` | Reopened at append admission | `crates/aether_ast`, `crates/aether_resolver`, resolver tests, comprehensive audit | Resolver validation exists, but namespace-schema validity is not enforced transactionally before append |
 | `6. Provenance model` | Kernel provenance complete; service proof identity reopened | `crates/aether_ast`, `crates/aether_runtime`, `crates/aether_explain`, sidecar tests, comprehensive audit | Datom and derived provenance exist, but a bare process-local tuple ID is not a durable service proof identity |
-| `7. Temporal model` | Complete unrestricted; policy scope reopened | `crates/aether_storage`, `crates/aether_resolver`, API/service tests, comprehensive audit | Deterministic replay is exact for an unrestricted journal prefix; policy projection must move before replay |
-| `8. Query and phase model` | Complete unrestricted; policy scope reopened | `crates/aether_rules`, `crates/aether_plan`, `crates/aether_api` | Phase-graph and query execution exist, but scoped program facts must be projected before compilation |
-| `9. Rule model` | Complete unrestricted; policy scope reopened | `crates/aether_rules`, `crates/aether_runtime`, runtime and API tests, comprehensive audit | Recursion/negation/aggregation execute, but protected inputs must be projected before compilation and evaluation |
-| `10. Coordination model` | Complete unrestricted; policy scope reopened | `crates/aether_api/src/pilot.rs`, pilot/report tests, comprehensive audit | Tasks, claims, leases, heartbeats, fencing, and outcomes exist, but policy-scoped readiness/reporting must be recomputed from visible inputs |
-| `11. Sidecar model` | Complete unrestricted; policy scope reopened | `crates/aether_api/src/sidecar.rs`, sidecar federation tests, comprehensive audit | Sidecars remain journal-subordinated, but policy dependency closure and noninterference are not yet proven |
+| `7. Temporal model` | Policy-scoped implementation complete locally | scoped resolver tests and API noninterference suite | Physical cut selection precedes policy projection; visible cuts and hidden/nonexistent errors are projection-local |
+| `8. Query and phase model` | Policy-scoped implementation complete locally | `crates/aether_rules`, `crates/aether_plan`, `crates/aether_api/src/evaluation.rs` | Extensional facts are projected before compiler validation and planning; scoped query execution consumes one evaluation bundle |
+| `9. Rule model` | Policy-scoped implementation complete locally | `crates/aether_runtime/tests/policy_scoped_execution.rs`, API projection-equivalence test | Recursion, negation, aggregates, tuple IDs, indexes, and iterations are computed inside the effective scope |
+| `10. Coordination model` | Policy-scoped implementation complete locally | pilot/report tests plus API noninterference suite | Coordination documents and reports run from scoped snapshots; R2 execution-scoped proof identity remains open |
+| `11. Sidecar model` | Policy-scoped reads implemented locally | sidecar unit/federation tests and semantic closure suite | Sidecar cuts use projected journal catalogs and protected/absent reads share an opaque error; append-time dependency admission remains R3 |
 
 ## Section Detail
 
@@ -149,7 +149,7 @@ Primary evidence:
 
 ### `7. Temporal model`
 
-**Status:** Complete for unrestricted replay; reopened for policy-scoped replay.
+**Status:** Policy-scoped replay implemented locally; immutable release evidence pending.
 
 Implemented:
 
@@ -157,17 +157,21 @@ Implemented:
 - `Current`
 - `AsOf(element_id)`
 - deterministic replay under fixed journal prefix
+- cut-then-project scoped replay with visible-cut metadata
+- deterministic policy-dependency certification for provenance, causal, and sequence anchors
 
 Primary evidence:
 
 - [crates/aether_storage/src/lib.rs](../crates/aether_storage/src/lib.rs)
 - [crates/aether_resolver/src/lib.rs](../crates/aether_resolver/src/lib.rs)
 - [crates/aether_api/tests/semantic_closure.rs](../crates/aether_api/tests/semantic_closure.rs)
+- [crates/aether_resolver/tests/policy_scoped_replay.rs](../crates/aether_resolver/tests/policy_scoped_replay.rs)
+- [crates/aether_api/tests/policy_noninterference.rs](../crates/aether_api/tests/policy_noninterference.rs)
 
 ### `8. Query and phase model`
 
-**Status:** Complete unrestricted; reopened for policy-scoped program/query
-execution.
+**Status:** Policy-scoped program/query execution implemented locally;
+exact-candidate evidence pending.
 
 Implemented:
 
@@ -175,6 +179,8 @@ Implemented:
 - compiled plans with phase graphs and SCC metadata
 - query execution over extensional and derived relations
 - named query and explain sections
+- scoped fact projection before compiler validation and planning
+- one typed snapshot/program/derived evaluation bundle per effective scope
 
 Primary evidence:
 
@@ -184,8 +190,8 @@ Primary evidence:
 
 ### `9. Rule model`
 
-**Status:** Complete for the unrestricted v1 slice; reopened for policy-scoped
-recursion, negation, and aggregation.
+**Status:** Policy-scoped recursion, negation, and aggregation implemented
+locally; scheduled backend/performance evidence pending.
 
 Implemented:
 
@@ -202,6 +208,8 @@ Primary evidence:
 - [crates/aether_rules/src/lib.rs](../crates/aether_rules/src/lib.rs)
 - [crates/aether_runtime/src/lib.rs](../crates/aether_runtime/src/lib.rs)
 - [crates/aether_api/tests/semantic_closure.rs](../crates/aether_api/tests/semantic_closure.rs)
+- [crates/aether_runtime/tests/policy_scoped_execution.rs](../crates/aether_runtime/tests/policy_scoped_execution.rs)
+- [crates/aether_api/tests/policy_noninterference.rs](../crates/aether_api/tests/policy_noninterference.rs)
 
 Normalization note:
 
@@ -235,8 +243,8 @@ Normalization note:
 
 ### `11. Sidecar model`
 
-**Status:** Complete unrestricted for the single-node slice; reopened for
-policy-scoped sidecar projection and dependency closure.
+**Status:** Policy-scoped sidecar reads and projection implemented locally;
+append-time dependency admission remains R3.
 
 Implemented:
 
@@ -244,8 +252,8 @@ Implemented:
 - vector metadata outside the inline journal payload
 - journal-subordinated sidecar registration and `AsOf` visibility
 - provenance-bearing semantic projection back into the rule layer
-- policy-related sidecar fetch and search filtering, pending R1
-  noninterference proof across anchors, projection, derivation, and metadata
+- policy-scoped journal catalogs for search cuts and provenance source IDs
+- hidden and nonexistent artifact reads share the same unknown-ID surface
 
 Primary evidence:
 

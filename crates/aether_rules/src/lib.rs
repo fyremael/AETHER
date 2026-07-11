@@ -3,20 +3,37 @@ mod parser;
 pub use parser::{DefaultDslParser, DslDocument, DslParser, ParseError};
 
 use aether_ast::{
-    AggregateFunction, AggregateTerm, Atom, AttributeId, ExtensionalFact, Literal, PredicateId,
-    RuleAst, RuleId, RuleProgram, Term, Value, Variable,
+    AggregateFunction, AggregateTerm, Atom, AttributeId, ExtensionalFact, Literal, PolicyScope,
+    PredicateId, RuleAst, RuleId, RuleProgram, Term, Value, Variable,
 };
-use aether_plan::{CompiledProgram, DeltaRulePlan, DependencyGraph, StronglyConnectedComponent};
+use aether_plan::{
+    CompiledProgram, DeltaRulePlan, DependencyGraph, ScopedProgram, StronglyConnectedComponent,
+};
 use aether_schema::{AttributeSchema, Schema, SchemaError, ValueType};
 use indexmap::{IndexMap, IndexSet};
 use thiserror::Error;
 
 pub trait RuleCompiler {
+    /// Trusted compatibility API.
+    ///
+    /// This compiles every fact in `program` and must only be used when the
+    /// caller has already established that the complete program is visible.
     fn compile(
         &self,
         schema: &Schema,
         program: &RuleProgram,
     ) -> Result<CompiledProgram, CompileError>;
+}
+
+pub trait ScopedRuleCompiler {
+    /// Projects extensional facts to `scope` before validation or planning and
+    /// returns a security-bearing compiled program bound to that scope.
+    fn compile_scoped(
+        &self,
+        schema: &Schema,
+        program: &RuleProgram,
+        scope: PolicyScope,
+    ) -> Result<ScopedProgram, CompileError>;
 }
 
 #[derive(Default)]
@@ -107,6 +124,22 @@ impl RuleCompiler for DefaultRuleCompiler {
             facts: program.facts.clone(),
             predicate_strata,
         })
+    }
+}
+
+impl ScopedRuleCompiler for DefaultRuleCompiler {
+    fn compile_scoped(
+        &self,
+        schema: &Schema,
+        program: &RuleProgram,
+        scope: PolicyScope,
+    ) -> Result<ScopedProgram, CompileError> {
+        let mut projected = program.clone();
+        projected
+            .facts
+            .retain(|fact| scope.allows(fact.policy.as_ref()));
+        let compiled = self.compile(schema, &projected)?;
+        Ok(ScopedProgram::from_scoped_compilation(compiled, scope))
     }
 }
 

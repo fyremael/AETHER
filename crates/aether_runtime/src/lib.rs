@@ -1,22 +1,36 @@
 use aether_ast::{
     merge_partition_cuts, merge_policy_envelopes, policy_allows, AggregateFunction, AggregateTerm,
     DerivedTuple, DerivedTupleMetadata, ElementId, Literal, PartitionCut, PolicyContext,
-    PolicyEnvelope, PredicateId, QueryAst, QueryResult, QueryRow, RuleAst, RuleId, Term, Tuple,
-    TupleId, Value, Variable,
+    PolicyEnvelope, PolicyScope, PredicateId, QueryAst, QueryResult, QueryRow, RuleAst, RuleId,
+    Term, Tuple, TupleId, Value, Variable,
 };
-use aether_plan::CompiledProgram;
-use aether_resolver::ResolvedState;
+use aether_plan::{CompiledProgram, ScopedProgram};
+use aether_resolver::{ResolvedSnapshot, ResolvedState};
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use thiserror::Error;
 
 pub trait RuleRuntime {
+    /// Trusted compatibility API.
+    ///
+    /// This evaluates the supplied state and program without proving that they
+    /// were projected under the same policy scope.
     fn evaluate(
         &self,
         state: &ResolvedState,
         program: &CompiledProgram,
     ) -> Result<DerivedSet, RuntimeError>;
+}
+
+pub trait ScopedRuleRuntime {
+    /// Evaluates only when the resolved snapshot and compiled program carry
+    /// exactly the same normalized policy scope.
+    fn evaluate_scoped(
+        &self,
+        snapshot: ResolvedSnapshot,
+        program: ScopedProgram,
+    ) -> Result<EvaluationBundle, RuntimeError>;
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -38,6 +52,33 @@ impl DerivedSet {
             Some(iteration) => iteration.delta_size == 0,
             None => true,
         }
+    }
+}
+
+/// A derived set bound to the exact scoped state and scoped program that
+/// produced it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EvaluationBundle {
+    snapshot: ResolvedSnapshot,
+    program: ScopedProgram,
+    derived: DerivedSet,
+}
+
+impl EvaluationBundle {
+    pub fn snapshot(&self) -> &ResolvedSnapshot {
+        &self.snapshot
+    }
+
+    pub fn program(&self) -> &ScopedProgram {
+        &self.program
+    }
+
+    pub fn derived(&self) -> &DerivedSet {
+        &self.derived
+    }
+
+    pub fn scope(&self) -> &PolicyScope {
+        self.program.scope()
     }
 }
 
@@ -310,6 +351,25 @@ impl RuleRuntime for SemiNaiveRuntime {
     }
 }
 
+impl ScopedRuleRuntime for SemiNaiveRuntime {
+    fn evaluate_scoped(
+        &self,
+        snapshot: ResolvedSnapshot,
+        program: ScopedProgram,
+    ) -> Result<EvaluationBundle, RuntimeError> {
+        if snapshot.scope() != program.scope() {
+            return Err(RuntimeError::PolicyScopeMismatch);
+        }
+
+        let derived = self.evaluate(snapshot.state(), program.compiled())?;
+        Ok(EvaluationBundle {
+            snapshot,
+            program,
+            derived,
+        })
+    }
+}
+
 pub fn execute_query(
     state: &ResolvedState,
     program: &CompiledProgram,
@@ -393,6 +453,23 @@ pub fn execute_query(
     });
 
     Ok(QueryResult { rows })
+}
+
+/// Executes a query against one already-scoped evaluation bundle.
+///
+/// Policy checks here are defensive assertions over inputs that were projected
+/// before replay and compilation; they do not construct the visible semantics.
+pub fn execute_scoped_query(
+    evaluation: &EvaluationBundle,
+    query: &QueryAst,
+) -> Result<QueryResult, RuntimeError> {
+    execute_query(
+        evaluation.snapshot().state(),
+        evaluation.program().compiled(),
+        evaluation.derived(),
+        query,
+        Some(evaluation.scope().context()),
+    )
 }
 
 fn build_extensional_rows(
@@ -1129,6 +1206,8 @@ fn runtime_value_type(value: &Value) -> String {
 
 #[derive(Debug, Error)]
 pub enum RuntimeError {
+    #[error("resolved snapshot and compiled program policy scopes differ")]
+    PolicyScopeMismatch,
     #[error("predicate {0} has no extensional binding or fact rows in the compiled program")]
     MissingExtensionalBinding(PredicateId),
     #[error("rule {0} uses same-stratum negation, which is not supported")]

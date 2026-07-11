@@ -1,10 +1,10 @@
 use aether_api::{
     build_coordination_pilot_report_with_policy, coordination_pilot_dsl,
-    coordination_pilot_seed_history, AppendRequest, CompileProgramRequest, EvaluateProgramRequest,
-    ExplainTupleRequest, InMemoryKernelService, KernelService, RegisterArtifactReferenceRequest,
-    RegisterVectorRecordRequest, RunDocumentRequest, SearchVectorsRequest, VectorFactProjection,
-    VectorMetric, VectorRecordMetadata, COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
-    COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
+    coordination_pilot_seed_history, ApiError, AppendRequest, CompileProgramRequest,
+    EvaluateProgramRequest, ExplainTupleRequest, InMemoryKernelService, KernelService,
+    RegisterArtifactReferenceRequest, RegisterVectorRecordRequest, RunDocumentRequest,
+    SearchVectorsRequest, VectorFactProjection, VectorMetric, VectorRecordMetadata,
+    COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
 use aether_ast::{
     AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PolicyContext,
@@ -196,7 +196,7 @@ fn semantic_closure_acceptance_covers_policy_recursion_aggregation_and_redaction
         })
         .expect("append semantic closure datoms");
 
-    let public_as_of = service
+    let hidden_public_cut = service
         .run_document(RunDocumentRequest {
             dsl: policy_semantic_dsl(
                 "as_of e5",
@@ -205,7 +205,22 @@ fn semantic_closure_acceptance_covers_policy_recursion_aggregation_and_redaction
             ),
             policy_context: None,
         })
-        .expect("run public as-of policy document");
+        .expect_err("public scope must not address a protected cut");
+    assert!(matches!(
+        hidden_public_cut,
+        ApiError::Validation(message) if message == "unknown element 5"
+    ));
+
+    let public_as_of = service
+        .run_document(RunDocumentRequest {
+            dsl: policy_semantic_dsl(
+                "as_of e4",
+                "goal blocked(t)\n  keep t",
+                "dependency_closure\n  blocked\n  blocked_summary",
+            ),
+            policy_context: None,
+        })
+        .expect("run public document at a visible cut");
     assert!(public_as_of.query.expect("public query").rows.is_empty());
 
     let privileged_as_of = service

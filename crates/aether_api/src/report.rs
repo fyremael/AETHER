@@ -6,7 +6,6 @@ use crate::{
     ApiError, ExplainTupleRequest, HistoryRequest, KernelService, RunDocumentRequest,
 };
 use aether_ast::{ElementId, PolicyContext, QueryRow, TupleId, Value};
-use aether_resolver::ResolveError;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt::Write as _;
@@ -583,7 +582,9 @@ fn run_report_query(
 ) -> Result<Vec<QueryRow>, ApiError> {
     match service.run_document(request) {
         Ok(response) => Ok(response.query.unwrap_or_default().rows),
-        Err(ApiError::Resolve(ResolveError::UnknownElementId(_))) => Ok(Vec::new()),
+        Err(ApiError::Validation(message)) if message.starts_with("unknown element ") => {
+            Ok(Vec::new())
+        }
         Err(error) => Err(error),
     }
 }

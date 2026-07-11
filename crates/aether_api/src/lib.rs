@@ -1,18 +1,24 @@
 use aether_ast::{
-    policy_allows, Datom, DerivationTrace, ElementId, ExplainSpec, ExplainTarget, ExtensionalFact,
-    NamedExplainSpec, NamedQuerySpec, PhaseGraph, PlanExplanation, PolicyContext, QueryResult,
+    policy_allows, Datom, DerivationTrace, ElementId, ExplainSpec, ExplainTarget, NamedExplainSpec,
+    NamedQuerySpec, PhaseGraph, PlanExplanation, PolicyContext, PolicyScope, QueryResult,
     QuerySpec, RuleProgram, TemporalView, Term, TupleId,
 };
 use aether_explain::{ExplainError, Explainer, InMemoryExplainer};
 use aether_plan::CompiledProgram;
-use aether_resolver::{MaterializedResolver, ResolveError, ResolvedState, ResolvedValue, Resolver};
+use aether_resolver::{ResolveError, ResolvedState};
 use aether_rules::{DefaultDslParser, DefaultRuleCompiler, DslParser, ParseError, RuleCompiler};
-use aether_runtime::{execute_query, DerivedSet, RuleRuntime, RuntimeError, SemiNaiveRuntime};
+use aether_runtime::{
+    execute_scoped_query, DerivedSet, EvaluationBundle, RuleRuntime, RuntimeError, SemiNaiveRuntime,
+};
 use aether_schema::Schema;
 use aether_storage::{InMemoryJournal, Journal, JournalError, PostgresJournal, SqliteJournal};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use thiserror::Error;
+
+mod evaluation;
+
+use evaluation::{project_history, resolve_snapshot, EvaluationKey, ScopedEvaluationBuilder};
 
 pub mod deployment;
 pub mod http;
@@ -191,125 +197,58 @@ impl<J: Journal, S: SidecarFederation> KernelServiceCore<J, S> {
     fn visible_history(
         &self,
         datoms: &[Datom],
-        policy_context: Option<&PolicyContext>,
+        scope: &PolicyScope,
     ) -> Result<Vec<Datom>, ApiError> {
-        Ok(filter_datoms(
-            self.datoms_or_history(datoms)?,
-            policy_context,
-        ))
+        project_history(&self.datoms_or_history(datoms)?, scope.clone())
     }
 
-    fn cache_derived(&mut self, derived: DerivedSet) {
-        self.last_derived = Some(CachedDerivedSet { derived });
+    fn cache_derived(
+        &mut self,
+        derived: DerivedSet,
+        scope: PolicyScope,
+        evaluation_key: EvaluationKey,
+    ) {
+        self.last_derived = Some(CachedDerivedSet {
+            derived,
+            scope,
+            _evaluation_key: evaluation_key,
+        });
     }
 
     fn sidecar_journal_catalog(&self) -> Result<JournalCatalog, ApiError> {
         Ok(JournalCatalog::from_history(&self.journal.history()?))
     }
 
+    fn scoped_sidecar_journal_catalog(
+        &self,
+        scope: PolicyScope,
+    ) -> Result<JournalCatalog, ApiError> {
+        let history = self.journal.history()?;
+        Ok(JournalCatalog::from_history(&project_history(
+            &history, scope,
+        )?))
+    }
+
     fn document_evaluation<'a>(
         &self,
         cache: &'a mut Vec<DocumentEvaluation>,
-        schema: &Schema,
-        datoms: &[Datom],
-        program: &CompiledProgram,
+        builder: &ScopedEvaluationBuilder<'_>,
         view: &TemporalView,
     ) -> Result<&'a DocumentEvaluation, ApiError> {
         if let Some(index) = cache.iter().position(|evaluation| &evaluation.view == view) {
             return Ok(&cache[index]);
         }
 
-        let state = match view {
-            TemporalView::AsOf(element) => MaterializedResolver.as_of(schema, datoms, element)?,
-            TemporalView::Current => MaterializedResolver.current(schema, datoms)?,
-        };
-        let derived = SemiNaiveRuntime.evaluate(&state, program)?;
+        let (key, evaluation) = builder.evaluate_with_key(view.clone())?;
         cache.push(DocumentEvaluation {
             view: view.clone(),
-            state,
-            derived,
+            key,
+            evaluation,
         });
         Ok(cache
             .last()
             .expect("evaluation cache contains the inserted view"))
     }
-}
-
-fn filter_datoms(datoms: Vec<Datom>, policy_context: Option<&PolicyContext>) -> Vec<Datom> {
-    datoms
-        .into_iter()
-        .filter(|datom| policy_allows(policy_context, datom.policy.as_ref()))
-        .collect()
-}
-
-fn filter_extensional_facts(
-    facts: Vec<ExtensionalFact>,
-    policy_context: Option<&PolicyContext>,
-) -> Vec<ExtensionalFact> {
-    facts
-        .into_iter()
-        .filter(|fact| policy_allows(policy_context, fact.policy.as_ref()))
-        .collect()
-}
-
-fn filter_compiled_program(
-    program: &CompiledProgram,
-    policy_context: Option<&PolicyContext>,
-) -> CompiledProgram {
-    let mut filtered = program.clone();
-    filtered.facts = filter_extensional_facts(filtered.facts, policy_context);
-    filtered
-}
-
-fn filter_resolved_state(
-    state: &ResolvedState,
-    policy_context: Option<&PolicyContext>,
-) -> ResolvedState {
-    let mut filtered = ResolvedState {
-        entities: indexmap::IndexMap::new(),
-        as_of: state.as_of,
-    };
-
-    for (entity_id, entity_state) in &state.entities {
-        let mut visible_entity = aether_resolver::EntityState::default();
-        for (attribute_id, value) in &entity_state.attributes {
-            let visible_facts = entity_state
-                .facts(attribute_id)
-                .iter()
-                .filter(|fact| policy_allows(policy_context, fact.policy.as_ref()))
-                .cloned()
-                .collect::<Vec<_>>();
-            if visible_facts.is_empty() {
-                continue;
-            }
-            let visible_value = match value {
-                ResolvedValue::Scalar(_) => {
-                    ResolvedValue::Scalar(visible_facts.last().map(|fact| fact.value.clone()))
-                }
-                ResolvedValue::Set(_) => ResolvedValue::Set(
-                    visible_facts
-                        .iter()
-                        .map(|fact| fact.value.clone())
-                        .collect::<Vec<_>>(),
-                ),
-                ResolvedValue::Sequence(_) => ResolvedValue::Sequence(
-                    visible_facts
-                        .iter()
-                        .map(|fact| fact.value.clone())
-                        .collect::<Vec<_>>(),
-                ),
-            };
-            visible_entity
-                .attributes
-                .insert(*attribute_id, visible_value);
-            visible_entity.facts.insert(*attribute_id, visible_facts);
-        }
-        if !visible_entity.attributes.is_empty() {
-            filtered.entities.insert(*entity_id, visible_entity);
-        }
-    }
-
-    filtered
 }
 
 fn filter_derived_set(derived: &DerivedSet, policy_context: Option<&PolicyContext>) -> DerivedSet {
@@ -345,38 +284,17 @@ fn filter_derived_set(derived: &DerivedSet, policy_context: Option<&PolicyContex
     }
 }
 
-fn filter_trace(
-    trace: DerivationTrace,
-    policy_context: Option<&PolicyContext>,
-) -> Result<DerivationTrace, ApiError> {
-    let tuples = trace
+fn assert_trace_visible(trace: &DerivationTrace, scope: &PolicyScope) -> Result<(), ApiError> {
+    if trace
         .tuples
-        .into_iter()
-        .filter(|tuple| policy_allows(policy_context, tuple.policy.as_ref()))
-        .collect::<Vec<_>>();
-    if tuples.iter().all(|tuple| tuple.tuple.id != trace.root) {
-        return Err(ApiError::Validation(
-            "requested tuple is not visible under the current policy".into(),
-        ));
-    }
-    Ok(DerivationTrace {
-        root: trace.root,
-        tuples,
-    })
-}
-
-fn ensure_visible_element(
-    datoms: &[Datom],
-    at: ElementId,
-    policy_context: Option<&PolicyContext>,
-) -> Result<(), ApiError> {
-    if datoms
         .iter()
-        .any(|datom| datom.element == at && policy_allows(policy_context, datom.policy.as_ref()))
+        .all(|tuple| scope.allows(tuple.policy.as_ref()))
     {
         Ok(())
     } else {
-        Err(ApiError::Validation(format!("unknown element {}", at.0)))
+        Err(ApiError::Validation(
+            "trace contains data outside the evaluation policy scope".into(),
+        ))
     }
 }
 
@@ -393,13 +311,15 @@ where
 #[derive(Clone, Debug)]
 struct DocumentEvaluation {
     view: TemporalView,
-    state: ResolvedState,
-    derived: DerivedSet,
+    key: EvaluationKey,
+    evaluation: EvaluationBundle,
 }
 
 #[derive(Clone, Debug)]
 struct CachedDerivedSet {
     derived: DerivedSet,
+    scope: PolicyScope,
+    _evaluation_key: EvaluationKey,
 }
 
 impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S> {
@@ -411,8 +331,9 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
     }
 
     fn history(&self, request: HistoryRequest) -> Result<HistoryResponse, ApiError> {
+        let scope = PolicyScope::from_optional(request.policy_context);
         Ok(HistoryResponse {
-            datoms: self.visible_history(&[], request.policy_context.as_ref())?,
+            datoms: self.visible_history(&[], &scope)?,
         })
     }
 
@@ -420,23 +341,31 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         &self,
         request: CurrentStateRequest,
     ) -> Result<CurrentStateResponse, ApiError> {
-        let datoms = self.datoms_or_history(&request.datoms)?;
+        let CurrentStateRequest {
+            schema,
+            datoms,
+            policy_context,
+        } = request;
+        let datoms = self.datoms_or_history(&datoms)?;
+        let scope = PolicyScope::from_optional(policy_context);
+        let snapshot = resolve_snapshot(&schema, &datoms, TemporalView::Current, scope)?;
         Ok(CurrentStateResponse {
-            state: filter_resolved_state(
-                &MaterializedResolver.current(&request.schema, &datoms)?,
-                request.policy_context.as_ref(),
-            ),
+            state: snapshot.into_state(),
         })
     }
 
     fn as_of(&self, request: AsOfRequest) -> Result<AsOfResponse, ApiError> {
-        let datoms = self.datoms_or_history(&request.datoms)?;
-        ensure_visible_element(&datoms, request.at, request.policy_context.as_ref())?;
+        let AsOfRequest {
+            schema,
+            datoms,
+            at,
+            policy_context,
+        } = request;
+        let datoms = self.datoms_or_history(&datoms)?;
+        let scope = PolicyScope::from_optional(policy_context);
+        let snapshot = resolve_snapshot(&schema, &datoms, TemporalView::AsOf(at), scope)?;
         Ok(AsOfResponse {
-            state: filter_resolved_state(
-                &MaterializedResolver.as_of(&request.schema, &datoms, &request.at)?,
-                request.policy_context.as_ref(),
-            ),
+            state: snapshot.into_state(),
         })
     }
 
@@ -454,7 +383,6 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         request: EvaluateProgramRequest,
     ) -> Result<EvaluateProgramResponse, ApiError> {
         let derived = SemiNaiveRuntime.evaluate(&request.state, &request.program)?;
-        self.cache_derived(derived.clone());
         Ok(EvaluateProgramResponse {
             derived: filter_derived_set(&derived, request.policy_context.as_ref()),
         })
@@ -468,11 +396,16 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
             .last_derived
             .as_ref()
             .ok_or_else(|| ApiError::Validation("no derived tuples are cached".into()))?;
+        let requested_scope = PolicyScope::from_optional(request.policy_context);
+        if requested_scope != cached.scope {
+            return Err(ApiError::Validation(
+                "requested tuple is not visible under the current policy".into(),
+            ));
+        }
         let trace = InMemoryExplainer::from_derived_set(&cached.derived)
             .explain_tuple(&request.tuple_id)?;
-        Ok(ExplainTupleResponse {
-            trace: filter_trace(trace, request.policy_context.as_ref())?,
-        })
+        assert_trace_visible(&trace, &requested_scope)?;
+        Ok(ExplainTupleResponse { trace })
     }
 
     fn explain_plan(&self, request: ExplainPlanRequest) -> Result<ExplainPlanResponse, ApiError> {
@@ -500,7 +433,13 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
     ) -> Result<RunDocumentResponse, ApiError> {
         let document = DefaultDslParser.parse_document(&request.dsl)?;
         let datoms = self.datoms_or_history(&[])?;
-        let program = DefaultRuleCompiler.compile(&document.schema, &document.program)?;
+        let scope = PolicyScope::from_optional(request.policy_context);
+        let builder = ScopedEvaluationBuilder::new(
+            &document.schema,
+            &datoms,
+            &document.program,
+            scope.clone(),
+        )?;
         let mut evaluations = Vec::new();
         let primary_view = document
             .query
@@ -519,46 +458,24 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
                     .map(|explain| explain.spec.view.clone())
             })
             .unwrap_or(TemporalView::Current);
-        let primary = self.document_evaluation(
-            &mut evaluations,
-            &document.schema,
-            &datoms,
-            &program,
-            &primary_view,
-        )?;
-        let primary_state = primary.state.clone();
-        let primary_derived = primary.derived.clone();
+        let primary = self.document_evaluation(&mut evaluations, &builder, &primary_view)?;
+        let primary_key = primary.key.clone();
+        let primary_state = primary.evaluation.snapshot().state().clone();
+        let primary_derived = primary.evaluation.derived().clone();
         let query = match &document.query {
-            Some(query) => Some(execute_query(
-                &primary_state,
-                &program,
-                &primary_derived,
-                &query.query,
-                request.policy_context.as_ref(),
-            )?),
+            Some(query) => Some(execute_scoped_query(&primary.evaluation, &query.query)?),
             None => None,
         };
         let queries = document
             .queries
             .iter()
             .map(|named_query| {
-                let evaluation = self.document_evaluation(
-                    &mut evaluations,
-                    &document.schema,
-                    &datoms,
-                    &program,
-                    &named_query.spec.view,
-                )?;
+                let evaluation =
+                    self.document_evaluation(&mut evaluations, &builder, &named_query.spec.view)?;
                 Ok(NamedQueryResult {
                     name: named_query.name.clone(),
                     spec: named_query.spec.clone(),
-                    result: execute_query(
-                        &evaluation.state,
-                        &program,
-                        &evaluation.derived,
-                        &named_query.spec.query,
-                        request.policy_context.as_ref(),
-                    )?,
+                    result: execute_scoped_query(&evaluation.evaluation, &named_query.spec.query)?,
                 })
             })
             .collect::<Result<Vec<_>, ApiError>>()?;
@@ -566,32 +483,21 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
             .explains
             .iter()
             .map(|named_explain| {
-                let evaluation = self.document_evaluation(
-                    &mut evaluations,
-                    &document.schema,
-                    &datoms,
-                    &program,
-                    &named_explain.spec.view,
-                )?;
+                let evaluation =
+                    self.document_evaluation(&mut evaluations, &builder, &named_explain.spec.view)?;
                 Ok(NamedExplainResult {
                     name: named_explain.name.clone(),
                     spec: named_explain.spec.clone(),
-                    result: execute_explain_spec(
-                        &program,
-                        evaluation,
-                        &named_explain.spec,
-                        request.policy_context.as_ref(),
-                    )?,
+                    result: execute_explain_spec(evaluation, &named_explain.spec)?,
                 })
             })
             .collect::<Result<Vec<_>, ApiError>>()?;
-        self.cache_derived(primary_derived.clone());
-        let derived = filter_derived_set(&primary_derived, request.policy_context.as_ref());
+        self.cache_derived(primary_derived.clone(), scope, primary_key);
 
         Ok(RunDocumentResponse {
-            state: filter_resolved_state(&primary_state, request.policy_context.as_ref()),
-            program: filter_compiled_program(&program, request.policy_context.as_ref()),
-            derived,
+            state: primary_state,
+            program: builder.program().compiled().clone(),
+            derived: primary_derived,
             query,
             queries,
             explains,
@@ -641,7 +547,8 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         &self,
         request: SearchVectorsRequest,
     ) -> Result<SearchVectorsResponse, ApiError> {
-        let journal = self.sidecar_journal_catalog()?;
+        let scope = PolicyScope::from_optional(request.policy_context.clone());
+        let journal = self.scoped_sidecar_journal_catalog(scope)?;
         Ok(self.sidecars.search_vectors(request, &journal)?)
     }
 }
@@ -804,28 +711,26 @@ pub struct NamedExplainResult {
 }
 
 fn execute_explain_spec(
-    program: &CompiledProgram,
     evaluation: &DocumentEvaluation,
     spec: &ExplainSpec,
-    policy_context: Option<&PolicyContext>,
 ) -> Result<ExplainArtifact, ApiError> {
     match &spec.target {
         ExplainTarget::Plan => Ok(ExplainArtifact::Plan(
-            InMemoryExplainer::default().explain_plan(&program.phase_graph)?,
+            InMemoryExplainer::default()
+                .explain_plan(&evaluation.evaluation.program().compiled().phase_graph)?,
         )),
         ExplainTarget::Tuple(atom) => {
-            let visible = filter_derived_set(&evaluation.derived, policy_context);
-            let tuple_id = find_matching_derived_tuple(&visible, atom).ok_or_else(|| {
-                ApiError::Validation(format!(
-                    "no derived tuple matched explain target {}",
-                    atom.predicate.name
-                ))
-            })?;
-            Ok(ExplainArtifact::Tuple(filter_trace(
-                InMemoryExplainer::from_derived_set(&evaluation.derived)
-                    .explain_tuple(&tuple_id)?,
-                policy_context,
-            )?))
+            let tuple_id = find_matching_derived_tuple(evaluation.evaluation.derived(), atom)
+                .ok_or_else(|| {
+                    ApiError::Validation(format!(
+                        "no derived tuple matched explain target {}",
+                        atom.predicate.name
+                    ))
+                })?;
+            let trace = InMemoryExplainer::from_derived_set(evaluation.evaluation.derived())
+                .explain_tuple(&tuple_id)?;
+            assert_trace_visible(&trace, evaluation.evaluation.scope())?;
+            Ok(ExplainArtifact::Tuple(trace))
         }
     }
 }

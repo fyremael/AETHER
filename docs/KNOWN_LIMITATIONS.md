@@ -22,11 +22,11 @@ The July 2026 external reviews are recorded in
 `docs/COMPREHENSIVE_AUDIT_2026-07-09.md`. These findings are defects, not
 ordinary feature backlog:
 
-- Policy contexts are currently applied after full journal resolution and
-  derivation in several service paths. That means hidden retracts or hidden
-  negated facts can affect visible state or derivations before response
-  filtering. Policy-scoped replay needs to become semantic input to resolver and
-  runtime execution.
+- The late-policy-filtering defect is repaired in the current remediation
+  branch: policy scope now binds replay, program compilation, runtime,
+  federation, reports, and sidecar cuts before semantic evaluation. The
+  mixed-policy external claim remains reopened until Postgres parity,
+  performance characterization, and exact-candidate evidence are complete.
 - Tuple explanation requests are backed by a process-local last-derived cache
   keyed only by tuple ID. Appends and different document runs can leave stale or
   ambiguous explanation state. Explanations need explicit cut/program/policy
@@ -47,9 +47,9 @@ ordinary feature backlog:
 
 - The kernel service now has in-memory, SQLite-backed, and optional Postgres-journal execution paths. Service v2 namespaces isolate HTTP service state and token authorization, but they are not DSL semantics, authority partitions, cross-partition transactions, or a full managed multi-tenant platform.
 - Coordination semantics now cover heartbeats and execution outcomes in the pilot slice, but expiry still relies on explicit semantic state rather than clock-driven timeout windows or distributed failure detection.
-- HTTP authorization still uses coarse endpoint scopes. Tokens bind maximum policy visibility, but several correctness-bearing paths apply that policy after resolution or derivation; token-bound policy therefore does not yet establish semantic noninterference.
+- HTTP authorization still uses coarse endpoint scopes. Tokens now bind policy before scoped snapshot construction, but the external noninterference claim remains pending exact-candidate evidence and scheduled Postgres parity.
 - Audit entries now capture effective policy decisions plus requested, granted, and effective semantic visibility, but they still do not capture full operator intent or semantic diffs between cuts.
-- Operator reports carry policy context in fixed-format markdown and JSON, but they are not yet proven to be computed entirely from a policy-projected semantic snapshot.
+- Operator reports carry policy context in fixed-format markdown and JSON and now compute their queries from policy-projected semantic snapshots; their tuple proof identity remains process-local until R2 trace handles replace it.
 - Coordination delta reports now compare explicit cuts and carry trace handles where visible, but they still summarize fixed pilot sections rather than arbitrary user-defined investigative views.
 - The Go operator TUI is now implemented as the primary live pilot cockpit, but it is intentionally pilot-focused and read-only in v1 rather than a general workflow IDE or mutation surface.
 - The pilot service now has a packaged deployment path with config-backed startup, package-local rotation tooling, backup/restore helpers, auth reload, explicit token/principal identities, and secret-file/env/command token resolution, but it is still a single-node bundle rather than a fully managed deployment story with automated rotation services, distributed revocation, or native cloud secret-manager integrations.

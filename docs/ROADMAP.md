@@ -26,6 +26,13 @@ The active external claim during remediation is:
 | `M4` | Controlled-alpha boundary only | Authenticated service, reports, and pilot workflows exist, but proof identity, append admission, transport, and release evidence remain blocked |
 | `M5` | Complete for first boundary layer | Go shell and Python SDK are real, but still early ecosystems |
 
+R1 is locally implemented and green across the workspace: policy scope is now
+semantic input to replay, compilation, runtime, service documents, federation,
+reports, and sidecar cuts. R1 remains evidence-pending rather than externally
+closed until its scheduled Postgres parity and performance matrix are captured
+by the immutable R4 evidence pipeline. The active implementation dependency is
+therefore R2 execution-scoped trace identity, followed by R3 append admission.
+
 The roadmap is no longer about proving the kernel can exist. Its immediate job
 is to repair the correctness and claim boundaries before widening resumes.
 

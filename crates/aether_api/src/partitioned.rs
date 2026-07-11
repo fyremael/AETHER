@@ -1,17 +1,16 @@
 use crate::{
-    ApiError, AppendRequest, CurrentStateRequest, ExplainArtifact, HistoryRequest,
-    InMemoryKernelService, KernelService, NamedExplainResult, NamedQueryResult,
-    ParseDocumentRequest, RunDocumentRequest, RunDocumentResponse,
+    evaluation::ScopedEvaluationBuilder, ApiError, AppendRequest, CurrentStateRequest,
+    ExplainArtifact, HistoryRequest, InMemoryKernelService, KernelService, NamedExplainResult,
+    NamedQueryResult, ParseDocumentRequest, RunDocumentRequest, RunDocumentResponse,
 };
 use aether_ast::{
-    merge_partition_cuts, policy_allows, Atom, Datom, ExplainSpec, ExplainTarget, ExtensionalFact,
-    FactProvenance, FederatedCut, PartitionCut, PartitionId, PolicyContext, PredicateRef,
-    QueryResult, QueryRow, ReplicaId, SourceRef, TemporalView, TupleId, Value,
+    merge_partition_cuts, Atom, Datom, ExplainSpec, ExplainTarget, ExtensionalFact, FactProvenance,
+    FederatedCut, PartitionCut, PartitionId, PolicyContext, PolicyScope, PredicateRef, QueryResult,
+    QueryRow, ReplicaId, SourceRef, TemporalView, TupleId, Value,
 };
 use aether_explain::{Explainer, InMemoryExplainer};
-use aether_plan::CompiledProgram;
 use aether_resolver::ResolvedState;
-use aether_runtime::{execute_query, DerivedSet};
+use aether_runtime::{execute_scoped_query, DerivedSet, EvaluationBundle};
 use aether_schema::{PredicateSignature, Schema, ValueType};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -1068,7 +1067,7 @@ fn execute_federated_document_request(
 ) -> Result<FederatedRunDocumentResponse, ApiError> {
     let cut = federated_cut_from_imports(&imports)?;
 
-    let mut local = InMemoryKernelService::new();
+    let local = InMemoryKernelService::new();
     let parsed = local.parse_document(ParseDocumentRequest {
         dsl: request.dsl.clone(),
     })?;
@@ -1108,29 +1107,13 @@ fn execute_federated_document_request(
     }
     ensure_schema_covers_fact_predicates(&mut schema, &program.facts)?;
 
-    let compiled = local.compile_program(crate::CompileProgramRequest {
-        schema: schema.clone(),
-        program,
-    })?;
-    let derived = local
-        .evaluate_program(crate::EvaluateProgramRequest {
-            state: ResolvedState::default(),
-            program: compiled.program.clone(),
-            policy_context: request.policy_context.clone(),
-        })?
-        .derived;
-    let visible_program =
-        filter_compiled_program_facts(&compiled.program, request.policy_context.as_ref());
-    let visible_derived = filter_derived_set(&derived, request.policy_context.as_ref());
+    let scope = PolicyScope::from_optional(request.policy_context.clone());
+    let history = Vec::<Datom>::new();
+    let builder = ScopedEvaluationBuilder::new(&schema, &history, &program, scope)?;
+    let evaluation = builder.evaluate(TemporalView::Current)?;
 
     let query = match &parsed.query {
-        Some(query) => Some(execute_query(
-            &ResolvedState::default(),
-            &visible_program,
-            &visible_derived,
-            &query.query,
-            request.policy_context.as_ref(),
-        )?),
+        Some(query) => Some(execute_scoped_query(&evaluation, &query.query)?),
         None => None,
     };
     let queries = parsed
@@ -1140,13 +1123,7 @@ fn execute_federated_document_request(
             Ok(NamedQueryResult {
                 name: named_query.name.clone(),
                 spec: named_query.spec.clone(),
-                result: execute_query(
-                    &ResolvedState::default(),
-                    &visible_program,
-                    &visible_derived,
-                    &named_query.spec.query,
-                    request.policy_context.as_ref(),
-                )?,
+                result: execute_scoped_query(&evaluation, &named_query.spec.query)?,
             })
         })
         .collect::<Result<Vec<_>, ApiError>>()?;
@@ -1157,13 +1134,7 @@ fn execute_federated_document_request(
             Ok(NamedExplainResult {
                 name: named_explain.name.clone(),
                 spec: named_explain.spec.clone(),
-                result: execute_federated_explain_spec(
-                    &visible_program,
-                    &derived,
-                    &visible_derived,
-                    &named_explain.spec,
-                    request.policy_context.as_ref(),
-                )?,
+                result: execute_federated_explain_spec(&evaluation, &named_explain.spec)?,
             })
         })
         .collect::<Result<Vec<_>, ApiError>>()?;
@@ -1173,8 +1144,8 @@ fn execute_federated_document_request(
         imports,
         run: RunDocumentResponse {
             state: ResolvedState::default(),
-            program: visible_program,
-            derived: visible_derived,
+            program: evaluation.program().compiled().clone(),
+            derived: evaluation.derived().clone(),
             query,
             queries,
             explains,
@@ -1479,75 +1450,43 @@ fn value_type_for(value: &Value) -> ValueType {
     }
 }
 
-fn filter_compiled_program_facts(
-    program: &CompiledProgram,
-    policy_context: Option<&PolicyContext>,
-) -> CompiledProgram {
-    let mut filtered = program.clone();
-    filtered
-        .facts
-        .retain(|fact| policy_allows(policy_context, fact.policy.as_ref()));
-    filtered
-}
-
-fn filter_derived_set(derived: &DerivedSet, policy_context: Option<&PolicyContext>) -> DerivedSet {
-    let tuples = derived
-        .tuples
-        .iter()
-        .filter(|tuple| policy_allows(policy_context, tuple.policy.as_ref()))
-        .cloned()
-        .collect::<Vec<_>>();
-    let visible_ids = tuples
-        .iter()
-        .map(|tuple| tuple.tuple.id)
-        .collect::<std::collections::BTreeSet<_>>();
-    let predicate_index = derived
-        .predicate_index
-        .iter()
-        .map(|(predicate, tuple_ids)| {
-            (
-                *predicate,
-                tuple_ids
-                    .iter()
-                    .copied()
-                    .filter(|tuple_id| visible_ids.contains(tuple_id))
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .collect::<IndexMap<_, _>>();
-
-    DerivedSet {
-        tuples,
-        iterations: derived.iterations.clone(),
-        predicate_index,
-    }
-}
-
 fn execute_federated_explain_spec(
-    program: &CompiledProgram,
-    derived: &DerivedSet,
-    visible_derived: &DerivedSet,
+    evaluation: &EvaluationBundle,
     spec: &ExplainSpec,
-    policy_context: Option<&PolicyContext>,
 ) -> Result<ExplainArtifact, ApiError> {
     match &spec.target {
         ExplainTarget::Plan => Ok(ExplainArtifact::Plan(
-            InMemoryExplainer::default().explain_plan(&program.phase_graph)?,
+            InMemoryExplainer::default()
+                .explain_plan(&evaluation.program().compiled().phase_graph)?,
         )),
         ExplainTarget::Tuple(atom) => {
-            let tuple_id = find_matching_derived_tuple(visible_derived, atom).ok_or_else(|| {
-                ApiError::Validation(format!(
-                    "no derived tuple matched explain target {}",
-                    atom.predicate.name
-                ))
-            })?;
-            let trace = InMemoryExplainer::from_derived_set(derived).explain_tuple(&tuple_id)?;
-            Ok(ExplainArtifact::Tuple(filter_trace(trace, policy_context)?))
+            let tuple_id =
+                find_matching_derived_tuple(evaluation.derived(), atom).ok_or_else(|| {
+                    ApiError::Validation(format!(
+                        "no derived tuple matched explain target {}",
+                        atom.predicate.name
+                    ))
+                })?;
+            let trace = InMemoryExplainer::from_derived_set(evaluation.derived())
+                .explain_tuple(&tuple_id)?;
+            if !trace
+                .tuples
+                .iter()
+                .all(|tuple| evaluation.scope().allows(tuple.policy.as_ref()))
+            {
+                return Err(ApiError::Validation(
+                    "federated trace contains data outside the evaluation policy scope".into(),
+                ));
+            }
+            Ok(ExplainArtifact::Tuple(trace))
         }
     }
 }
 
-fn find_matching_derived_tuple(derived: &DerivedSet, atom: &Atom) -> Option<TupleId> {
+fn find_matching_derived_tuple(
+    derived: &aether_runtime::DerivedSet,
+    atom: &Atom,
+) -> Option<TupleId> {
     derived.tuples.iter().find_map(|tuple| {
         if tuple.tuple.predicate != atom.predicate.id
             || tuple.tuple.values.len() != atom.terms.len()
@@ -1569,26 +1508,6 @@ fn matches_term(term: &aether_ast::Term, value: &Value) -> bool {
         aether_ast::Term::Variable(_) => true,
         aether_ast::Term::Aggregate(_) => false,
     }
-}
-
-fn filter_trace(
-    trace: aether_ast::DerivationTrace,
-    policy_context: Option<&PolicyContext>,
-) -> Result<aether_ast::DerivationTrace, ApiError> {
-    let tuples = trace
-        .tuples
-        .into_iter()
-        .filter(|tuple| policy_allows(policy_context, tuple.policy.as_ref()))
-        .collect::<Vec<_>>();
-    if tuples.iter().all(|tuple| tuple.tuple.id != trace.root) {
-        return Err(ApiError::Validation(
-            "requested tuple is not visible under the current policy".into(),
-        ));
-    }
-    Ok(aether_ast::DerivationTrace {
-        root: trace.root,
-        tuples,
-    })
 }
 
 fn report_rows(result: &QueryResult) -> Vec<FederatedReportRow> {

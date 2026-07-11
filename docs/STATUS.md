@@ -46,6 +46,16 @@ binding repair sequence are recorded in
 `docs/REMEDIATION_PROGRAMME.md`. `docs/V1_CLOSEOUT.md` and the semantic
 compliance matrix now carry that reopened boundary explicitly.
 
+Remediation execution has completed the local R1 semantic repair: normalized
+`PolicyScope`, cut-then-project scoped replay, dependency-closure
+certification, scoped program compilation, typed scoped runtime bundles, a
+central service evaluation path, federated/sidecar projection, and
+projection-local evaluation keys are implemented. The permanent adversarial
+suites pass in-memory and SQLite coverage, and the workspace test and strict
+Clippy gates are green. The external mixed-policy claim remains reopened until
+scheduled Postgres parity, performance characterization, and R4 immutable
+evidence bind those results to an exact candidate.
+
 Completed:
 
 - Rust workspace root created
@@ -57,9 +67,9 @@ Completed:
 - first recursive tuple explainer implemented
 - whole-document DSL parser implemented for the current canonical v1 surface: schema, attribute classes, facts, repeated queries, explain directives, temporal views, and policy annotations
 - `Current` and `AsOf` query execution implemented
-- policy annotations wired through state, document, explanation, report, and sidecar paths, with the policy-aware correctness claim reopened because several paths filter after resolution or derivation
+- policy annotations wired through state, document, explanation, report, federation, and sidecar paths as pre-replay/pre-compilation semantic scope; immutable release qualification remains pending
 - authenticated HTTP tokens now bind maximum semantic policy visibility, with request policy contexts only allowed to narrow that bound
-- policy context is carried through explain, history, audit, and report surfaces, but policy-scoped replay and derivation are not yet proven noninterfering
+- policy context is carried through explain, history, audit, and report surfaces; local projection-equivalence, hidden retract, negation, recursion, aggregation, metadata, sequence, and SQLite parity tests now pass, with Postgres/performance/exact-candidate evidence still pending
 - strict v1 operation/class validation implemented across scalar, set, and sequence attributes, with anchored `InsertAfter` semantics and deterministic replay for `SequenceRGA`
 - semi-naive delta execution implemented for recursive SCC evaluation
 - executable stratified negation implemented for stratified programs

@@ -1,4 +1,6 @@
-use aether_ast::{AttributeId, ExtensionalFact, PhaseGraph, PredicateId, RuleAst, RuleId};
+use aether_ast::{
+    AttributeId, ExtensionalFact, PhaseGraph, PolicyScope, PredicateId, RuleAst, RuleId,
+};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
@@ -43,4 +45,35 @@ pub struct CompiledProgram {
     pub extensional_bindings: IndexMap<PredicateId, AttributeId>,
     pub facts: Vec<ExtensionalFact>,
     pub predicate_strata: IndexMap<PredicateId, usize>,
+}
+
+/// A compiled program whose extensional facts have been projected to one
+/// canonical policy scope before compilation.
+///
+/// The private fields prevent callers from relabeling a compiled program by
+/// constructing this security-bearing wrapper directly.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScopedProgram {
+    program: CompiledProgram,
+    scope: PolicyScope,
+}
+
+impl ScopedProgram {
+    /// Constructs a scoped plan from compiler output and defensively enforces
+    /// the scoped-fact invariant again at the type boundary.
+    #[doc(hidden)]
+    pub fn from_scoped_compilation(mut program: CompiledProgram, scope: PolicyScope) -> Self {
+        program
+            .facts
+            .retain(|fact| scope.allows(fact.policy.as_ref()));
+        Self { program, scope }
+    }
+
+    pub fn compiled(&self) -> &CompiledProgram {
+        &self.program
+    }
+
+    pub fn scope(&self) -> &PolicyScope {
+        &self.scope
+    }
 }
