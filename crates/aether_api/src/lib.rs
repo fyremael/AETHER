@@ -16,9 +16,19 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use thiserror::Error;
 
-mod evaluation;
+pub(crate) const ENGINE_SEMANTICS_VERSION: &str = "aether-semantic-v1-policy-scope-1";
 
-use evaluation::{project_history, resolve_snapshot, EvaluationKey, ScopedEvaluationBuilder};
+mod evaluation;
+pub mod execution;
+
+use evaluation::{
+    project_history, project_history_at_view, resolve_snapshot, EvaluationKey,
+    ScopedEvaluationBuilder,
+};
+use execution::{
+    execution_catalog_path_for_journal, persist_execution, resolve_trace, ExecutionError,
+    ExecutionStore, InMemoryExecutionStore, SqliteExecutionStore,
+};
 
 pub mod deployment;
 pub mod http;
@@ -35,6 +45,11 @@ pub use deployment::{
     default_audit_log_path, serve_pilot_http_service, DeploymentError, PilotAuthConfig,
     PilotServiceConfig, PilotStorageConfig, PilotTokenConfig, ResolvedPilotServiceConfig,
     ResolvedPilotStorage, ResolvedPilotTokenSummary,
+};
+pub use execution::{
+    ContentDigest, ExecutionId, ExecutionManifest, ExecutionReceipt, FederatedExecutionSource,
+    FederationManifest, JournalCut, ResolveTraceHandleRequest, ResolveTraceHandleResponse,
+    SchemaRef, TraceHandle, TraceHandleBinding, TraceRecord,
 };
 pub use http::{
     http_router, http_router_with_options, http_router_with_partitioned_options,
@@ -95,6 +110,10 @@ pub trait KernelService {
     ) -> Result<EvaluateProgramResponse, ApiError>;
     fn explain_tuple(&self, request: ExplainTupleRequest)
         -> Result<ExplainTupleResponse, ApiError>;
+    fn resolve_trace_handle(
+        &mut self,
+        request: ResolveTraceHandleRequest,
+    ) -> Result<ResolveTraceHandleResponse, ApiError>;
     fn explain_plan(&self, request: ExplainPlanRequest) -> Result<ExplainPlanResponse, ApiError>;
     fn parse_document(
         &self,
@@ -138,7 +157,8 @@ pub type PostgresKernelService = KernelServiceCore<PostgresJournal, SqliteSideca
 pub struct KernelServiceCore<J: Journal, S: SidecarFederation = InMemorySidecarFederation> {
     journal: J,
     sidecars: S,
-    last_derived: Option<CachedDerivedSet>,
+    namespace: NamespaceId,
+    execution_store: Box<dyn ExecutionStore>,
 }
 
 impl KernelServiceCore<InMemoryJournal, InMemorySidecarFederation> {
@@ -156,9 +176,13 @@ impl Default for KernelServiceCore<InMemoryJournal, InMemorySidecarFederation> {
 impl KernelServiceCore<SqliteJournal, SqliteSidecarFederation> {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, ApiError> {
         let path = path.as_ref();
-        Ok(Self::from_parts(
+        let execution_store = SqliteExecutionStore::open(execution_catalog_path_for_journal(path))
+            .map_err(ExecutionError::from)?;
+        Ok(Self::from_parts_with_execution_store(
             SqliteJournal::open(path)?,
             SqliteSidecarFederation::open(sidecar::sidecar_catalog_path_for_journal(path))?,
+            NamespaceId::default(),
+            Box::new(execution_store),
         ))
     }
 }
@@ -170,20 +194,46 @@ impl KernelServiceCore<PostgresJournal, SqliteSidecarFederation> {
         namespace: &str,
         sidecar_path: impl AsRef<Path>,
     ) -> Result<Self, ApiError> {
-        Ok(Self::from_parts(
+        let sidecar_path = sidecar_path.as_ref();
+        let execution_store =
+            SqliteExecutionStore::open(execution_catalog_path_for_journal(sidecar_path))
+                .map_err(ExecutionError::from)?;
+        Ok(Self::from_parts_with_execution_store(
             PostgresJournal::open(database_url, schema, namespace)?,
             SqliteSidecarFederation::open(sidecar_path)?,
+            NamespaceId::new(namespace).map_err(ApiError::Validation)?,
+            Box::new(execution_store),
         ))
     }
 }
 
 impl<J: Journal, S: SidecarFederation> KernelServiceCore<J, S> {
     pub fn from_parts(journal: J, sidecars: S) -> Self {
+        Self::from_parts_with_execution_store(
+            journal,
+            sidecars,
+            NamespaceId::default(),
+            Box::<InMemoryExecutionStore>::default(),
+        )
+    }
+
+    fn from_parts_with_execution_store(
+        journal: J,
+        sidecars: S,
+        namespace: NamespaceId,
+        execution_store: Box<dyn ExecutionStore>,
+    ) -> Self {
         Self {
             journal,
             sidecars,
-            last_derived: None,
+            namespace,
+            execution_store,
         }
+    }
+
+    pub fn with_namespace(mut self, namespace: NamespaceId) -> Self {
+        self.namespace = namespace;
+        self
     }
 
     fn datoms_or_history(&self, datoms: &[Datom]) -> Result<Vec<Datom>, ApiError> {
@@ -200,19 +250,6 @@ impl<J: Journal, S: SidecarFederation> KernelServiceCore<J, S> {
         scope: &PolicyScope,
     ) -> Result<Vec<Datom>, ApiError> {
         project_history(&self.datoms_or_history(datoms)?, scope.clone())
-    }
-
-    fn cache_derived(
-        &mut self,
-        derived: DerivedSet,
-        scope: PolicyScope,
-        evaluation_key: EvaluationKey,
-    ) {
-        self.last_derived = Some(CachedDerivedSet {
-            derived,
-            scope,
-            _evaluation_key: evaluation_key,
-        });
     }
 
     fn sidecar_journal_catalog(&self) -> Result<JournalCatalog, ApiError> {
@@ -315,13 +352,6 @@ struct DocumentEvaluation {
     evaluation: EvaluationBundle,
 }
 
-#[derive(Clone, Debug)]
-struct CachedDerivedSet {
-    derived: DerivedSet,
-    scope: PolicyScope,
-    _evaluation_key: EvaluationKey,
-}
-
 impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S> {
     fn append(&mut self, request: AppendRequest) -> Result<AppendResponse, ApiError> {
         self.journal.append(&request.datoms)?;
@@ -390,22 +420,20 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
 
     fn explain_tuple(
         &self,
-        request: ExplainTupleRequest,
+        _request: ExplainTupleRequest,
     ) -> Result<ExplainTupleResponse, ApiError> {
-        let cached = self
-            .last_derived
-            .as_ref()
-            .ok_or_else(|| ApiError::Validation("no derived tuples are cached".into()))?;
-        let requested_scope = PolicyScope::from_optional(request.policy_context);
-        if requested_scope != cached.scope {
-            return Err(ApiError::Validation(
-                "requested tuple is not visible under the current policy".into(),
-            ));
-        }
-        let trace = InMemoryExplainer::from_derived_set(&cached.derived)
-            .explain_tuple(&request.tuple_id)?;
-        assert_trace_visible(&trace, &requested_scope)?;
-        Ok(ExplainTupleResponse { trace })
+        Err(ApiError::AmbiguousTupleReference)
+    }
+
+    fn resolve_trace_handle(
+        &mut self,
+        request: ResolveTraceHandleRequest,
+    ) -> Result<ResolveTraceHandleResponse, ApiError> {
+        Ok(resolve_trace(
+            self.execution_store.as_mut(),
+            &self.namespace,
+            request,
+        )?)
     }
 
     fn explain_plan(&self, request: ExplainPlanRequest) -> Result<ExplainPlanResponse, ApiError> {
@@ -431,10 +459,15 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         &mut self,
         request: RunDocumentRequest,
     ) -> Result<RunDocumentResponse, ApiError> {
-        let document = DefaultDslParser.parse_document(&request.dsl)?;
+        let RunDocumentRequest {
+            dsl,
+            policy_context,
+        } = request;
+        let document = DefaultDslParser.parse_document(&dsl)?;
         let datoms = self.datoms_or_history(&[])?;
-        let scope = PolicyScope::from_optional(request.policy_context);
-        let builder = ScopedEvaluationBuilder::new(
+        let scope = PolicyScope::from_optional(policy_context);
+        let builder = ScopedEvaluationBuilder::new_in_namespace(
+            self.namespace.as_str(),
             &document.schema,
             &datoms,
             &document.program,
@@ -476,6 +509,7 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
                     name: named_query.name.clone(),
                     spec: named_query.spec.clone(),
                     result: execute_scoped_query(&evaluation.evaluation, &named_query.spec.query)?,
+                    execution_id: Some(ExecutionId(evaluation.key.to_hex())),
                 })
             })
             .collect::<Result<Vec<_>, ApiError>>()?;
@@ -489,11 +523,35 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
                     name: named_explain.name.clone(),
                     spec: named_explain.spec.clone(),
                     result: execute_explain_spec(evaluation, &named_explain.spec)?,
+                    execution_id: Some(ExecutionId(evaluation.key.to_hex())),
                 })
             })
             .collect::<Result<Vec<_>, ApiError>>()?;
-        self.cache_derived(primary_derived.clone(), scope, primary_key);
-
+        let mut executions = Vec::with_capacity(evaluations.len());
+        for evaluation in &evaluations {
+            let visible_history =
+                project_history_at_view(&datoms, evaluation.view.clone(), scope.clone())?;
+            executions.push(persist_execution(
+                self.execution_store.as_mut(),
+                &self.namespace,
+                &evaluation.key,
+                &document.schema,
+                visible_history,
+                builder.program().compiled(),
+                &scope,
+                evaluation.view.clone(),
+                evaluation.evaluation.derived(),
+                None,
+            )?);
+        }
+        let primary_execution_id = ExecutionId(primary_key.to_hex());
+        let execution = executions
+            .iter()
+            .find(|execution| execution.manifest.execution_id == primary_execution_id)
+            .cloned()
+            .ok_or_else(|| {
+                ApiError::Validation("primary execution receipt was not persisted".into())
+            })?;
         Ok(RunDocumentResponse {
             state: primary_state,
             program: builder.program().compiled().clone(),
@@ -501,6 +559,8 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
             query,
             queries,
             explains,
+            execution: Some(execution.clone()),
+            executions,
         })
     }
 
@@ -682,6 +742,10 @@ pub struct RunDocumentResponse {
     pub query: Option<QueryResult>,
     pub queries: Vec<NamedQueryResult>,
     pub explains: Vec<NamedExplainResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<ExecutionReceipt>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub executions: Vec<ExecutionReceipt>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -689,6 +753,8 @@ pub struct NamedQueryResult {
     pub name: Option<String>,
     pub spec: QuerySpec,
     pub result: QueryResult,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<ExecutionId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -708,6 +774,8 @@ pub struct NamedExplainResult {
     pub name: Option<String>,
     pub spec: ExplainSpec,
     pub result: ExplainArtifact,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<ExecutionId>,
 }
 
 fn execute_explain_spec(
@@ -756,6 +824,8 @@ fn find_matching_derived_tuple(derived: &DerivedSet, atom: &aether_ast::Atom) ->
 
 #[derive(Debug, Error)]
 pub enum ApiError {
+    #[error("bare tuple ids are execution-local; resolve an opaque trace handle instead")]
+    AmbiguousTupleReference,
     #[error("validation error: {0}")]
     Validation(String),
     #[error(transparent)]
@@ -772,16 +842,19 @@ pub enum ApiError {
     Runtime(#[from] RuntimeError),
     #[error(transparent)]
     Explain(#[from] ExplainError),
+    #[error(transparent)]
+    Execution(#[from] execution::ExecutionError),
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         coordination_pilot_dsl, coordination_pilot_seed_history, ApiError, AppendRequest,
-        AsOfRequest, CurrentStateRequest, ExplainArtifact, ExplainTupleRequest,
-        InMemoryKernelService, KernelService, ParseDocumentRequest, RunDocumentRequest,
+        AsOfRequest, CurrentStateRequest, ExplainArtifact, InMemoryKernelService, KernelService,
+        ParseDocumentRequest, ResolveTraceHandleRequest, RunDocumentRequest,
         COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
     };
+    use crate::execution::ExecutionError;
     use aether_ast::{ElementId, EntityId, PolicyContext, PolicyEnvelope, Value};
 
     #[test]
@@ -874,14 +947,27 @@ mod tests {
                 Value::U64(2),
             ]
         );
+        let authorized_tuple = authorized_rows[0]
+            .tuple_id
+            .expect("execution_authorized tuple id");
+        let handle = current_authorized
+            .execution
+            .as_ref()
+            .expect("execution receipt")
+            .trace_handles
+            .iter()
+            .find(|binding| binding.local_tuple_id == authorized_tuple)
+            .expect("authorization trace handle")
+            .handle
+            .clone();
         let trace = service
-            .explain_tuple(ExplainTupleRequest {
-                tuple_id: authorized_rows[0]
-                    .tuple_id
-                    .expect("execution_authorized tuple id"),
+            .resolve_trace_handle(ResolveTraceHandleRequest {
+                handle,
                 policy_context: None,
+                verify_replay: true,
             })
             .expect("explain authorization tuple")
+            .record
             .trace;
         assert!(!trace.tuples.is_empty());
 
@@ -1150,26 +1236,38 @@ query current_cut {
             .find(|row| row.values == vec![Value::Entity(EntityId::new(3))])
             .and_then(|row| row.tuple_id)
             .expect("protected tuple id");
+        let protected_handle = executor_result
+            .execution
+            .as_ref()
+            .expect("executor execution receipt")
+            .trace_handles
+            .iter()
+            .find(|binding| binding.local_tuple_id == protected_tuple)
+            .expect("protected trace handle")
+            .handle
+            .clone();
         let mismatch = service
-            .explain_tuple(ExplainTupleRequest {
-                tuple_id: protected_tuple,
+            .resolve_trace_handle(ResolveTraceHandleRequest {
+                handle: protected_handle.clone(),
                 policy_context: None,
+                verify_replay: false,
             })
             .expect_err("explain should reject mismatched policy context");
         assert!(matches!(
             mismatch,
-            ApiError::Validation(message)
-                if message == "requested tuple is not visible under the current policy"
+            ApiError::Execution(ExecutionError::InsufficientPolicy)
         ));
         let executor_trace = service
-            .explain_tuple(ExplainTupleRequest {
-                tuple_id: protected_tuple,
+            .resolve_trace_handle(ResolveTraceHandleRequest {
+                handle: protected_handle,
                 policy_context: Some(PolicyContext {
                     capabilities: vec!["executor".into()],
                     visibilities: Vec::new(),
                 }),
+                verify_replay: true,
             })
             .expect("explain protected tuple with matching policy")
+            .record
             .trace;
         assert!(!executor_trace.tuples.is_empty());
     }

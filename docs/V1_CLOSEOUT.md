@@ -1,6 +1,6 @@
 # V1 Closeout
 
-- Status: Reopened in part; policy-aware semantic closure is not currently satisfied
+- Status: Reopened in part; append admission and immutable qualification remain unsatisfied
 - Date: 2026-03-28
 - Reopened: 2026-07-09 following the comprehensive audit
 - Scope: historical v1 acceptance record, now limited to the unrestricted
@@ -28,14 +28,14 @@ items remain supported for the unrestricted library slice:
 - stratified negation
 - bounded aggregation in the current v1 slice
 - provenance-bearing derived tuples and explanation
-- policy plumbing and response filtering, but not policy-scoped semantic
-  noninterference
+- policy-scoped replay, compilation, runtime, reporting, and explanation
+- execution-scoped service proof handles with durable replay metadata
 - sidecar subordination on the current single-node path
 - pilot-grade coordination semantics and authenticated service boundaries
 
-It does not currently close policy-aware replay, derivation, aggregation,
-explanation identity, or authenticated reporting. Those are correctness defects
-inside the former closure boundary, not optional platform breadth.
+The local R1 and R2 implementations repair policy-aware semantics and proof
+identity, but this historical closeout still does not promote those claims:
+R3 append admission and R4 immutable exact-candidate evidence remain open.
 
 ## Acceptance Closure Against The Original Kernel Bar
 

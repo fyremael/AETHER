@@ -98,11 +98,19 @@ query current_cut {
             run_response["query"]["rows"][0]["values"],
             [{"Entity": 1}],
         )
+        trace_handle = run_response["execution"]["trace_handles"][0]["handle"]
+        resolved_trace = client.resolve_trace_handle(
+            trace_handle,
+            verify_replay=True,
+        )
+        self.assertTrue(resolved_trace["digests_verified"])
+        self.assertTrue(resolved_trace["replay_verified"])
         named_query = client.run_named_query(document, query_name="current_cut")
         self.assertEqual(
             [row["values"] for row in named_query["rows"]],
             [[{"Entity": 1}]],
         )
+        self.assertIn("trace_handle", named_query["rows"][0])
 
         policy_document = """
 schema {
@@ -221,7 +229,9 @@ query current_cut {
             embedding=[0.9, 0.1, 0.0],
         )
 
-        with self.assertRaisesRegex(Exception, "policy denied"):
+        # Hidden and nonexistent sidecar records intentionally share one
+        # public error shape under policy-scoped lookup.
+        with self.assertRaisesRegex(Exception, "does not contain artifact"):
             client.get_artifact_reference(
                 sidecar_id="semantic-memory",
                 artifact_id="doc-1",

@@ -327,43 +327,55 @@ func TestHistoryAuditAndExplainDecodeTypedModels(t *testing.T) {
 					},
 				},
 			})
-		case "/v1/explain/tuple":
-			var request ExplainTupleRequest
+		case "/v1/explanations/resolve":
+			var request ResolveTraceHandleRequest
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				t.Fatalf("decode explain request: %v", err)
 			}
 			if request.PolicyContext == nil || len(request.PolicyContext.Capabilities) != 1 {
 				t.Fatalf("expected explain policy context, got %#v", request.PolicyContext)
 			}
+			if request.Handle != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || !request.VerifyReplay {
+				t.Fatalf("unexpected trace resolution request: %#v", request)
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"trace": map[string]any{
-					"root": 7,
-					"tuples": []map[string]any{
-						{
-							"tuple": map[string]any{
-								"id":        7,
-								"predicate": 42,
-								"values": []map[string]any{
-									{"Entity": 1},
-									{"String": "worker-b"},
+				"record": map[string]any{
+					"handle":         request.Handle,
+					"execution_id":   "execution-a",
+					"local_tuple_id": 7,
+					"tuple_digest":   "tuple-digest",
+					"trace_digest":   "trace-digest",
+					"trace": map[string]any{
+						"root": 7,
+						"tuples": []map[string]any{
+							{
+								"tuple": map[string]any{
+									"id":        7,
+									"predicate": 42,
+									"values": []map[string]any{
+										{"Entity": 1},
+										{"String": "worker-b"},
+									},
 								},
-							},
-							"metadata": map[string]any{
-								"rule_id":          5,
-								"predicate_id":     42,
-								"stratum":          0,
-								"scc_id":           0,
-								"iteration":        1,
-								"parent_tuple_ids": []uint64{3},
-								"source_datom_ids": []uint64{9},
-								"imported_cuts":    []any{},
-							},
-							"policy": map[string]any{
-								"capabilities": []string{"executor"},
+								"metadata": map[string]any{
+									"rule_id":          5,
+									"predicate_id":     42,
+									"stratum":          0,
+									"scc_id":           0,
+									"iteration":        1,
+									"parent_tuple_ids": []uint64{3},
+									"source_datom_ids": []uint64{9},
+									"imported_cuts":    []any{},
+								},
+								"policy": map[string]any{
+									"capabilities": []string{"executor"},
+								},
 							},
 						},
 					},
 				},
+				"digests_verified": true,
+				"replay_verified":  true,
 			})
 		default:
 			t.Fatalf("unexpected path %q", r.URL.Path)
@@ -395,16 +407,16 @@ func TestHistoryAuditAndExplainDecodeTypedModels(t *testing.T) {
 		t.Fatalf("unexpected audit selected report %#v", audit.Entries[0].Context.SelectedReport)
 	}
 
-	explain, err := api.ExplainTupleWithPolicy(context.Background(), 7, &PolicyContext{
+	explain, err := api.ResolveTraceHandleWithPolicy(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &PolicyContext{
 		Capabilities: []string{"executor"},
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("explain failed: %v", err)
 	}
-	if explain.Trace.Root != 7 || len(explain.Trace.Tuples) != 1 {
+	if explain.Record.Trace.Root != 7 || len(explain.Record.Trace.Tuples) != 1 || !explain.ReplayVerified {
 		t.Fatalf("unexpected explain response %#v", explain)
 	}
-	if explain.Trace.Tuples[0].Policy == nil || len(explain.Trace.Tuples[0].Policy.Capabilities) != 1 {
-		t.Fatalf("expected policy on trace tuple: %#v", explain.Trace.Tuples[0])
+	if explain.Record.Trace.Tuples[0].Policy == nil || len(explain.Record.Trace.Tuples[0].Policy.Capabilities) != 1 {
+		t.Fatalf("expected policy on trace tuple: %#v", explain.Record.Trace.Tuples[0])
 	}
 }

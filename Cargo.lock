@@ -33,6 +33,7 @@ dependencies = [
  "clap",
  "criterion",
  "indexmap",
+ "rand 0.8.6",
  "reqwest",
  "rusqlite",
  "serde",

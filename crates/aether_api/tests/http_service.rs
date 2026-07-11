@@ -10,10 +10,11 @@ use aether_api::{
     ParseDocumentRequest, ParseDocumentResponse, PartitionAppendRequest, PartitionStatusResponse,
     PilotAuthConfig, PilotServiceConfig, PilotTokenConfig, PromoteReplicaRequest,
     RegisterArtifactReferenceRequest, RegisterVectorRecordRequest, ReplicaConfig, ReplicaRole,
-    ReplicatedAuthorityPartitionService, RunDocumentRequest, RunDocumentResponse,
-    SearchVectorsRequest, SearchVectorsResponse, ServiceMode, ServiceStatusResponse,
-    SqliteKernelService, VectorFactProjection, VectorMetric, AETHER_NAMESPACE_HEADER,
-    COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
+    ReplicatedAuthorityPartitionService, ResolveTraceHandleRequest, RunDocumentRequest,
+    RunDocumentResponse, SearchVectorsRequest, SearchVectorsResponse, ServiceMode,
+    ServiceStatusResponse, SqliteKernelService, VectorFactProjection, VectorMetric,
+    AETHER_NAMESPACE_HEADER, COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
+    COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
 use aether_ast::{
     AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PartitionCut,
@@ -189,7 +190,36 @@ async fn http_service_runs_documents_and_explains_tuples() {
     );
 
     let tuple_id = current_rows[0].tuple_id.expect("tuple id");
+    let handle = current_authorized
+        .execution
+        .as_ref()
+        .expect("execution receipt")
+        .trace_handles
+        .iter()
+        .find(|binding| binding.local_tuple_id == tuple_id)
+        .expect("trace handle")
+        .handle
+        .clone();
     let explain = client
+        .post(format!("{base_url}/v1/explanations/resolve"))
+        .json(&ResolveTraceHandleRequest {
+            handle,
+            policy_context: None,
+            verify_replay: true,
+        })
+        .send()
+        .await
+        .expect("explain request");
+    assert!(explain.status().is_success());
+    let trace = explain
+        .json::<aether_api::ResolveTraceHandleResponse>()
+        .await
+        .expect("explain response")
+        .record
+        .trace;
+    assert!(!trace.tuples.is_empty());
+
+    let ambiguous = client
         .post(format!("{base_url}/v1/explain/tuple"))
         .json(&ExplainTupleRequest {
             tuple_id,
@@ -197,14 +227,16 @@ async fn http_service_runs_documents_and_explains_tuples() {
         })
         .send()
         .await
-        .expect("explain request");
-    assert!(explain.status().is_success());
-    let trace = explain
-        .json::<aether_api::ExplainTupleResponse>()
+        .expect("legacy tuple explain request");
+    assert_eq!(ambiguous.status(), reqwest::StatusCode::CONFLICT);
+    let ambiguous = ambiguous
+        .json::<serde_json::Value>()
         .await
-        .expect("explain response")
-        .trace;
-    assert!(!trace.tuples.is_empty());
+        .expect("legacy tuple error body");
+    assert_eq!(
+        ambiguous["code"],
+        serde_json::Value::String("ambiguous_tuple_reference".into())
+    );
 
     let stale = run_document(
         &client,
@@ -494,20 +526,35 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
         .await
         .expect("authorized run request");
     assert!(current.status().is_success());
-    let current_rows = current
+    let current_response = current
         .json::<RunDocumentResponse>()
         .await
-        .expect("current response")
+        .expect("current response");
+    let current_rows = current_response
         .query
+        .as_ref()
         .expect("current query result")
-        .rows;
+        .rows
+        .clone();
+    let tuple_id = current_rows[0].tuple_id.expect("tuple id");
+    let handle = current_response
+        .execution
+        .as_ref()
+        .expect("execution receipt")
+        .trace_handles
+        .iter()
+        .find(|binding| binding.local_tuple_id == tuple_id)
+        .expect("trace handle")
+        .handle
+        .clone();
 
     let explain = client
-        .post(format!("{base_url}/v1/explain/tuple"))
+        .post(format!("{base_url}/v1/explanations/resolve"))
         .bearer_auth("pilot-operator-token")
-        .json(&ExplainTupleRequest {
-            tuple_id: current_rows[0].tuple_id.expect("tuple id"),
+        .json(&ResolveTraceHandleRequest {
+            handle,
             policy_context: None,
+            verify_replay: true,
         })
         .send()
         .await
@@ -557,7 +604,7 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
     }));
     assert!(audit_entries.iter().any(|entry| {
         entry.principal == "pilot-operator"
-            && entry.path == "/v1/explain/tuple"
+            && entry.path == "/v1/explanations/resolve"
             && entry.status == reqwest::StatusCode::OK.as_u16()
             && entry.context.tuple_id == Some(current_rows[0].tuple_id.expect("tuple id").0)
             && entry.context.trace_tuple_count.is_some()
@@ -740,7 +787,7 @@ async fn http_service_exposes_status_and_supports_auth_reload() {
                     principal: "query-client".into(),
                     principal_id: Some("principal:query-client".into()),
                     token_id: Some("token:query-client".into()),
-                    scopes: vec![AuthScope::Query],
+                    scopes: vec![AuthScope::Query, AuthScope::Explain],
                     policy_context: None,
                     token: Some("pilot-query-token".into()),
                     token_env: None,
@@ -792,6 +839,32 @@ async fn http_service_exposes_status_and_supports_auth_reload() {
         .iter()
         .any(|principal| principal.token_id == "token:query-client" && !principal.revoked));
 
+    let proof_run = run_document_authorized(
+        &client,
+        &base_url,
+        "pilot-query-token",
+        policy_document_dsl(),
+    )
+    .await;
+    let proof_handle = proof_run
+        .execution
+        .expect("execution receipt")
+        .trace_handles[0]
+        .handle
+        .clone();
+    let before_reload = client
+        .post(format!("{base_url}/v1/explanations/resolve"))
+        .bearer_auth("pilot-query-token")
+        .json(&ResolveTraceHandleRequest {
+            handle: proof_handle.clone(),
+            policy_context: None,
+            verify_replay: false,
+        })
+        .send()
+        .await
+        .expect("resolve before reload");
+    assert!(before_reload.status().is_success());
+
     config.config_version = "test-config-v2".into();
     config.auth.revoked_token_ids = vec!["token:query-client".into()];
     std::fs::write(
@@ -833,6 +906,31 @@ async fn http_service_exposes_status_and_supports_auth_reload() {
         .await
         .expect("revoked token request");
     assert_eq!(revoked.status(), reqwest::StatusCode::FORBIDDEN);
+
+    let revoked_resolution = client
+        .post(format!("{base_url}/v1/explanations/resolve"))
+        .bearer_auth("pilot-query-token")
+        .json(&ResolveTraceHandleRequest {
+            handle: proof_handle.clone(),
+            policy_context: None,
+            verify_replay: false,
+        })
+        .send()
+        .await
+        .expect("revoked proof resolution");
+    assert_eq!(revoked_resolution.status(), reqwest::StatusCode::FORBIDDEN);
+    let still_immutable = client
+        .post(format!("{base_url}/v1/explanations/resolve"))
+        .bearer_auth("pilot-operator-token")
+        .json(&ResolveTraceHandleRequest {
+            handle: proof_handle,
+            policy_context: None,
+            verify_replay: true,
+        })
+        .send()
+        .await
+        .expect("resolve retained proof as operator");
+    assert!(still_immutable.status().is_success());
 
     stop_server(server).await;
 }
@@ -1637,6 +1735,33 @@ async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
             Value::String("worker-a".into())
         ]
     );
+    let federated_handle = federated
+        .run
+        .execution
+        .as_ref()
+        .expect("federated execution receipt")
+        .trace_handles
+        .first()
+        .expect("federated trace handle")
+        .handle
+        .clone();
+    let resolved = client
+        .post(format!("{base_url}/v1/explanations/resolve"))
+        .bearer_auth("pilot-operator-token")
+        .json(&ResolveTraceHandleRequest {
+            handle: federated_handle,
+            policy_context: None,
+            verify_replay: true,
+        })
+        .send()
+        .await
+        .expect("resolve federated trace request");
+    assert!(resolved.status().is_success());
+    let resolved = resolved
+        .json::<aether_api::ResolveTraceHandleResponse>()
+        .await
+        .expect("resolve federated trace response");
+    assert!(resolved.replay_verified);
 
     let report = client
         .post(format!("{base_url}/v1/federated/report"))
@@ -1950,16 +2075,27 @@ async fn authenticated_http_service_persists_semantic_audit_context_across_resta
                 ),
             )
             .await;
-            let tuple_id = current.query.expect("current query result").rows[0]
+            let tuple_id = current.query.as_ref().expect("current query result").rows[0]
                 .tuple_id
                 .expect("tuple id");
+            let handle = current
+                .execution
+                .as_ref()
+                .expect("execution receipt")
+                .trace_handles
+                .iter()
+                .find(|binding| binding.local_tuple_id == tuple_id)
+                .expect("trace handle")
+                .handle
+                .clone();
 
             let explain = client
-                .post(format!("{base_url}/v1/explain/tuple"))
+                .post(format!("{base_url}/v1/explanations/resolve"))
                 .bearer_auth("pilot-operator-token")
-                .json(&ExplainTupleRequest {
-                    tuple_id,
+                .json(&ResolveTraceHandleRequest {
+                    handle,
                     policy_context: None,
+                    verify_replay: true,
                 })
                 .send()
                 .await
@@ -2011,7 +2147,7 @@ async fn authenticated_http_service_persists_semantic_audit_context_across_resta
         .collect::<Vec<_>>();
     let explain_entries = persisted
         .iter()
-        .filter(|entry| entry.path == "/v1/explain/tuple")
+        .filter(|entry| entry.path == "/v1/explanations/resolve")
         .collect::<Vec<_>>();
 
     assert!(run_entries.len() >= 4);

@@ -193,6 +193,9 @@ $databaseShmPath = "$databasePath-shm"
 $sidecarPath = "$databasePath.sidecars.sqlite"
 $sidecarWalPath = "$sidecarPath-wal"
 $sidecarShmPath = "$sidecarPath-shm"
+$executionPath = "$databasePath.executions.sqlite"
+$executionWalPath = "$executionPath-wal"
+$executionShmPath = "$executionPath-shm"
 $auditPath = Resolve-ConfigPath $configDir $config.audit_log_path
 
 if (-not $SnapshotDir) {
@@ -240,6 +243,15 @@ if (Test-Path $sidecarWalPath) {
 if (Test-Path $sidecarShmPath) {
     Copy-Item -Path $sidecarShmPath -Destination (Join-Path $snapshotDataDir (Split-Path -Leaf $sidecarShmPath))
 }
+if (Test-Path $executionPath) {
+    Copy-Item -Path $executionPath -Destination (Join-Path $snapshotDataDir (Split-Path -Leaf $executionPath))
+}
+if (Test-Path $executionWalPath) {
+    Copy-Item -Path $executionWalPath -Destination (Join-Path $snapshotDataDir (Split-Path -Leaf $executionWalPath))
+}
+if (Test-Path $executionShmPath) {
+    Copy-Item -Path $executionShmPath -Destination (Join-Path $snapshotDataDir (Split-Path -Leaf $executionShmPath))
+}
 if (Test-Path $auditPath) {
     Copy-Item -Path $auditPath -Destination (Join-Path $snapshotLogsDir (Split-Path -Leaf $auditPath))
 }
@@ -253,6 +265,9 @@ $manifest = [pscustomobject]@{
     sidecar_path = $sidecarPath
     sidecar_wal_path = $sidecarWalPath
     sidecar_shm_path = $sidecarShmPath
+    execution_store_path = $executionPath
+    execution_store_wal_path = $executionWalPath
+    execution_store_shm_path = $executionShmPath
     audit_log_path = $auditPath
     token_files = $tokenFiles
 }
@@ -294,6 +309,9 @@ $databaseShmPath = "$databasePath-shm"
 $sidecarPath = "$databasePath.sidecars.sqlite"
 $sidecarWalPath = "$sidecarPath-wal"
 $sidecarShmPath = "$sidecarPath-shm"
+$executionPath = "$databasePath.executions.sqlite"
+$executionWalPath = "$executionPath-wal"
+$executionShmPath = "$executionPath-shm"
 $auditPath = Resolve-ConfigPath $configDir $config.audit_log_path
 
 function Restore-OptionalFile([string]$SnapshotPath, [string]$DestinationPath) {
@@ -320,7 +338,7 @@ if ($BackupExisting) {
     $backupDataDir = Join-Path $backupDir "data"
     $backupLogsDir = Join-Path $backupDir "logs"
     New-Item -ItemType Directory -Force -Path $backupConfigDir, $backupDataDir, $backupLogsDir | Out-Null
-    foreach ($path in @($configPath, $databasePath, $databaseWalPath, $databaseShmPath, $sidecarPath, $sidecarWalPath, $sidecarShmPath, $auditPath)) {
+    foreach ($path in @($configPath, $databasePath, $databaseWalPath, $databaseShmPath, $sidecarPath, $sidecarWalPath, $sidecarShmPath, $executionPath, $executionWalPath, $executionShmPath, $auditPath)) {
         if (Test-Path $path) {
             $destination = switch -Wildcard ($path) {
                 "$configDir*" { $backupConfigDir }
@@ -344,6 +362,9 @@ $snapshotDbShm = Join-Path $snapshotDir ("data\" + (Split-Path -Leaf $databaseSh
 $snapshotSidecars = Join-Path $snapshotDir ("data\" + (Split-Path -Leaf $sidecarPath))
 $snapshotSidecarWal = Join-Path $snapshotDir ("data\" + (Split-Path -Leaf $sidecarWalPath))
 $snapshotSidecarShm = Join-Path $snapshotDir ("data\" + (Split-Path -Leaf $sidecarShmPath))
+$snapshotExecutions = Join-Path $snapshotDir ("data\" + (Split-Path -Leaf $executionPath))
+$snapshotExecutionWal = Join-Path $snapshotDir ("data\" + (Split-Path -Leaf $executionWalPath))
+$snapshotExecutionShm = Join-Path $snapshotDir ("data\" + (Split-Path -Leaf $executionShmPath))
 $snapshotAudit = Join-Path $snapshotDir ("logs\" + (Split-Path -Leaf $auditPath))
 
 if (Test-Path $snapshotDb) {
@@ -356,6 +377,11 @@ if (Test-Path $snapshotSidecars) {
 }
 Restore-OptionalFile $snapshotSidecarWal $sidecarWalPath
 Restore-OptionalFile $snapshotSidecarShm $sidecarShmPath
+if (Test-Path $snapshotExecutions) {
+    Copy-Item -Path $snapshotExecutions -Destination $executionPath -Force
+}
+Restore-OptionalFile $snapshotExecutionWal $executionWalPath
+Restore-OptionalFile $snapshotExecutionShm $executionShmPath
 if (Test-Path $snapshotAudit) {
     Copy-Item -Path $snapshotAudit -Destination $auditPath -Force
 }

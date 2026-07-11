@@ -2,12 +2,13 @@ use crate::{
     build_coordination_delta_report, build_coordination_pilot_report,
     coordination_pilot_seed_history, http_router_with_options, ApiError, AppendRequest, AuthScope,
     AuthorityPartitionConfig, CoordinationCut, CoordinationDeltaReportRequest,
-    CoordinationPilotReportRequest, CurrentStateRequest, ExplainTupleRequest,
-    FederatedHistoryRequest, FederatedRunDocumentRequest, HealthResponse, HttpAuthConfig,
-    HttpKernelOptions, ImportedFactQueryRequest, InMemoryKernelService, KernelService, LeaderEpoch,
+    CoordinationPilotReportRequest, CurrentStateRequest, FederatedHistoryRequest,
+    FederatedRunDocumentRequest, HealthResponse, HttpAuthConfig, HttpKernelOptions,
+    ImportedFactQueryRequest, InMemoryKernelService, KernelService, LeaderEpoch,
     PartitionAppendRequest, PromoteReplicaRequest, ReplicaConfig, ReplicaRole,
-    ReplicatedAuthorityPartitionService, RunDocumentRequest, ServiceMode, ServiceStatusResponse,
-    ServiceStatusStorage, SqliteKernelService, COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
+    ReplicatedAuthorityPartitionService, ResolveTraceHandleRequest, RunDocumentRequest,
+    ServiceMode, ServiceStatusResponse, ServiceStatusStorage, SqliteKernelService, TraceHandle,
+    COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
 };
 use aether_ast::{
     Atom, AttributeId, Datom, DatomProvenance, DerivationTrace, ElementId, EntityId, FederatedCut,
@@ -569,7 +570,7 @@ struct HttpFixture {
     runtime: Runtime,
     router: axum::Router,
     token: String,
-    explain_tuple_id: TupleId,
+    explain_handle: TraceHandle,
     history_datoms: usize,
     coordination_rows: usize,
     delta_changed_rows: usize,
@@ -1547,10 +1548,10 @@ fn build_http_fixture() -> Result<HttpFixture, ApiError> {
     })?;
 
     let report = build_coordination_pilot_report(&mut service)?;
-    let explain_tuple_id = report
+    let explain_handle = report
         .current_authorized
         .iter()
-        .find_map(|row| row.tuple_id)
+        .find_map(|row| row.trace_handle.clone())
         .ok_or_else(|| {
             ApiError::Validation(
                 "coordination pilot seed did not produce an explainable authorization tuple".into(),
@@ -1615,7 +1616,7 @@ fn build_http_fixture() -> Result<HttpFixture, ApiError> {
         runtime,
         router: http_router_with_options(service, options),
         token,
-        explain_tuple_id,
+        explain_handle,
         history_datoms: history.len(),
         coordination_rows,
         delta_changed_rows,
@@ -1846,19 +1847,21 @@ fn benchmark_http_explain_tuple_impl(
                 "tuples",
             )],
             notes: vec![
-                "authenticated in-process POST /v1/explain/tuple over the pilot router".into(),
+                "authenticated in-process POST /v1/explanations/resolve over the pilot router"
+                    .into(),
             ],
             samples,
             iterations_per_sample: 1,
         },
         observer,
         move || {
-            http_post_json::<ExplainTupleRequest, crate::ExplainTupleResponse>(
+            http_post_json::<ResolveTraceHandleRequest, crate::ResolveTraceHandleResponse>(
                 &fixture,
-                "/v1/explain/tuple",
-                &ExplainTupleRequest {
-                    tuple_id: fixture.explain_tuple_id,
+                "/v1/explanations/resolve",
+                &ResolveTraceHandleRequest {
+                    handle: fixture.explain_handle.clone(),
                     policy_context: None,
+                    verify_replay: false,
                 },
             )
         },

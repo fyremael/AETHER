@@ -1,11 +1,11 @@
 use aether_api::{
     build_coordination_pilot_report, coordination_pilot_dsl, coordination_pilot_seed_history,
     http_router_with_options, AppendRequest, AuditEntry, AuditLogResponse, AuthScope,
-    ExplainTupleRequest, HistoryResponse, HttpAuthConfig, HttpKernelOptions, KernelService,
+    HistoryResponse, HttpAuthConfig, HttpKernelOptions, KernelService, ResolveTraceHandleRequest,
     RunDocumentRequest, RunDocumentResponse, SqliteKernelService,
     COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
-use aether_ast::{ElementId, EntityId, PolicyContext, TupleId, Value};
+use aether_ast::{ElementId, EntityId, PolicyContext, Value};
 use reqwest::Client;
 use std::{
     path::{Path, PathBuf},
@@ -68,7 +68,12 @@ async fn soak_authenticated_pilot_service_survives_restarts() {
             ),
         )
         .await;
-        let current_rows = current.query.expect("current query result").rows;
+        let current_rows = current
+            .query
+            .as_ref()
+            .expect("current query result")
+            .rows
+            .clone();
         assert_eq!(
             current_rows[0].values,
             vec![
@@ -78,22 +83,34 @@ async fn soak_authenticated_pilot_service_survives_restarts() {
             ]
         );
 
+        let tuple_id = current_rows[0].tuple_id.expect("tuple id");
+        let handle = current
+            .execution
+            .as_ref()
+            .expect("execution receipt")
+            .trace_handles
+            .iter()
+            .find(|binding| binding.local_tuple_id == tuple_id)
+            .expect("trace handle")
+            .handle
+            .clone();
         let explain = client
-            .post(format!("{base_url}/v1/explain/tuple"))
+            .post(format!("{base_url}/v1/explanations/resolve"))
             .bearer_auth("pilot-operator-token")
-            .json(&ExplainTupleRequest {
-                tuple_id: current_rows[0].tuple_id.expect("tuple id"),
+            .json(&ResolveTraceHandleRequest {
+                handle,
                 policy_context: None,
+                verify_replay: true,
             })
             .send()
             .await
             .expect("explain request");
         assert!(explain.status().is_success());
         let explain = explain
-            .json::<aether_api::ExplainTupleResponse>()
+            .json::<aether_api::ResolveTraceHandleResponse>()
             .await
             .expect("explain response");
-        assert!(!explain.trace.tuples.is_empty());
+        assert!(!explain.record.trace.tuples.is_empty());
 
         if cycle % 2 == 0 {
             let as_of = run_document_authorized(
@@ -154,7 +171,7 @@ async fn soak_authenticated_pilot_service_survives_restarts() {
         .collect::<Vec<_>>();
     let explain_entries = persisted
         .iter()
-        .filter(|entry| entry.path == "/v1/explain/tuple")
+        .filter(|entry| entry.path == "/v1/explanations/resolve")
         .collect::<Vec<_>>();
     let append_entries = persisted
         .iter()
@@ -254,18 +271,19 @@ async fn misuse_paths_are_rejected_cleanly_and_audited() {
     assert_eq!(unauthorized.status(), reqwest::StatusCode::UNAUTHORIZED);
 
     let forbidden = client
-        .post(format!("{base_url}/v1/explain/tuple"))
+        .post(format!("{base_url}/v1/explanations/resolve"))
         .bearer_auth("pilot-query-token")
-        .json(&ExplainTupleRequest {
-            tuple_id: TupleId::new(1),
+        .json(&ResolveTraceHandleRequest {
+            handle: "00".repeat(32).parse().expect("synthetic trace handle"),
             policy_context: None,
+            verify_replay: false,
         })
         .send()
         .await
         .expect("forbidden explain request");
     assert_eq!(forbidden.status(), reqwest::StatusCode::FORBIDDEN);
 
-    let current = run_document_authorized(
+    let _current = run_document_authorized(
         &client,
         &base_url,
         "pilot-operator-token",
@@ -275,21 +293,18 @@ async fn misuse_paths_are_rejected_cleanly_and_audited() {
         ),
     )
     .await;
-    let valid_tuple_id = current.query.expect("query result").rows[0]
-        .tuple_id
-        .expect("tuple id");
-
-    let bad_tuple = client
-        .post(format!("{base_url}/v1/explain/tuple"))
+    let unknown_handle = client
+        .post(format!("{base_url}/v1/explanations/resolve"))
         .bearer_auth("pilot-operator-token")
-        .json(&ExplainTupleRequest {
-            tuple_id: TupleId::new(valid_tuple_id.0 + 10_000),
+        .json(&ResolveTraceHandleRequest {
+            handle: "ff".repeat(32).parse().expect("unknown trace handle"),
             policy_context: None,
+            verify_replay: false,
         })
         .send()
         .await
-        .expect("bad tuple explain request");
-    assert_eq!(bad_tuple.status(), reqwest::StatusCode::BAD_REQUEST);
+        .expect("unknown handle request");
+    assert_eq!(unknown_handle.status(), reqwest::StatusCode::NOT_FOUND);
 
     let history = client
         .get(format!("{base_url}/v1/history"))
@@ -330,14 +345,12 @@ async fn misuse_paths_are_rejected_cleanly_and_audited() {
             && entry.context.temporal_view.as_deref() == Some("current")
     }));
     assert!(audit_entries.iter().any(|entry| {
-        entry.path == "/v1/explain/tuple"
+        entry.path == "/v1/explanations/resolve"
             && entry.status == reqwest::StatusCode::FORBIDDEN.as_u16()
-            && entry.context.tuple_id == Some(1)
     }));
     assert!(audit_entries.iter().any(|entry| {
-        entry.path == "/v1/explain/tuple"
-            && entry.status == reqwest::StatusCode::BAD_REQUEST.as_u16()
-            && entry.context.tuple_id == Some(valid_tuple_id.0 + 10_000)
+        entry.path == "/v1/explanations/resolve"
+            && entry.status == reqwest::StatusCode::NOT_FOUND.as_u16()
     }));
 
     stop_server(server).await;
@@ -354,7 +367,7 @@ async fn misuse_paths_are_rejected_cleanly_and_audited() {
             && entry.outcome == "unauthorized"
     }));
     assert!(persisted.iter().any(|entry| {
-        entry.path == "/v1/explain/tuple"
+        entry.path == "/v1/explanations/resolve"
             && entry.status == reqwest::StatusCode::FORBIDDEN.as_u16()
             && entry.outcome == "forbidden"
     }));

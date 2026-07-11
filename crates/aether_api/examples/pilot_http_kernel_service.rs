@@ -104,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  POST /v1/documents/run");
     println!("  POST /v1/reports/pilot/coordination");
     println!("  POST /v1/reports/pilot/coordination-delta");
-    println!("  POST /v1/explain/tuple");
+    println!("  POST /v1/explanations/resolve");
     println!("  POST /v1/sidecars/artifacts/register");
     println!("  POST /v1/sidecars/artifacts/get");
     println!("  POST /v1/sidecars/vectors/register");

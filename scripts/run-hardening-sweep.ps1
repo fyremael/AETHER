@@ -550,6 +550,41 @@ function Invoke-AdminPack {
                     throw "expected one datom after first append, found $($historyAfterFirstAppend.Body.datoms.Count)"
                 }
 
+                $proofRun = Invoke-JsonRequest -Method "POST" -Url "$baseUrl/v1/documents/run" -Token $token -Body @{
+                    dsl = @'
+schema proof_backup_v1 {
+}
+
+predicates {
+  source(Entity)
+  derived(Entity)
+}
+
+facts {
+  source(entity(1))
+}
+
+rules {
+  derived(x) <- source(x)
+}
+
+materialize {
+  derived
+}
+
+query {
+  current
+  goal derived(x)
+  keep x
+}
+'@
+                }
+                Assert-StatusCode $proofRun @(200) "proof execution before backup"
+                $proofHandle = $proofRun.Body.execution.trace_handles[0].handle
+                if (-not $proofHandle) {
+                    throw "proof execution did not return a trace handle"
+                }
+
                 Stop-ServiceProcess $serviceHandle
                 $serviceHandle = $null
 
@@ -620,10 +655,12 @@ function Invoke-AdminPack {
                 $restoredToken = (Get-Content -Path $packageTokenPath -Raw).Trim()
                 $candidateTokens = @($restoredToken, $newToken, $oldToken) | Where-Object { $_ } | Select-Object -Unique
                 $restoredHistory = $null
+                $restoredAuthorizedToken = $null
                 foreach ($candidate in $candidateTokens) {
                     $attempt = Invoke-JsonRequest -Method "GET" -Url "$baseUrl/v1/history" -Token $candidate -Body $null
                     if ($attempt.StatusCode -eq 200) {
                         $restoredHistory = $attempt
+                        $restoredAuthorizedToken = $candidate
                         break
                     }
                 }
@@ -633,10 +670,18 @@ function Invoke-AdminPack {
                 if ($restoredHistory.Body.datoms.Count -ne 1) {
                     throw "expected one datom after restore/restart, found $($restoredHistory.Body.datoms.Count)"
                 }
+                $restoredProof = Invoke-JsonRequest -Method "POST" -Url "$baseUrl/v1/explanations/resolve" -Token $restoredAuthorizedToken -Body @{
+                    handle = $proofHandle
+                    verify_replay = $true
+                }
+                Assert-StatusCode $restoredProof @(200) "trace handle after backup/restore"
+                if (-not $restoredProof.Body.replay_verified) {
+                    throw "restored trace handle did not pass replay verification"
+                }
 
                 [pscustomobject]@{
                     ArtifactPath = $build.OutputPath
-                    Notes = "built package, expanded zip, rotated auth, and verified backup/restore via packaged restart"
+                    Notes = "built package, expanded zip, rotated auth, and verified journal plus execution-handle backup/restore via packaged restart"
                 }
             } finally {
                 Stop-ServiceProcess $serviceHandle

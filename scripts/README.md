@@ -121,6 +121,11 @@ They now also include:
 - `restore-pilot-state.cmd`
 - `restore-pilot-state.ps1`
 
+The backup/restore pair treats the journal, sidecar catalog, and
+`*.executions.sqlite` proof metadata (including SQLite WAL/SHM companions) as
+one operational snapshot. The hardening drill resolves a pre-backup trace
+handle after restore and requests digest-checked replay.
+
 That makes the packaged bundle self-contained for both the pilot service and the
 read-only operator cockpit.
 

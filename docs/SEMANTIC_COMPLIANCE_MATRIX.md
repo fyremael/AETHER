@@ -19,8 +19,8 @@ The bar here is intentionally narrow and strict:
 - exact local truth on a single-node kernel
 - deterministic `History`, `Current`, and `AsOf`
 - recursive derivation, stratified negation, bounded aggregation, provenance,
-  policy plumbing, and sidecar subordination, with policy noninterference still
-  open
+  policy-scoped semantics, execution-scoped proof identity, and sidecar
+  subordination, with immutable exact-candidate qualification still open
 - no implied claim of distributed runtime completion, multitenancy, or
   production platform completeness
 
@@ -36,11 +36,11 @@ called out explicitly instead of hidden.
 | `3. Architectural thesis` | Complete | `docs/ARCHITECTURE.md`, `crates/aether_runtime`, `crates/aether_api/src/sidecar.rs` | Two-center kernel thesis is implemented locally |
 | `4. Design stance on Janus` | Complete | Repo layout and implementation shape | Janus remains reference-only, not a compatibility target |
 | `5. Core data model` | Reopened at append admission | `crates/aether_ast`, `crates/aether_resolver`, resolver tests, comprehensive audit | Resolver validation exists, but namespace-schema validity is not enforced transactionally before append |
-| `6. Provenance model` | Kernel provenance complete; service proof identity reopened | `crates/aether_ast`, `crates/aether_runtime`, `crates/aether_explain`, sidecar tests, comprehensive audit | Datom and derived provenance exist, but a bare process-local tuple ID is not a durable service proof identity |
+| `6. Provenance model` | Execution-scoped proof identity implemented locally | `crates/aether_api/tests/execution_handles.rs`, execution-store unit tests, HTTP/federation tests | Kernel `TupleId` remains local; service proofs use authorization-checked opaque handles bound to immutable execution manifests and replay digests |
 | `7. Temporal model` | Policy-scoped implementation complete locally | scoped resolver tests and API noninterference suite | Physical cut selection precedes policy projection; visible cuts and hidden/nonexistent errors are projection-local |
 | `8. Query and phase model` | Policy-scoped implementation complete locally | `crates/aether_rules`, `crates/aether_plan`, `crates/aether_api/src/evaluation.rs` | Extensional facts are projected before compiler validation and planning; scoped query execution consumes one evaluation bundle |
 | `9. Rule model` | Policy-scoped implementation complete locally | `crates/aether_runtime/tests/policy_scoped_execution.rs`, API projection-equivalence test | Recursion, negation, aggregates, tuple IDs, indexes, and iterations are computed inside the effective scope |
-| `10. Coordination model` | Policy-scoped implementation complete locally | pilot/report tests plus API noninterference suite | Coordination documents and reports run from scoped snapshots; R2 execution-scoped proof identity remains open |
+| `10. Coordination model` | Policy- and proof-scoped implementation complete locally | pilot/report tests, API noninterference suite, `execution_handles.rs` | Coordination documents and reports run from scoped snapshots and carry execution IDs plus durable trace handles |
 | `11. Sidecar model` | Policy-scoped reads implemented locally | sidecar unit/federation tests and semantic closure suite | Sidecar cuts use projected journal catalogs and protected/absent reads share an opaque error; append-time dependency admission remains R3 |
 
 ## Section Detail
@@ -92,7 +92,7 @@ Implemented:
 
 - authoritative semantic substrate: datoms, storage, resolver, sidecar anchors
 - recursive semantic closure: rules, SCC planning, semi-naive runtime,
-  explanation, and current policy filtering, which is not yet semantic input
+  explanation, with policy projected before replay, compilation, and execution
 
 Primary evidence:
 
@@ -287,8 +287,8 @@ Together they cover:
 - recursive closure
 - stratified negation
 - bounded aggregation
-- policy-related derivation coverage that does not yet prove pre-evaluation
-  projection or noninterference
+- policy noninterference across replay, compilation, recursion, negation,
+  aggregation, metadata, explanations, sidecars, and federation
 - coordination fencing
 - sidecar projection
 - explanation
@@ -304,5 +304,6 @@ This matrix does **not** claim:
 - production platform completeness
 
 Those remain important, but they are outside the unrestricted kernel slice.
-Policy-scoped replay, proof identity, and append admission are inside the
-reopened correctness boundary and must not be described as completed closure.
+Append admission remains inside the reopened correctness boundary. Policy and
+proof-identity repairs are implemented locally but remain external non-claims
+until immutable exact-candidate evidence and later operational gates pass.

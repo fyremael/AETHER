@@ -1,4 +1,4 @@
-use crate::ApiError;
+use crate::{ApiError, ENGINE_SEMANTICS_VERSION};
 use aether_ast::{Datom, PartitionCut, PolicyScope, RuleProgram, TemporalView};
 use aether_plan::ScopedProgram;
 use aether_resolver::{
@@ -11,10 +11,21 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fmt;
 
-const ENGINE_SEMANTICS_VERSION: &str = "aether-semantic-v1-policy-scope-1";
-
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub(crate) struct EvaluationKey([u8; 32]);
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+pub(crate) struct FederationIdentityMaterial {
+    pub(crate) leader_epochs: Vec<(String, u64)>,
+    pub(crate) visible_prefix_digests: Vec<(String, String)>,
+    pub(crate) imported_execution_ids: Vec<(String, String)>,
+}
+
+impl EvaluationKey {
+    pub(crate) fn to_hex(&self) -> String {
+        self.0.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+}
 
 impl fmt::Debug for EvaluationKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -30,7 +41,16 @@ pub(crate) fn project_history(
     history: &[Datom],
     scope: PolicyScope,
 ) -> Result<Vec<Datom>, ApiError> {
-    Ok(ScopedReplay::new(history, TemporalView::Current, scope)?
+    project_history_at_view(history, TemporalView::Current, scope)
+}
+
+pub(crate) fn project_history_at_view(
+    history: &[Datom],
+    view: TemporalView,
+    scope: PolicyScope,
+) -> Result<Vec<Datom>, ApiError> {
+    Ok(ScopedReplay::new(history, view, scope)
+        .map_err(public_resolve_error)?
         .datoms()
         .to_vec())
 }
@@ -51,18 +71,10 @@ pub(crate) struct ScopedEvaluationBuilder<'a> {
     schema: &'a Schema,
     history: &'a [Datom],
     program: ScopedProgram,
+    federation: FederationIdentityMaterial,
 }
 
 impl<'a> ScopedEvaluationBuilder<'a> {
-    pub(crate) fn new(
-        schema: &'a Schema,
-        history: &'a [Datom],
-        program: &RuleProgram,
-        scope: PolicyScope,
-    ) -> Result<Self, ApiError> {
-        Self::new_in_namespace("local", schema, history, program, scope)
-    }
-
     pub(crate) fn new_in_namespace(
         namespace: impl Into<String>,
         schema: &'a Schema,
@@ -76,16 +88,23 @@ impl<'a> ScopedEvaluationBuilder<'a> {
             schema,
             history,
             program,
+            federation: FederationIdentityMaterial::default(),
         })
+    }
+
+    pub(crate) fn with_federation_identity(
+        mut self,
+        mut federation: FederationIdentityMaterial,
+    ) -> Self {
+        federation.leader_epochs.sort();
+        federation.visible_prefix_digests.sort();
+        federation.imported_execution_ids.sort();
+        self.federation = federation;
+        self
     }
 
     pub(crate) fn program(&self) -> &ScopedProgram {
         &self.program
-    }
-
-    pub(crate) fn evaluate(&self, view: TemporalView) -> Result<EvaluationBundle, ApiError> {
-        self.evaluate_with_key(view)
-            .map(|(_, evaluation)| evaluation)
     }
 
     pub(crate) fn evaluate_with_key(
@@ -94,7 +113,13 @@ impl<'a> ScopedEvaluationBuilder<'a> {
     ) -> Result<(EvaluationKey, EvaluationBundle), ApiError> {
         let replay = ScopedReplay::new(self.history, view, self.program.scope().clone())
             .map_err(public_resolve_error)?;
-        let key = build_evaluation_key(&self.namespace, self.schema, &self.program, &replay)?;
+        let key = build_evaluation_key(
+            &self.namespace,
+            self.schema,
+            &self.program,
+            &replay,
+            &self.federation,
+        )?;
         let snapshot = MaterializedResolver
             .resolve_scoped(self.schema, &replay)
             .map_err(public_resolve_error)?;
@@ -117,6 +142,7 @@ fn build_evaluation_key(
     schema: &Schema,
     program: &ScopedProgram,
     replay: &ScopedReplay,
+    federation: &FederationIdentityMaterial,
 ) -> Result<EvaluationKey, ApiError> {
     let mut imported_cuts = program
         .compiled()
@@ -143,7 +169,6 @@ fn build_evaluation_key(
     let visible_history_material = replay.datoms();
     let program_material = program.compiled();
     let imported_material: Vec<PartitionCut> = imported_cuts;
-    let leader_epochs: Vec<(String, u64)> = Vec::new();
 
     let mut hasher = Sha256::new();
     hash_component(&mut hasher, "namespace", &namespace)?;
@@ -153,7 +178,7 @@ fn build_evaluation_key(
     hash_component(&mut hasher, "schema", &schema_material)?;
     hash_component(&mut hasher, "program", program_material)?;
     hash_component(&mut hasher, "imported_cuts", &imported_material)?;
-    hash_component(&mut hasher, "leader_epochs", &leader_epochs)?;
+    hash_component(&mut hasher, "federation", federation)?;
     hash_component(
         &mut hasher,
         "engine_semantics_version",
@@ -180,7 +205,7 @@ fn hash_component<T: Serialize + ?Sized>(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_evaluation_key, EvaluationKey};
+    use super::{build_evaluation_key, EvaluationKey, FederationIdentityMaterial};
     use aether_ast::{
         AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PolicyContext,
         PolicyEnvelope, PolicyScope, ReplicaId, RuleProgram, TemporalView, Value,
@@ -217,7 +242,14 @@ mod tests {
             .compile_scoped(&schema, &RuleProgram::default(), scope.clone())
             .expect("compile empty scoped program");
         let replay = ScopedReplay::new(history, view, scope).expect("construct scoped replay");
-        build_evaluation_key(namespace, &schema, &program, &replay).expect("build evaluation key")
+        build_evaluation_key(
+            namespace,
+            &schema,
+            &program,
+            &replay,
+            &FederationIdentityMaterial::default(),
+        )
+        .expect("build evaluation key")
     }
 
     #[test]

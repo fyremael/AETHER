@@ -1,8 +1,8 @@
 use aether_api::{
     build_coordination_pilot_report_with_policy, coordination_pilot_dsl,
     coordination_pilot_seed_history, ApiError, AppendRequest, CompileProgramRequest,
-    EvaluateProgramRequest, ExplainTupleRequest, InMemoryKernelService, KernelService,
-    RegisterArtifactReferenceRequest, RegisterVectorRecordRequest, RunDocumentRequest,
+    EvaluateProgramRequest, InMemoryKernelService, KernelService, RegisterArtifactReferenceRequest,
+    RegisterVectorRecordRequest, ResolveTraceHandleRequest, RunDocumentRequest,
     SearchVectorsRequest, VectorFactProjection, VectorMetric, VectorRecordMetadata,
     COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
@@ -132,14 +132,27 @@ fn semantic_closure_acceptance_covers_coordination_fencing_and_explainability() 
         ]
     );
 
+    let current_tuple = current_rows[0]
+        .tuple_id
+        .expect("current authorization tuple id");
+    let current_handle = current_authorized
+        .execution
+        .as_ref()
+        .expect("current execution receipt")
+        .trace_handles
+        .iter()
+        .find(|binding| binding.local_tuple_id == current_tuple)
+        .expect("current authorization trace handle")
+        .handle
+        .clone();
     let trace = service
-        .explain_tuple(ExplainTupleRequest {
-            tuple_id: current_rows[0]
-                .tuple_id
-                .expect("current authorization tuple id"),
+        .resolve_trace_handle(ResolveTraceHandleRequest {
+            handle: current_handle,
             policy_context: None,
+            verify_replay: true,
         })
         .expect("explain current authorization")
+        .record
         .trace;
     assert!(!trace.tuples.is_empty());
 
@@ -263,23 +276,37 @@ fn semantic_closure_acceptance_covers_policy_recursion_aggregation_and_redaction
     }));
 
     let tuple_id = blocked_rows[0].tuple_id.expect("blocked tuple id");
+    let handle = privileged_as_of
+        .execution
+        .as_ref()
+        .expect("privileged execution receipt")
+        .trace_handles
+        .iter()
+        .find(|binding| binding.local_tuple_id == tuple_id)
+        .expect("privileged trace handle")
+        .handle
+        .clone();
     let privileged_trace = service
-        .explain_tuple(ExplainTupleRequest {
-            tuple_id,
+        .resolve_trace_handle(ResolveTraceHandleRequest {
+            handle: handle.clone(),
             policy_context: Some(ops_context()),
+            verify_replay: true,
         })
         .expect("explain privileged tuple")
+        .record
         .trace;
     assert!(!privileged_trace.tuples.is_empty());
 
-    let hidden_trace = service.explain_tuple(ExplainTupleRequest {
-        tuple_id,
+    let hidden_trace = service.resolve_trace_handle(ResolveTraceHandleRequest {
+        handle,
         policy_context: None,
+        verify_replay: false,
     });
     assert!(matches!(
         hidden_trace,
-        Err(aether_api::ApiError::Validation(message))
-            if message == "requested tuple is not visible under the current policy"
+        Err(aether_api::ApiError::Execution(
+            aether_api::execution::ExecutionError::InsufficientPolicy
+        ))
     ));
 
     let aggregate_at_cut = service

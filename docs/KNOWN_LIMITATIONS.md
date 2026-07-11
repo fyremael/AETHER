@@ -27,10 +27,12 @@ ordinary feature backlog:
   federation, reports, and sidecar cuts before semantic evaluation. The
   mixed-policy external claim remains reopened until Postgres parity,
   performance characterization, and exact-candidate evidence are complete.
-- Tuple explanation requests are backed by a process-local last-derived cache
-  keyed only by tuple ID. Appends and different document runs can leave stale or
-  ambiguous explanation state. Explanations need explicit cut/program/policy
-  trace handles.
+- Service explanations now resolve opaque execution-scoped handles persisted
+  beside the journal and re-check namespace and current policy authorization.
+  Retention is bounded to 1,024 executions by default; evicted handles return
+  an explicit expired result. Postgres journal mode currently keeps this
+  derived execution metadata in local SQLite, so operators must back up both
+  stores at one operational cut.
 - Append accepts datoms before a canonical namespace schema validates the whole
   batch. Invalid records can reach journal authority and poison later replay.
 - Commercial readiness is computed from authored statuses and path existence,

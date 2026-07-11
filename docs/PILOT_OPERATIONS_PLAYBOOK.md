@@ -96,6 +96,11 @@ If the bind or storage paths changed, restart the service instead of reloading a
 
 3. Preserve the generated snapshot directory with the release evidence.
 
+The helper snapshots the journal, sidecar catalog, execution metadata database
+(`*.executions.sqlite`), their SQLite WAL/SHM companions, audit log, config,
+and token files. A trace handle is durable only when its execution database is
+restored with the journal cut that produced it.
+
 To restore:
 
 1. Stop the service.
@@ -110,7 +115,7 @@ To restore:
    - `/health`
    - `/v1/status`
    - authenticated query
-   - authenticated explain
+   - resolution of a pre-snapshot trace handle with replay verification
    - audit append
 
 ## External Secret-Manager Playbook
@@ -163,6 +168,7 @@ Avoid commands that print banners, prompts, or status lines to stdout.
 4. Snapshot:
    - `data/coordination.sqlite`
    - adjacent sidecar catalog
+   - adjacent execution metadata database
    - `logs/audit.jsonl`
    - current config files
 5. Replace:

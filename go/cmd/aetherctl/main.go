@@ -106,19 +106,21 @@ func runWithArgs(
 	case "explain":
 		command := flag.NewFlagSet("explain", flag.ContinueOnError)
 		command.SetOutput(ioDiscard{})
-		tupleID := command.Uint64("tuple-id", 0, "Tuple ID to explain")
+		traceHandle := command.String("trace-handle", "", "Opaque execution-scoped trace handle")
+		verifyReplay := command.Bool("verify-replay", false, "Recompute and verify the stored proof")
 		capabilities := command.String("capabilities", "", "Comma-separated capabilities")
 		visibilities := command.String("visibilities", "", "Comma-separated visibilities")
 		if err := command.Parse(commandArgs); err != nil {
 			return err
 		}
-		if *tupleID == 0 {
-			return usageError("explain requires --tuple-id")
+		if *traceHandle == "" {
+			return usageError("explain requires --trace-handle")
 		}
-		response, err := api.ExplainTupleWithPolicy(
+		response, err := api.ResolveTraceHandleWithPolicy(
 			ctx,
-			*tupleID,
+			*traceHandle,
 			buildPolicyContext(*capabilities, *visibilities),
+			*verifyReplay,
 		)
 		if err != nil {
 			return err

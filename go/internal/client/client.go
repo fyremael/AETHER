@@ -122,19 +122,21 @@ func (c *Client) RunDocument(ctx context.Context, request RunDocumentRequest) (m
 	return response, nil
 }
 
-func (c *Client) ExplainTuple(ctx context.Context, tupleID uint64) (*ExplainTupleResponse, error) {
-	return c.ExplainTupleWithPolicy(ctx, tupleID, nil)
+func (c *Client) ResolveTraceHandle(ctx context.Context, handle string) (*ResolveTraceHandleResponse, error) {
+	return c.ResolveTraceHandleWithPolicy(ctx, handle, nil, false)
 }
 
-func (c *Client) ExplainTupleWithPolicy(
+func (c *Client) ResolveTraceHandleWithPolicy(
 	ctx context.Context,
-	tupleID uint64,
+	handle string,
 	policy *PolicyContext,
-) (*ExplainTupleResponse, error) {
-	var response ExplainTupleResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/v1/explain/tuple", ExplainTupleRequest{
-		TupleID:       tupleID,
+	verifyReplay bool,
+) (*ResolveTraceHandleResponse, error) {
+	var response ResolveTraceHandleResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/explanations/resolve", ResolveTraceHandleRequest{
+		Handle:        handle,
 		PolicyContext: policy,
+		VerifyReplay:  verifyReplay,
 	}, &response); err != nil {
 		return nil, err
 	}

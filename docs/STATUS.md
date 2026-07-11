@@ -46,15 +46,21 @@ binding repair sequence are recorded in
 `docs/REMEDIATION_PROGRAMME.md`. `docs/V1_CLOSEOUT.md` and the semantic
 compliance matrix now carry that reopened boundary explicitly.
 
-Remediation execution has completed the local R1 semantic repair: normalized
+Remediation execution has completed the local R1 semantic repair and R2 proof
+identity repair: normalized
 `PolicyScope`, cut-then-project scoped replay, dependency-closure
 certification, scoped program compilation, typed scoped runtime bundles, a
 central service evaluation path, federated/sidecar projection, and
-projection-local evaluation keys are implemented. The permanent adversarial
-suites pass in-memory and SQLite coverage, and the workspace test and strict
-Clippy gates are green. The external mixed-policy claim remains reopened until
-scheduled Postgres parity, performance characterization, and R4 immutable
-evidence bind those results to an exact candidate.
+projection-local evaluation keys are implemented. Service evaluations now
+emit deterministic execution receipts and random opaque trace handles backed
+by bounded in-memory or SQLite execution stores. Resolution rechecks namespace
+and current policy, supports digest-checked replay, survives restart and
+backup/restore, and binds federated source cuts, epochs, prefix digests, and
+source execution IDs. Rust, HTTP, reports, Go, Python, the TUI, demos, and
+notebooks use handles; bare tuple explanation returns
+`409 ambiguous_tuple_reference`. The external mixed-policy and durable-proof
+claims remain contained until the later immutable-evidence and operational
+qualification phases bind these local results to an exact candidate.
 
 Completed:
 
@@ -65,6 +71,8 @@ Completed:
 - durable SQLite journal implemented behind the `Journal` boundary with restart-safe replay coverage
 - source datom provenance threaded through resolution and derivation
 - first recursive tuple explainer implemented
+- execution-scoped proof manifests, receipts, opaque trace handles, durable
+  SQLite resolution, authorization re-checks, and optional replay verification implemented
 - whole-document DSL parser implemented for the current canonical v1 surface: schema, attribute classes, facts, repeated queries, explain directives, temporal views, and policy annotations
 - `Current` and `AsOf` query execution implemented
 - policy annotations wired through state, document, explanation, report, federation, and sidecar paths as pre-replay/pre-compilation semantic scope; immutable release qualification remains pending
@@ -95,7 +103,7 @@ Completed:
 - launch validation and drift promotion completed into a required mainline CI gate
 - packaged durable pilot-service bundles implemented with config-backed startup, package-local rotation tooling, restart/replay benchmark coverage, and secret-file/env/command token resolution
 - service-status, auth-reload, and config-backed token/principal identity surfaces implemented for the hardened pilot boundary
-- packaged backup and restore helpers implemented for the Windows pilot bundle, with snapshot/export of journal, sidecar catalog, audit log, config, and token files
+- packaged backup and restore helpers implemented for the Windows pilot bundle, with snapshot/export of journal, sidecar catalog, execution metadata, audit log, config, and token files and a restored-handle replay check in the hardening drill
 - scheduled/manual extended-operability workflow added for soak, package build, and launch-validation evidence beyond the standard release gate
 - first real Go operator shell implemented against the HTTP API with typed client coverage
 - pilot-focused Go operator TUI implemented as the live cockpit for health, coordination state, audit entries, history, tuple proof traces, service status, and coordination diffs

@@ -124,23 +124,46 @@ class AetherClient:
         response = self.run_document(dsl, policy_context=policy_context)
         for query in response.get("queries", []):
             if query.get("name") == query_name:
-                return query.get("result", query)
+                result = query.get("result", query)
+                execution_id = query.get("execution_id")
+                receipt = next(
+                    (
+                        item
+                        for item in response.get("executions", [])
+                        if item.get("manifest", {}).get("execution_id") == execution_id
+                    ),
+                    None,
+                )
+                handles = {
+                    binding["local_tuple_id"]: binding["handle"]
+                    for binding in (receipt or {}).get("trace_handles", [])
+                }
+                for row in result.get("rows", []):
+                    tuple_id = row.get("tuple_id")
+                    if tuple_id in handles:
+                        row["execution_id"] = execution_id
+                        row["trace_handle"] = handles[tuple_id]
+                return result
         raise AetherApiError(
             404,
             f"named query not found: {query_name}",
             {"query_name": query_name},
         )
 
-    def explain_tuple(
+    def resolve_trace_handle(
         self,
-        tuple_id: int,
+        handle: str,
         *,
         policy_context: PolicyContext | dict[str, Any] | None = None,
+        verify_replay: bool = False,
     ) -> dict[str, Any]:
-        payload: dict[str, Any] = {"tuple_id": tuple_id}
+        payload: dict[str, Any] = {
+            "handle": handle,
+            "verify_replay": verify_replay,
+        }
         if policy_context is not None:
             payload["policy_context"] = policy_context
-        return self._request_json("POST", "/v1/explain/tuple", payload)
+        return self._request_json("POST", "/v1/explanations/resolve", payload)
 
     def coordination_report(
         self,

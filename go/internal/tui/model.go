@@ -20,7 +20,7 @@ type DataSource interface {
 	AuditLog(context.Context) (*client.AuditLogResponse, error)
 	CoordinationPilotReport(context.Context, *client.PolicyContext) (*client.CoordinationPilotReport, error)
 	CoordinationDeltaReport(context.Context, client.CoordinationCut, client.CoordinationCut, *client.PolicyContext) (*client.CoordinationDeltaReport, error)
-	ExplainTupleWithPolicy(context.Context, uint64, *client.PolicyContext) (*client.ExplainTupleResponse, error)
+	ResolveTraceHandleWithPolicy(context.Context, string, *client.PolicyContext, bool) (*client.ResolveTraceHandleResponse, error)
 }
 
 type Tab int
@@ -172,45 +172,46 @@ type historyDataMsg struct {
 }
 
 type explainDataMsg struct {
-	tupleID uint64
-	explain *client.ExplainTupleResponse
-	err     error
+	traceHandle string
+	explain     *client.ResolveTraceHandleResponse
+	err         error
 }
 
 type tickMsg struct{}
 
 type Model struct {
-	dataSource         DataSource
-	baseURL            string
-	policy             *client.PolicyContext
-	refreshInterval    time.Duration
-	activeTab          Tab
-	section            CoordinationSection
-	deltaPreset        DeltaPreset
-	coordSelection     map[CoordinationSection]int
-	auditSelection     int
-	historySelection   int
-	auditDetailOpen    bool
-	historyDetailOpen  bool
-	selectedTupleID    *uint64
-	health             *client.HealthResponse
-	status             *client.ServiceStatusResponse
-	liveHistory        *client.HistoryResponse
-	history            *client.HistoryResponse
-	historyLoaded      bool
-	audit              *client.AuditLogResponse
-	report             *client.CoordinationPilotReport
-	delta              *client.CoordinationDeltaReport
-	explain            *client.ExplainTupleResponse
-	lastLiveRefresh    time.Time
-	lastHistoryRefresh time.Time
-	lastExplainRefresh time.Time
-	staleMessage       string
-	showHelp           bool
-	width              int
-	height             int
-	keys               keyMap
-	helpModel          help.Model
+	dataSource          DataSource
+	baseURL             string
+	policy              *client.PolicyContext
+	refreshInterval     time.Duration
+	activeTab           Tab
+	section             CoordinationSection
+	deltaPreset         DeltaPreset
+	coordSelection      map[CoordinationSection]int
+	auditSelection      int
+	historySelection    int
+	auditDetailOpen     bool
+	historyDetailOpen   bool
+	selectedTupleID     *uint64
+	selectedTraceHandle string
+	health              *client.HealthResponse
+	status              *client.ServiceStatusResponse
+	liveHistory         *client.HistoryResponse
+	history             *client.HistoryResponse
+	historyLoaded       bool
+	audit               *client.AuditLogResponse
+	report              *client.CoordinationPilotReport
+	delta               *client.CoordinationDeltaReport
+	explain             *client.ResolveTraceHandleResponse
+	lastLiveRefresh     time.Time
+	lastHistoryRefresh  time.Time
+	lastExplainRefresh  time.Time
+	staleMessage        string
+	showHelp            bool
+	width               int
+	height              int
+	keys                keyMap
+	helpModel           help.Model
 }
 
 func NewModel(
@@ -306,7 +307,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.staleMessage = fmt.Sprintf("Explain refresh failed: %v", msg.err)
 			return m, nil
 		}
-		if m.selectedTupleID != nil && *m.selectedTupleID == msg.tupleID {
+		if m.selectedTraceHandle != "" && m.selectedTraceHandle == msg.traceHandle {
 			m.explain = msg.explain
 			m.lastExplainRefresh = time.Now()
 			m.staleMessage = ""
@@ -406,8 +407,8 @@ func (m Model) tabEntryCmd() tea.Cmd {
 	case HistoryTab:
 		return m.loadHistoryCmd()
 	case ExplainTab:
-		if m.selectedTupleID != nil {
-			return m.loadExplainCmd(*m.selectedTupleID)
+		if m.selectedTraceHandle != "" {
+			return m.loadExplainCmd(m.selectedTraceHandle)
 		}
 	}
 	return nil
@@ -420,8 +421,8 @@ func (m Model) refreshCurrentTabCmd() tea.Cmd {
 	case HistoryTab:
 		return m.loadHistoryCmd()
 	case ExplainTab:
-		if m.selectedTupleID != nil {
-			return m.loadExplainCmd(*m.selectedTupleID)
+		if m.selectedTraceHandle != "" {
+			return m.loadExplainCmd(m.selectedTraceHandle)
 		}
 	}
 	return nil
@@ -431,13 +432,14 @@ func (m *Model) openSelectionCmd() tea.Cmd {
 	switch m.activeTab {
 	case CoordinationTab:
 		row := m.selectedCoordinationRow()
-		if row == nil || row.TupleID == nil {
+		if row == nil || row.TupleID == nil || row.TraceHandle == nil {
 			return nil
 		}
 		tupleID := *row.TupleID
 		m.selectedTupleID = &tupleID
+		m.selectedTraceHandle = *row.TraceHandle
 		m.activeTab = ExplainTab
-		return m.loadExplainCmd(tupleID)
+		return m.loadExplainCmd(m.selectedTraceHandle)
 	case AuditTab:
 		m.auditDetailOpen = !m.auditDetailOpen
 	case HistoryTab:
@@ -574,16 +576,16 @@ func (m Model) loadHistoryCmd() tea.Cmd {
 	}
 }
 
-func (m Model) loadExplainCmd(tupleID uint64) tea.Cmd {
+func (m Model) loadExplainCmd(traceHandle string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 
-		explain, err := m.dataSource.ExplainTupleWithPolicy(ctx, tupleID, m.policy)
+		explain, err := m.dataSource.ResolveTraceHandleWithPolicy(ctx, traceHandle, m.policy, true)
 		return explainDataMsg{
-			tupleID: tupleID,
-			explain: explain,
-			err:     err,
+			traceHandle: traceHandle,
+			explain:     explain,
+			err:         err,
 		}
 	}
 }
@@ -1002,18 +1004,20 @@ func (m Model) renderHistory() string {
 
 func (m Model) renderExplain() string {
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	if m.selectedTupleID == nil || m.explain == nil {
-		return muted.Render("No tuple trace selected yet. Choose a coordination row with a tuple id and press enter.")
+	if m.selectedTupleID == nil || m.selectedTraceHandle == "" || m.explain == nil {
+		return muted.Render("No proof selected yet. Choose an explainable coordination row and press enter.")
 	}
 
+	trace := m.explain.Record.Trace
 	var lines []string
-	lines = append(lines, fmt.Sprintf("Root tuple: t%d", m.explain.Trace.Root))
-	lines = append(lines, fmt.Sprintf("Trace tuples: %d", len(m.explain.Trace.Tuples)))
+	lines = append(lines, fmt.Sprintf("Execution: %s", m.explain.Record.ExecutionID))
+	lines = append(lines, fmt.Sprintf("Root tuple: t%d", trace.Root))
+	lines = append(lines, fmt.Sprintf("Trace tuples: %d", len(trace.Tuples)))
 	if !m.lastExplainRefresh.IsZero() {
 		lines = append(lines, muted.Render("Last refresh: "+m.lastExplainRefresh.Format(time.RFC3339)))
 	}
 	lines = append(lines, "")
-	for _, tuple := range m.explain.Trace.Tuples {
+	for _, tuple := range trace.Tuples {
 		lines = append(lines, fmt.Sprintf(
 			"t%d | %s | iteration=%d | sources=%s | parents=%s",
 			tuple.Tuple.ID,

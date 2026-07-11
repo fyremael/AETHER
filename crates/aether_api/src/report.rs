@@ -3,7 +3,8 @@ use crate::{
         coordination_pilot_dsl, COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
         COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
     },
-    ApiError, ExplainTupleRequest, HistoryRequest, KernelService, RunDocumentRequest,
+    ApiError, ExecutionId, HistoryRequest, KernelService, ResolveTraceHandleRequest,
+    RunDocumentRequest, TraceHandle,
 };
 use aether_ast::{ElementId, PolicyContext, QueryRow, TupleId, Value};
 use serde::{Deserialize, Serialize};
@@ -30,10 +31,16 @@ pub struct CoordinationPilotReport {
 pub struct ReportRow {
     pub tuple_id: Option<TupleId>,
     pub values: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<ExecutionId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_handle: Option<TraceHandle>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TraceSummary {
+    pub execution_id: ExecutionId,
+    pub handle: TraceHandle,
     pub root: TupleId,
     pub tuple_count: usize,
     pub tuples: Vec<TraceTupleSummary>,
@@ -84,9 +91,11 @@ pub struct CoordinationDeltaReportRequest {
     pub policy_context: Option<PolicyContext>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CoordinationTraceHandle {
-    pub tuple_id: TupleId,
+    pub execution_id: ExecutionId,
+    pub handle: TraceHandle,
+    pub local_tuple_id: TupleId,
     pub tuple_count: usize,
     pub source_datom_ids: Vec<ElementId>,
     pub parent_tuple_ids: Vec<TupleId>,
@@ -221,15 +230,19 @@ pub fn build_coordination_pilot_report_with_policy(
 
     let trace = current_authorized
         .first()
-        .and_then(|row| row.tuple_id)
-        .map(|tuple_id| -> Result<TraceSummary, ApiError> {
+        .and_then(|row| Some((row.execution_id.clone()?, row.trace_handle.clone()?)))
+        .map(|(execution_id, handle)| -> Result<TraceSummary, ApiError> {
             let trace = service
-                .explain_tuple(ExplainTupleRequest {
-                    tuple_id,
+                .resolve_trace_handle(ResolveTraceHandleRequest {
+                    handle: handle.clone(),
                     policy_context: policy_context.clone(),
+                    verify_replay: false,
                 })?
+                .record
                 .trace;
             Ok(TraceSummary {
+                execution_id,
+                handle,
                 root: trace.root,
                 tuple_count: trace.tuples.len(),
                 tuples: trace
@@ -251,13 +264,13 @@ pub fn build_coordination_pilot_report_with_policy(
         generated_at_ms: now_millis(),
         policy_context,
         history_len,
-        pre_heartbeat_authorized: into_report_rows(pre_heartbeat_authorized),
-        as_of_authorized: into_report_rows(as_of_authorized),
-        live_heartbeats: into_report_rows(live_heartbeats),
-        current_authorized: into_report_rows(current_authorized),
-        claimable: into_report_rows(claimable),
-        accepted_outcomes: into_report_rows(accepted_outcomes),
-        rejected_outcomes: into_report_rows(rejected_outcomes),
+        pre_heartbeat_authorized,
+        as_of_authorized,
+        live_heartbeats,
+        current_authorized,
+        claimable,
+        accepted_outcomes,
+        rejected_outcomes,
         trace,
     })
 }
@@ -460,11 +473,28 @@ fn format_policy_context(policy_context: Option<&PolicyContext>) -> String {
     }
 }
 
-fn into_report_rows(rows: Vec<QueryRow>) -> Vec<ReportRow> {
+fn into_report_rows(
+    rows: Vec<QueryRow>,
+    execution: Option<&crate::ExecutionReceipt>,
+) -> Vec<ReportRow> {
+    let execution_id = execution.map(|receipt| receipt.manifest.execution_id.clone());
+    let handles = execution
+        .map(|receipt| {
+            receipt
+                .trace_handles
+                .iter()
+                .map(|binding| (binding.local_tuple_id, binding.handle.clone()))
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
     rows.into_iter()
         .map(|row| ReportRow {
             tuple_id: row.tuple_id,
             values: row.values,
+            execution_id: row.tuple_id.and(execution_id.clone()),
+            trace_handle: row
+                .tuple_id
+                .and_then(|tuple_id| handles.get(&tuple_id).cloned()),
         })
         .collect()
 }
@@ -529,7 +559,7 @@ fn render_diff_rows(output: &mut String, title: &str, rows: &[ReportRowDiff]) {
             let _ = writeln!(
                 output,
                 "  trace `t{}` | tuples `{}` | sources `{}` | parents `{}`",
-                trace.tuple_id.0,
+                trace.local_tuple_id.0,
                 trace.tuple_count,
                 format_element_ids(&trace.source_datom_ids),
                 format_tuple_ids(&trace.parent_tuple_ids),
@@ -556,7 +586,7 @@ fn render_changed_rows(output: &mut String, rows: &[ReportRowChange]) {
             let _ = writeln!(
                 output,
                 "  before trace `t{}` | tuples `{}` | sources `{}` | parents `{}`",
-                trace.tuple_id.0,
+                trace.local_tuple_id.0,
                 trace.tuple_count,
                 format_element_ids(&trace.source_datom_ids),
                 format_tuple_ids(&trace.parent_tuple_ids),
@@ -566,7 +596,7 @@ fn render_changed_rows(output: &mut String, rows: &[ReportRowChange]) {
             let _ = writeln!(
                 output,
                 "  after trace `t{}` | tuples `{}` | sources `{}` | parents `{}`",
-                trace.tuple_id.0,
+                trace.local_tuple_id.0,
                 trace.tuple_count,
                 format_element_ids(&trace.source_datom_ids),
                 format_tuple_ids(&trace.parent_tuple_ids),
@@ -579,9 +609,12 @@ fn render_changed_rows(output: &mut String, rows: &[ReportRowChange]) {
 fn run_report_query(
     service: &mut impl KernelService,
     request: RunDocumentRequest,
-) -> Result<Vec<QueryRow>, ApiError> {
+) -> Result<Vec<ReportRow>, ApiError> {
     match service.run_document(request) {
-        Ok(response) => Ok(response.query.unwrap_or_default().rows),
+        Ok(response) => Ok(into_report_rows(
+            response.query.unwrap_or_default().rows,
+            response.execution.as_ref(),
+        )),
         Err(ApiError::Validation(message)) if message.starts_with("unknown element ") => {
             Ok(Vec::new())
         }
@@ -607,36 +640,36 @@ fn build_coordination_snapshot(
     let history_len = run_report_history_len(service, cut, policy_context.clone())?;
     Ok(CoordinationSnapshot {
         history_len,
-        current_authorized: into_report_rows(run_report_query_for_cut(
+        current_authorized: run_report_query_for_cut(
             service,
             cut,
             "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
             policy_context.clone(),
-        )?),
-        claimable: into_report_rows(run_report_query_for_cut(
+        )?,
+        claimable: run_report_query_for_cut(
             service,
             cut,
             "goal worker_can_claim(t, worker)\n  keep t, worker",
             policy_context.clone(),
-        )?),
-        live_heartbeats: into_report_rows(run_report_query_for_cut(
+        )?,
+        live_heartbeats: run_report_query_for_cut(
             service,
             cut,
             "goal live_authority(t, worker, epoch, beat)\n  keep t, worker, epoch, beat",
             policy_context.clone(),
-        )?),
-        accepted_outcomes: into_report_rows(run_report_query_for_cut(
+        )?,
+        accepted_outcomes: run_report_query_for_cut(
             service,
             cut,
             "goal execution_outcome_accepted(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
             policy_context.clone(),
-        )?),
-        rejected_outcomes: into_report_rows(run_report_query_for_cut(
+        )?,
+        rejected_outcomes: run_report_query_for_cut(
             service,
             cut,
             "goal execution_outcome_rejected_stale(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
             policy_context,
-        )?),
+        )?,
     })
 }
 
@@ -664,7 +697,7 @@ fn run_report_query_for_cut(
     cut: &CoordinationCut,
     query_body: &str,
     policy_context: Option<PolicyContext>,
-) -> Result<Vec<QueryRow>, ApiError> {
+) -> Result<Vec<ReportRow>, ApiError> {
     run_report_query(
         service,
         RunDocumentRequest {
@@ -800,18 +833,17 @@ fn trace_handle_for_row(
     row: &ReportRow,
     policy_context: Option<&PolicyContext>,
 ) -> Result<Option<CoordinationTraceHandle>, ApiError> {
-    let Some(tuple_id) = row.tuple_id else {
+    let (Some(execution_id), Some(handle)) = (&row.execution_id, &row.trace_handle) else {
         return Ok(None);
     };
-    let trace = match service.explain_tuple(ExplainTupleRequest {
-        tuple_id,
+    let trace = match service.resolve_trace_handle(ResolveTraceHandleRequest {
+        handle: handle.clone(),
         policy_context: policy_context.cloned(),
+        verify_replay: false,
     }) {
-        Ok(response) => response.trace,
-        Err(ApiError::Validation(message))
-            if message == "requested tuple is not visible under the current policy" =>
-        {
-            return Ok(None);
+        Ok(response) => response.record.trace,
+        Err(ApiError::Execution(crate::execution::ExecutionError::InsufficientPolicy)) => {
+            return Ok(None)
         }
         Err(error) => return Err(error),
     };
@@ -822,7 +854,9 @@ fn trace_handle_for_row(
         .or_else(|| trace.tuples.first())
         .ok_or_else(|| ApiError::Validation("empty explain trace".into()))?;
     Ok(Some(CoordinationTraceHandle {
-        tuple_id: trace.root,
+        execution_id: execution_id.clone(),
+        handle: handle.clone(),
+        local_tuple_id: trace.root,
         tuple_count: trace.tuples.len(),
         source_datom_ids: root.metadata.source_datom_ids.clone(),
         parent_tuple_ids: root.metadata.parent_tuple_ids.clone(),

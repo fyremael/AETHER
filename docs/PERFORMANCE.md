@@ -86,7 +86,7 @@ before pretending they are stable enough to gate releases.
 - `GET /v1/status`
 - `GET /v1/history`
 - `POST /v1/reports/pilot/coordination`
-- `POST /v1/explain/tuple`
+- `POST /v1/explanations/resolve`
 - `POST /v1/reports/pilot/coordination-delta`
 
 ### `replicated_partition`

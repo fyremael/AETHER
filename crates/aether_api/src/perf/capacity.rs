@@ -233,7 +233,7 @@ impl MixedOperation {
             Self::History => "/v1/history",
             Self::Report => "/v1/reports/pilot/coordination",
             Self::Delta => "/v1/reports/pilot/coordination-delta",
-            Self::Explain => "/v1/explain/tuple",
+            Self::Explain => "/v1/explanations/resolve",
         }
     }
 }
@@ -960,12 +960,13 @@ fn run_mixed_operation(fixture: &HttpFixture, operation: MixedOperation) -> Resu
             )?;
         }
         MixedOperation::Explain => {
-            let _: crate::ExplainTupleResponse = http_post_json(
+            let _: crate::ResolveTraceHandleResponse = http_post_json(
                 fixture,
-                "/v1/explain/tuple",
-                &ExplainTupleRequest {
-                    tuple_id: fixture.explain_tuple_id,
+                "/v1/explanations/resolve",
+                &ResolveTraceHandleRequest {
+                    handle: fixture.explain_handle.clone(),
                     policy_context: None,
+                    verify_replay: false,
                 },
             )?;
         }

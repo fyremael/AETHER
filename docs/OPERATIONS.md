@@ -218,7 +218,9 @@ Available endpoints today:
 - `POST /v1/documents/run`
 - `POST /v1/reports/pilot/coordination`
 - `POST /v1/reports/pilot/coordination-delta`
-- `POST /v1/explain/tuple`
+- `POST /v1/explanations/resolve` resolves an opaque execution-scoped trace
+  handle after namespace and current-policy authorization. The former
+  `/v1/explain/tuple` path returns `409` and never selects a recent execution.
 - `POST /v1/sidecars/artifacts/register`
 - `POST /v1/sidecars/artifacts/get`
 - `POST /v1/sidecars/vectors/register`

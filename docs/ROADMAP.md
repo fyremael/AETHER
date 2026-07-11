@@ -147,7 +147,7 @@ If the team needs a practical ordering, use this one:
 
 1. `R0`: contain claims and freeze scope
 2. `R1`: make policy semantic input and prove noninterference
-3. `R2`: replace process-local tuple explanation with execution-scoped handles
+3. `R2`: execution-scoped handles implemented locally; immutable candidate evidence remains pending
 4. `R3`: enforce transactional namespace-schema append admission
 5. `R4`: compute readiness from immutable exact-candidate evidence
 6. `R5`: harden supply chain, transport, concurrency, resource controls, and operational automation

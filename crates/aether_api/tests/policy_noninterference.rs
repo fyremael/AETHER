@@ -392,10 +392,32 @@ fn equal_visible_program_projections_have_byte_equal_semantics_and_metadata() {
         })
         .expect("evaluate explicit public control program");
 
-    assert_eq!(projected_from_full, explicit_control);
+    let projected_receipt = projected_from_full
+        .execution
+        .as_ref()
+        .expect("projected execution receipt");
+    let control_receipt = explicit_control
+        .execution
+        .as_ref()
+        .expect("control execution receipt");
     assert_eq!(
-        serde_json::to_vec(&projected_from_full).expect("serialize projected response"),
-        serde_json::to_vec(&explicit_control).expect("serialize control response")
+        projected_receipt.manifest.execution_id,
+        control_receipt.manifest.execution_id
+    );
+    assert_ne!(
+        projected_receipt.trace_handles[0].handle,
+        control_receipt.trace_handles[0].handle
+    );
+    let mut projected_semantics = projected_from_full.clone();
+    projected_semantics.execution = None;
+    projected_semantics.executions.clear();
+    let mut control_semantics = explicit_control.clone();
+    control_semantics.execution = None;
+    control_semantics.executions.clear();
+    assert_eq!(projected_semantics, control_semantics);
+    assert_eq!(
+        serde_json::to_vec(&projected_semantics).expect("serialize projected response"),
+        serde_json::to_vec(&control_semantics).expect("serialize control response")
     );
 
     let privileged = service

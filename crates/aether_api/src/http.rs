@@ -6,8 +6,9 @@ use crate::{
     NamespaceId, ParseDocumentRequest, PartitionAppendRequest, PartitionHistoryRequest,
     PartitionStateRequest, PartitionStatusResponse, PostgresKernelService, PromoteReplicaRequest,
     RegisterArtifactReferenceRequest, RegisterVectorRecordRequest,
-    ReplicatedAuthorityPartitionService, RunDocumentRequest, SearchVectorsRequest, ServiceMode,
-    ServiceStatusResponse, ServiceStatusStorage, SqliteKernelService,
+    ReplicatedAuthorityPartitionService, ResolveTraceHandleRequest, RunDocumentRequest,
+    SearchVectorsRequest, ServiceMode, ServiceStatusResponse, ServiceStatusStorage,
+    SqliteKernelService,
 };
 use aether_ast::PolicyContext;
 use axum::{
@@ -340,6 +341,107 @@ impl HttpKernelState {
             ));
             result
         }
+    }
+
+    fn resolve_execution_trace(
+        &self,
+        headers: &HeaderMap,
+        mut request: ResolveTraceHandleRequest,
+        mut context: AuditContext,
+    ) -> Result<crate::ResolveTraceHandleResponse, HttpError> {
+        let namespace = namespace_from_headers(headers)?;
+        context.namespace = Some(namespace.to_string());
+        let principal = match self.authorize(headers, AuthScope::Explain, &namespace) {
+            Ok(principal) => principal,
+            Err(error) => {
+                self.audit.record(AuditEntry::for_denied(
+                    "POST",
+                    "/v1/explanations/resolve",
+                    error.status_code(),
+                    error.audit_principal(),
+                    None,
+                    None,
+                    AuthScope::Explain,
+                    error.audit_message(),
+                    context,
+                ));
+                return Err(error);
+            }
+        };
+        request.policy_context =
+            match apply_policy_binding(&principal, request.policy_context, &mut context) {
+                Ok(policy) => policy,
+                Err(error) => {
+                    self.audit.record(AuditEntry::for_denied(
+                        "POST",
+                        "/v1/explanations/resolve",
+                        error.status_code(),
+                        error.audit_principal(),
+                        principal.principal_id.clone(),
+                        principal.token_id.clone(),
+                        AuthScope::Explain,
+                        error.audit_message(),
+                        context,
+                    ));
+                    return Err(error);
+                }
+            };
+
+        let central = self
+            .services
+            .lock()
+            .map_err(|_| HttpError::LockPoisoned)?
+            .execute(&namespace, |service| {
+                service
+                    .resolve_trace_handle(request.clone())
+                    .map_err(HttpError::Api)
+            });
+        let partition = if namespace == NamespaceId::default() && self.partitioned.is_some() {
+            Some(
+                self.partitioned_service()?
+                    .resolve_trace_handle(request)
+                    .map_err(HttpError::Api),
+            )
+        } else {
+            None
+        };
+        let result = match (central, partition) {
+            (central, None) => central,
+            (Ok(_), Some(Ok(_))) => Err(HttpError::Api(ApiError::Execution(
+                crate::execution::ExecutionError::Store(
+                    "trace handle collision across execution stores".into(),
+                ),
+            ))),
+            (Ok(response), Some(Err(error))) if is_unknown_trace_error(&error) => Ok(response),
+            (Ok(_), Some(Err(error))) => Err(error),
+            (Err(error), Some(Ok(response))) if is_unknown_trace_error(&error) => Ok(response),
+            (Err(error), Some(Ok(_))) => Err(error),
+            (Err(central_error), Some(Err(partition_error))) => {
+                if is_unknown_trace_error(&central_error) {
+                    Err(partition_error)
+                } else {
+                    Err(central_error)
+                }
+            }
+        };
+
+        if let Ok(response) = &result {
+            context.tuple_id = Some(response.record.local_tuple_id.0);
+            context.trace_tuple_count = Some(response.record.trace.tuples.len());
+        }
+        let status = result
+            .as_ref()
+            .map(|_| StatusCode::OK)
+            .unwrap_or_else(|error| error.status_code());
+        self.audit.record(AuditEntry::for_request(
+            "POST",
+            "/v1/explanations/resolve",
+            status,
+            &principal,
+            AuthScope::Explain,
+            context,
+        ));
+        result
     }
 
     fn audit_entries(&self, headers: &HeaderMap) -> Result<AuditLogResponse, HttpError> {
@@ -684,6 +786,7 @@ pub fn http_router_with_partitioned_options(
             post(coordination_delta_report),
         )
         .route("/v1/explain/tuple", post(explain_tuple))
+        .route("/v1/explanations/resolve", post(resolve_trace_handle))
         .route("/v1/partitions/status", get(partition_status))
         .route("/v1/partitions/promote", post(promote_replica))
         .route("/v1/partitions/append", post(partition_append))
@@ -733,6 +836,7 @@ pub fn http_router_with_options(
             post(coordination_delta_report),
         )
         .route("/v1/explain/tuple", post(explain_tuple))
+        .route("/v1/explanations/resolve", post(resolve_trace_handle))
         .route(
             "/v1/sidecars/artifacts/register",
             post(register_artifact_reference),
@@ -770,6 +874,7 @@ pub fn http_router_with_sqlite_namespaces(
             post(coordination_delta_report),
         )
         .route("/v1/explain/tuple", post(explain_tuple))
+        .route("/v1/explanations/resolve", post(resolve_trace_handle))
         .route(
             "/v1/sidecars/artifacts/register",
             post(register_artifact_reference),
@@ -809,6 +914,7 @@ pub fn http_router_with_postgres_namespaces(
             post(coordination_delta_report),
         )
         .route("/v1/explain/tuple", post(explain_tuple))
+        .route("/v1/explanations/resolve", post(resolve_trace_handle))
         .route(
             "/v1/sidecars/artifacts/register",
             post(register_artifact_reference),
@@ -962,7 +1068,8 @@ impl NamespaceServiceStore {
             }
             NamespaceServiceMode::Sqlite { data_root } => Ok(Box::new(
                 SqliteKernelService::open(namespace_sqlite_path(data_root, namespace))
-                    .map_err(HttpError::Api)?,
+                    .map_err(HttpError::Api)?
+                    .with_namespace(namespace.clone()),
             )),
             NamespaceServiceMode::Postgres {
                 database_url,
@@ -1401,26 +1508,71 @@ impl From<ApiError> for HttpError {
     }
 }
 
+fn is_unknown_trace_error(error: &HttpError) -> bool {
+    matches!(
+        error,
+        HttpError::Api(ApiError::Execution(
+            crate::execution::ExecutionError::UnknownTraceHandle
+        ))
+    )
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 struct ErrorBody {
     error: String,
+    code: &'static str,
 }
 
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         let status = self.status_code();
-        let error = match self {
-            Self::Api(error) => error.to_string(),
-            Self::Unauthorized { message, .. } | Self::Forbidden { message, .. } => message,
-            Self::LockPoisoned => "internal service state is unavailable".into(),
+        let (error, code) = match self {
+            Self::Api(error) => {
+                let code = api_error_code(&error);
+                (error.to_string(), code)
+            }
+            Self::Unauthorized { message, .. } => (message, "unauthorized"),
+            Self::Forbidden { message, .. } => (message, "forbidden"),
+            Self::LockPoisoned => (
+                "internal service state is unavailable".into(),
+                "service_state_unavailable",
+            ),
         };
 
-        (status, Json(ErrorBody { error })).into_response()
+        (status, Json(ErrorBody { error, code })).into_response()
+    }
+}
+
+fn api_error_code(error: &ApiError) -> &'static str {
+    match error {
+        ApiError::AmbiguousTupleReference => "ambiguous_tuple_reference",
+        ApiError::Execution(crate::execution::ExecutionError::MalformedTraceHandle) => {
+            "malformed_trace_handle"
+        }
+        ApiError::Execution(crate::execution::ExecutionError::UnknownTraceHandle) => {
+            "unknown_trace_handle"
+        }
+        ApiError::Execution(crate::execution::ExecutionError::ExpiredTraceHandle) => {
+            "expired_trace_handle"
+        }
+        ApiError::Execution(crate::execution::ExecutionError::InsufficientPolicy) => {
+            "insufficient_policy"
+        }
+        ApiError::Execution(_) => "execution_integrity_failure",
+        ApiError::Journal(_) => "journal_conflict",
+        ApiError::Validation(_) => "validation_error",
+        ApiError::Sidecar(_) => "sidecar_error",
+        ApiError::Resolve(_) => "resolve_error",
+        ApiError::Parse(_) => "parse_error",
+        ApiError::Compile(_) => "compile_error",
+        ApiError::Runtime(_) => "runtime_error",
+        ApiError::Explain(_) => "explain_error",
     }
 }
 
 fn status_for_api_error(error: &ApiError) -> StatusCode {
     match error {
+        ApiError::AmbiguousTupleReference => StatusCode::CONFLICT,
         ApiError::Validation(_)
         | ApiError::Sidecar(_)
         | ApiError::Resolve(_)
@@ -1429,6 +1581,21 @@ fn status_for_api_error(error: &ApiError) -> StatusCode {
         | ApiError::Runtime(_)
         | ApiError::Explain(_) => StatusCode::BAD_REQUEST,
         ApiError::Journal(_) => StatusCode::CONFLICT,
+        ApiError::Execution(error) => match error {
+            crate::execution::ExecutionError::MalformedTraceHandle => StatusCode::BAD_REQUEST,
+            crate::execution::ExecutionError::UnknownTraceHandle => StatusCode::NOT_FOUND,
+            crate::execution::ExecutionError::ExpiredTraceHandle => StatusCode::GONE,
+            crate::execution::ExecutionError::InsufficientPolicy => StatusCode::FORBIDDEN,
+            crate::execution::ExecutionError::CorruptedExecutionManifest
+            | crate::execution::ExecutionError::CorruptedTraceRecord
+            | crate::execution::ExecutionError::IncompatibleEngineSemantics
+            | crate::execution::ExecutionError::ReplayMismatch
+            | crate::execution::ExecutionError::Resolve(_)
+            | crate::execution::ExecutionError::Runtime(_)
+            | crate::execution::ExecutionError::Explain(_)
+            | crate::execution::ExecutionError::Serde(_)
+            | crate::execution::ExecutionError::Store(_) => StatusCode::CONFLICT,
+        },
     }
 }
 
@@ -2073,6 +2240,20 @@ async fn explain_tuple(
             Ok(response)
         },
     )?;
+    Ok(Json(response))
+}
+
+async fn resolve_trace_handle(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<ResolveTraceHandleRequest>,
+) -> Result<Json<crate::ResolveTraceHandleResponse>, HttpError> {
+    let request_context = AuditContext {
+        command_source: Some("http".into()),
+        selected_report: Some("trace_handle_resolve".into()),
+        ..Default::default()
+    };
+    let response = state.resolve_execution_trace(&headers, request, request_context)?;
     Ok(Json(response))
 }
 

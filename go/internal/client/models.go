@@ -201,9 +201,10 @@ type RunDocumentRequest struct {
 	PolicyContext *PolicyContext `json:"policy_context,omitempty"`
 }
 
-type ExplainTupleRequest struct {
-	TupleID       uint64         `json:"tuple_id"`
+type ResolveTraceHandleRequest struct {
+	Handle        string         `json:"handle"`
 	PolicyContext *PolicyContext `json:"policy_context,omitempty"`
+	VerifyReplay  bool           `json:"verify_replay"`
 }
 
 type HealthResponse struct {
@@ -337,7 +338,9 @@ type CoordinationDeltaReportRequest struct {
 }
 
 type CoordinationTraceHandle struct {
-	TupleID        uint64      `json:"tuple_id"`
+	ExecutionID    string      `json:"execution_id"`
+	Handle         string      `json:"handle"`
+	LocalTupleID   uint64      `json:"local_tuple_id"`
 	TupleCount     int         `json:"tuple_count"`
 	SourceDatomIDs []ElementID `json:"source_datom_ids"`
 	ParentTupleIDs []TupleID   `json:"parent_tuple_ids"`
@@ -376,8 +379,10 @@ type CoordinationDeltaReport struct {
 }
 
 type ReportRow struct {
-	TupleID *uint64 `json:"tuple_id,omitempty"`
-	Values  []Value `json:"values"`
+	TupleID     *uint64 `json:"tuple_id,omitempty"`
+	ExecutionID *string `json:"execution_id,omitempty"`
+	TraceHandle *string `json:"trace_handle,omitempty"`
+	Values      []Value `json:"values"`
 }
 
 type TraceTupleSummary struct {
@@ -389,9 +394,11 @@ type TraceTupleSummary struct {
 }
 
 type TraceSummary struct {
-	Root       uint64              `json:"root"`
-	TupleCount int                 `json:"tuple_count"`
-	Tuples     []TraceTupleSummary `json:"tuples"`
+	ExecutionID string              `json:"execution_id"`
+	Handle      string              `json:"handle"`
+	Root        uint64              `json:"root"`
+	TupleCount  int                 `json:"tuple_count"`
+	Tuples      []TraceTupleSummary `json:"tuples"`
 }
 
 type CoordinationPilotReport struct {
@@ -441,8 +448,19 @@ type DerivationTrace struct {
 	Tuples []DerivedTuple `json:"tuples"`
 }
 
-type ExplainTupleResponse struct {
-	Trace DerivationTrace `json:"trace"`
+type TraceRecord struct {
+	Handle       string          `json:"handle"`
+	ExecutionID  string          `json:"execution_id"`
+	LocalTupleID uint64          `json:"local_tuple_id"`
+	TupleDigest  string          `json:"tuple_digest"`
+	TraceDigest  string          `json:"trace_digest"`
+	Trace        DerivationTrace `json:"trace"`
+}
+
+type ResolveTraceHandleResponse struct {
+	Record          TraceRecord `json:"record"`
+	DigestsVerified bool        `json:"digests_verified"`
+	ReplayVerified  bool        `json:"replay_verified"`
 }
 
 func FormatPolicyContext(policy *PolicyContext) string {
