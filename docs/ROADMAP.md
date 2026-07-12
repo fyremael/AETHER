@@ -23,7 +23,7 @@ The active external claim during remediation is:
 | `M1` | Complete | Deterministic resolver core exists |
 | `M2` | Complete | Rule compiler and planning exist |
 | `M3` | Reopened for policy-aware execution | Recursive runtime, stratified negation, provenance, and bounded aggregation work unrestricted; policy projection must move before compilation/evaluation |
-| `M4` | Controlled-alpha boundary only | Authenticated service, reports, execution-scoped proof identity, and schema-admitted writes exist; transport and immutable release evidence remain blocked |
+| `M4` | Controlled-alpha boundary only | Authenticated service, reports, execution-scoped proof identity, schema-admitted writes, and a verified-TLS transport contract exist; hosted transport and immutable release evidence remain blocked |
 | `M5` | Complete for first boundary layer | Go shell and Python SDK are real, but still early ecosystems |
 
 R1-R3 are locally implemented and green across the workspace: policy scope is now
@@ -155,7 +155,9 @@ If the team needs a practical ordering, use this one:
 3. `R2`: execution-scoped handles implemented locally; immutable candidate evidence remains pending
 4. `R3`: transactional namespace-schema append admission implemented locally; immutable candidate evidence remains pending
 5. `R4`: immutable exact-candidate evidence implemented locally; official run and independent downloaded verification pending
-6. `R5`: harden supply chain, transport, concurrency, resource controls, and operational automation
+6. `R5`: supply-chain and transport contracts are implemented locally; complete
+   hosted evidence, concurrency isolation, client migration, resource controls,
+   and operational automation
 7. `R7`: requalify one selected commercial-beta candidate only after independent bundle verification
 8. `R6`: reorganize ownership boundaries after the repaired contracts stabilize
 

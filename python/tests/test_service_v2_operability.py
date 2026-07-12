@@ -41,9 +41,10 @@ class ServiceV2OperabilityTests(unittest.TestCase):
             REPO_ROOT / ".github" / "workflows" / "ci.yml",
             [
                 "postgres-journal",
-                "postgres:16",
-                "AETHER_POSTGRES_TEST_URL",
-                "cargo test -p aether_storage postgres_journal",
+                "scripts/ci-postgres-tls.sh",
+                "Postgres transport security matrix",
+                "cargo test -p aether_storage --lib",
+                "cargo test -p aether_storage --test postgres_tls",
                 "cargo test -p aether_api --test http_service http_service_postgres_namespaces",
             ],
         )

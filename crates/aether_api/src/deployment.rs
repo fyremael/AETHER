@@ -1,14 +1,16 @@
 use crate::{
-    http_router_with_options, http_router_with_postgres_namespaces,
+    http_router_with_options, http_router_with_postgres_namespaces_and_tls,
     http_router_with_sqlite_namespaces, sidecar::sidecar_catalog_path_for_journal, ApiError,
     AuthScope, HttpAccessToken, HttpAuthConfig, HttpKernelOptions, NamespaceId,
     NamespaceStatusSummary, PrincipalStatusSummary, ServiceMode, ServiceStatusResponse,
-    ServiceStatusStorage, SqliteKernelService,
+    ServiceStatusStorage, ServiceTransportStatus, SqliteKernelService,
 };
 use aether_ast::PolicyContext;
+use aether_storage::{PostgresTlsConfig, PostgresTlsMode};
 use serde::{Deserialize, Serialize};
 use std::{
     env, fs,
+    net::SocketAddr,
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -23,6 +25,8 @@ pub struct PilotServiceConfig {
     #[serde(default)]
     pub service_mode: ServiceMode,
     pub bind_addr: String,
+    #[serde(default)]
+    pub http_transport: PilotHttpTransportConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -46,7 +50,95 @@ pub enum PilotStorageConfig {
         #[serde(default)]
         schema: Option<String>,
         sidecar_path: PathBuf,
+        #[serde(default)]
+        tls: PostgresTlsConfig,
     },
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum PilotHttpTransportConfig {
+    #[default]
+    LoopbackPlaintext,
+    TrustedTlsIngress {
+        external_https_origin: String,
+        ingress: String,
+    },
+}
+
+impl PilotHttpTransportConfig {
+    fn resolve(self, bind_addr: &str) -> Result<ResolvedPilotHttpTransport, DeploymentError> {
+        let address = bind_addr.parse::<SocketAddr>().map_err(|error| {
+            DeploymentError::Validation(format!(
+                "pilot service bind_addr must be a socket address: {error}"
+            ))
+        })?;
+        match self {
+            Self::LoopbackPlaintext => {
+                if !address.ip().is_loopback() {
+                    return Err(DeploymentError::Validation(
+                        "plaintext AETHER HTTP must bind to loopback; expose remote HTTPS only through a trusted TLS ingress"
+                            .into(),
+                    ));
+                }
+                Ok(ResolvedPilotHttpTransport::LoopbackPlaintext)
+            }
+            Self::TrustedTlsIngress {
+                external_https_origin,
+                ingress,
+            } => {
+                let origin = external_https_origin
+                    .trim()
+                    .trim_end_matches('/')
+                    .to_string();
+                if !origin.starts_with("https://") || origin.len() <= "https://".len() {
+                    return Err(DeploymentError::Validation(
+                        "trusted_tls_ingress external_https_origin must use https://".into(),
+                    ));
+                }
+                let ingress = ingress.trim().to_string();
+                if ingress.is_empty() {
+                    return Err(DeploymentError::Validation(
+                        "trusted_tls_ingress must name the trusted ingress boundary".into(),
+                    ));
+                }
+                Ok(ResolvedPilotHttpTransport::TrustedTlsIngress {
+                    external_https_origin: origin,
+                    ingress,
+                    listener_loopback: address.ip().is_loopback(),
+                })
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ResolvedPilotHttpTransport {
+    LoopbackPlaintext,
+    TrustedTlsIngress {
+        external_https_origin: String,
+        ingress: String,
+        listener_loopback: bool,
+    },
+}
+
+impl ResolvedPilotHttpTransport {
+    fn status(&self) -> ServiceTransportStatus {
+        match self {
+            Self::LoopbackPlaintext => ServiceTransportStatus::default(),
+            Self::TrustedTlsIngress {
+                external_https_origin,
+                ingress,
+                listener_loopback,
+            } => ServiceTransportStatus {
+                http_mode: "trusted_tls_ingress".into(),
+                listener_loopback: *listener_loopback,
+                listener_tls: false,
+                external_https_origin: Some(external_https_origin.clone()),
+                trusted_ingress: Some(ingress.clone()),
+            },
+        }
+    }
 }
 
 impl PilotServiceConfig {
@@ -73,6 +165,7 @@ impl PilotServiceConfig {
                 "pilot service bind_addr must not be empty".into(),
             ));
         }
+        let http_transport = self.http_transport.resolve(&self.bind_addr)?;
 
         let storage = resolve_storage_config(config_dir, self.database_path, self.storage)?;
         let audit_log_path = self
@@ -104,6 +197,7 @@ impl PilotServiceConfig {
             schema_version: self.schema_version,
             service_mode: self.service_mode,
             bind_addr: self.bind_addr,
+            http_transport,
             database_path: storage.legacy_database_path(),
             storage,
             audit_log_path,
@@ -333,6 +427,7 @@ pub struct ResolvedPilotServiceConfig {
     pub schema_version: String,
     pub service_mode: ServiceMode,
     pub bind_addr: String,
+    pub http_transport: ResolvedPilotHttpTransport,
     pub database_path: Option<PathBuf>,
     pub storage: ResolvedPilotStorage,
     pub audit_log_path: PathBuf,
@@ -360,6 +455,7 @@ impl ResolvedPilotServiceConfig {
             bind_addr: Some(self.bind_addr.clone()),
             effective_namespace: None,
             service_mode: self.service_mode.clone(),
+            transport: self.http_transport.status(),
             storage: self.storage.status_storage(self.audit_log_path.clone()),
             active_namespace_count: 0,
             namespaces: namespace_status_from_principals(&principals),
@@ -382,6 +478,7 @@ pub enum ResolvedPilotStorage {
         database_url: String,
         schema: String,
         sidecar_path: PathBuf,
+        tls: PostgresTlsConfig,
     },
 }
 
@@ -434,6 +531,10 @@ impl ResolvedPilotStorage {
                 data_root: None,
                 postgres_schema: None,
                 postgres_url_configured: false,
+                postgres_tls_mode: None,
+                postgres_ca_certificate_count: None,
+                postgres_client_certificate_configured: None,
+                postgres_system_roots_enabled: None,
                 sidecar_mode: "sqlite_local".into(),
                 sidecar_path: Some(sidecar_path.clone()),
                 audit_log_path: Some(audit_log_path),
@@ -445,6 +546,10 @@ impl ResolvedPilotStorage {
                 data_root: Some(data_root.clone()),
                 postgres_schema: None,
                 postgres_url_configured: false,
+                postgres_tls_mode: None,
+                postgres_ca_certificate_count: None,
+                postgres_client_certificate_configured: None,
+                postgres_system_roots_enabled: None,
                 sidecar_mode: "sqlite_local_per_namespace".into(),
                 sidecar_path: None,
                 audit_log_path: Some(audit_log_path),
@@ -453,6 +558,7 @@ impl ResolvedPilotStorage {
             Self::PostgresNamespaces {
                 schema,
                 sidecar_path,
+                tls,
                 ..
             } => ServiceStatusStorage {
                 backend: "postgres".into(),
@@ -460,6 +566,10 @@ impl ResolvedPilotStorage {
                 data_root: None,
                 postgres_schema: Some(schema.clone()),
                 postgres_url_configured: true,
+                postgres_tls_mode: Some(postgres_tls_mode_label(&tls.mode).into()),
+                postgres_ca_certificate_count: Some(tls.ca_certificate_paths.len()),
+                postgres_client_certificate_configured: Some(tls.client_certificate_path.is_some()),
+                postgres_system_roots_enabled: Some(!tls.disable_system_roots),
                 sidecar_mode: "sqlite_local".into(),
                 sidecar_path: Some(sidecar_path.clone()),
                 audit_log_path: Some(audit_log_path),
@@ -554,13 +664,28 @@ fn resolve_storage_config(
             database_url_command,
             schema,
             sidecar_path,
+            mut tls,
         }) => {
             let database_url =
                 resolve_database_url(config_dir, database_url_env, database_url_command)?;
+            tls.ca_certificate_paths = tls
+                .ca_certificate_paths
+                .into_iter()
+                .map(|path| resolve_path(config_dir, &path))
+                .collect();
+            tls.client_certificate_path = tls
+                .client_certificate_path
+                .map(|path| resolve_path(config_dir, &path));
+            tls.client_private_key_path = tls
+                .client_private_key_path
+                .map(|path| resolve_path(config_dir, &path));
+            tls.validate(&database_url)
+                .map_err(|error| DeploymentError::Validation(error.to_string()))?;
             Ok(ResolvedPilotStorage::PostgresNamespaces {
                 database_url,
                 schema: schema.unwrap_or_else(|| "aether".into()),
                 sidecar_path: resolve_path(config_dir, &sidecar_path),
+                tls,
             })
         }
         None => {
@@ -605,6 +730,14 @@ fn resolve_database_url(
     } else {
         let command = database_url_command.expect("database_url_command source already validated");
         resolve_database_url_command(config_dir, &command)
+    }
+}
+
+fn postgres_tls_mode_label(mode: &PostgresTlsMode) -> &'static str {
+    match mode {
+        PostgresTlsMode::VerifyFull => "verify_full",
+        PostgresTlsMode::VerifyCa => "verify_ca",
+        PostgresTlsMode::DevelopmentPlaintext => "development_plaintext",
     }
 }
 
@@ -729,13 +862,15 @@ pub async fn serve_pilot_http_service(
             database_url,
             schema,
             sidecar_path,
+            tls,
         } => {
             axum::serve(
                 listener,
-                http_router_with_postgres_namespaces(
+                http_router_with_postgres_namespaces_and_tls(
                     database_url.clone(),
                     schema.clone(),
                     sidecar_path.clone(),
+                    tls.clone(),
                     options,
                 ),
             )
@@ -849,11 +984,12 @@ fn normalize_policy_context(policy_context: Option<PolicyContext>) -> Option<Pol
 #[cfg(test)]
 mod tests {
     use super::{
-        default_audit_log_path, DeploymentError, PilotAuthConfig, PilotServiceConfig,
-        PilotStorageConfig, PilotTokenConfig,
+        default_audit_log_path, DeploymentError, PilotAuthConfig, PilotHttpTransportConfig,
+        PilotServiceConfig, PilotStorageConfig, PilotTokenConfig,
     };
     use crate::{AuthScope, NamespaceId, ServiceMode};
     use aether_ast::PolicyContext;
+    use aether_storage::PostgresTlsConfig;
     use std::{
         fs,
         path::PathBuf,
@@ -873,6 +1009,7 @@ mod tests {
             schema_version: "v1".into(),
             service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
+            http_transport: PilotHttpTransportConfig::default(),
             database_path: Some(PathBuf::from("../data/coordination.sqlite")),
             storage: None,
             audit_log_path: None,
@@ -927,6 +1064,7 @@ mod tests {
             schema_version: "v2".into(),
             service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
+            http_transport: PilotHttpTransportConfig::default(),
             database_path: None,
             storage: Some(PilotStorageConfig::Sqlite {
                 data_root: PathBuf::from("../data"),
@@ -1009,12 +1147,14 @@ mod tests {
             schema_version: "v2".into(),
             service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
+            http_transport: PilotHttpTransportConfig::default(),
             database_path: None,
             storage: Some(PilotStorageConfig::Postgres {
                 database_url_env: Some(env_name.clone()),
                 database_url_command: None,
                 schema: Some("partner".into()),
                 sidecar_path: PathBuf::from("../data/sidecars.sqlite"),
+                tls: PostgresTlsConfig::default(),
             }),
             audit_log_path: None,
             auth: PilotAuthConfig {
@@ -1044,12 +1184,113 @@ mod tests {
         assert_eq!(status.storage.postgres_schema.as_deref(), Some("partner"));
         assert!(status.storage.postgres_url_configured);
         assert_eq!(
+            status.storage.postgres_tls_mode.as_deref(),
+            Some("verify_full")
+        );
+        assert_eq!(status.storage.postgres_ca_certificate_count, Some(0));
+        assert_eq!(
+            status.storage.postgres_client_certificate_configured,
+            Some(false)
+        );
+        assert_eq!(status.storage.postgres_system_roots_enabled, Some(true));
+        assert_eq!(
             status.storage.sidecar_path,
             Some(root.join("data").join("sidecars.sqlite"))
         );
         let serialized = serde_json::to_string(&status).expect("serialize status");
         assert!(!serialized.contains("secret@example"));
+        assert!(!serialized.contains("database_url"));
         assert_eq!(status.principals[0].namespaces, vec!["acme"]);
+    }
+
+    #[test]
+    fn rejects_non_loopback_http_listener_without_a_native_tls_listener() {
+        let error =
+            minimal_service_config("0.0.0.0:3000", PilotHttpTransportConfig::LoopbackPlaintext)
+                .resolve("pilot-service.json")
+                .expect_err("non-loopback plaintext listener must fail closed");
+        assert!(matches!(
+            error,
+            DeploymentError::Validation(message)
+                if message.contains("must bind to loopback")
+        ));
+    }
+
+    #[test]
+    fn trusted_tls_ingress_requires_https_and_reports_only_non_secret_state() {
+        let invalid = minimal_service_config(
+            "127.0.0.1:3000",
+            PilotHttpTransportConfig::TrustedTlsIngress {
+                external_https_origin: "http://aether.example".into(),
+                ingress: "edge-gateway".into(),
+            },
+        )
+        .resolve("pilot-service.json")
+        .expect_err("HTTP ingress origin must fail");
+        assert!(matches!(
+            invalid,
+            DeploymentError::Validation(message)
+                if message.contains("must use https://")
+        ));
+
+        let resolved = minimal_service_config(
+            "127.0.0.1:3000",
+            PilotHttpTransportConfig::TrustedTlsIngress {
+                external_https_origin: "https://aether.example/".into(),
+                ingress: "edge-gateway".into(),
+            },
+        )
+        .resolve("pilot-service.json")
+        .expect("trusted TLS ingress");
+        let status = resolved.service_status();
+        assert_eq!(status.transport.http_mode, "trusted_tls_ingress");
+        assert!(status.transport.listener_loopback);
+        assert!(!status.transport.listener_tls);
+        assert_eq!(
+            status.transport.external_https_origin.as_deref(),
+            Some("https://aether.example")
+        );
+        assert_eq!(
+            status.transport.trusted_ingress.as_deref(),
+            Some("edge-gateway")
+        );
+    }
+
+    #[test]
+    fn postgres_plaintext_downgrade_is_rejected_for_remote_hosts() {
+        let root = unique_temp_dir("pilot-postgres-plaintext-reject");
+        let env_name = format!(
+            "AETHER_TEST_DATABASE_URL_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        );
+        std::env::set_var(
+            &env_name,
+            "postgres://aether:secret@db.internal/aether?sslmode=disable",
+        );
+        let mut config = minimal_service_config(
+            "127.0.0.1:3000",
+            PilotHttpTransportConfig::LoopbackPlaintext,
+        );
+        config.database_path = None;
+        config.storage = Some(PilotStorageConfig::Postgres {
+            database_url_env: Some(env_name.clone()),
+            database_url_command: None,
+            schema: Some("aether".into()),
+            sidecar_path: root.join("sidecars.sqlite"),
+            tls: PostgresTlsConfig::development_plaintext(),
+        });
+        let error = config
+            .resolve(root.join("pilot-service.json"))
+            .expect_err("remote plaintext must fail closed");
+        std::env::remove_var(env_name);
+        assert!(matches!(
+            error,
+            DeploymentError::Validation(message)
+                if message.contains("restricted to literal loopback")
+        ));
     }
 
     #[test]
@@ -1059,6 +1300,7 @@ mod tests {
             schema_version: "v1".into(),
             service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
+            http_transport: PilotHttpTransportConfig::default(),
             database_path: Some(PathBuf::from("coordination.sqlite")),
             storage: None,
             audit_log_path: None,
@@ -1099,6 +1341,7 @@ mod tests {
             schema_version: "v1".into(),
             service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
+            http_transport: PilotHttpTransportConfig::default(),
             database_path: Some(PathBuf::from("coordination.sqlite")),
             storage: None,
             audit_log_path: None,
@@ -1135,6 +1378,7 @@ mod tests {
             schema_version: "v1".into(),
             service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
+            http_transport: PilotHttpTransportConfig::default(),
             database_path: Some(PathBuf::from("coordination.sqlite")),
             storage: None,
             audit_log_path: None,
@@ -1178,6 +1422,7 @@ mod tests {
             schema_version: "v1".into(),
             service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
+            http_transport: PilotHttpTransportConfig::default(),
             database_path: Some(PathBuf::from("coordination.sqlite")),
             storage: None,
             audit_log_path: None,
@@ -1217,6 +1462,7 @@ mod tests {
             schema_version: "v1".into(),
             service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
+            http_transport: PilotHttpTransportConfig::default(),
             database_path: Some(PathBuf::from("coordination.sqlite")),
             storage: None,
             audit_log_path: None,
@@ -1250,6 +1496,39 @@ mod tests {
                 ..
             } if principal == "pilot-operator" && stderr.contains("hard failure")
         ));
+    }
+
+    fn minimal_service_config(
+        bind_addr: &str,
+        http_transport: PilotHttpTransportConfig,
+    ) -> PilotServiceConfig {
+        PilotServiceConfig {
+            config_version: "pilot-v2".into(),
+            schema_version: "v2".into(),
+            service_mode: ServiceMode::SingleNode,
+            bind_addr: bind_addr.into(),
+            http_transport,
+            database_path: Some(PathBuf::from("coordination.sqlite")),
+            storage: None,
+            audit_log_path: None,
+            auth: PilotAuthConfig {
+                tokens: vec![PilotTokenConfig {
+                    principal: "operator".into(),
+                    principal_id: Some("principal:operator".into()),
+                    token_id: Some("token:operator".into()),
+                    scopes: vec![AuthScope::Ops],
+                    policy_context: None,
+                    token: Some("test-only-token".into()),
+                    token_env: None,
+                    token_file: None,
+                    token_command: None,
+                    namespaces: Vec::new(),
+                    revoked: false,
+                }],
+                revoked_token_ids: Vec::new(),
+                revoked_principal_ids: Vec::new(),
+            },
+        }
     }
 
     fn token_command_fixture(token: &str) -> Vec<String> {

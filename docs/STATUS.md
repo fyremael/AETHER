@@ -170,6 +170,16 @@ Completed:
   packaged file; pinned cargo-audit, govulncheck, Trivy, Gitleaks, CodeQL,
   provenance/SBOM attestations, immutable Actions/images, and Dependabot are
   wired into the Supply Chain workflow, pending a successful hosted exact-SHA run
+- Postgres now defaults to forced `verify_full` TLS, supports explicit
+  `verify_ca`, CA bundles and optional mTLS identity, and permits plaintext only
+  through an explicit literal-loopback development mode; the HTTP config rejects
+  non-loopback plaintext unless it declares a trusted `https://` ingress boundary
+- non-secret service status exposes transport mode, trust-root posture, CA count,
+  and client-certificate presence without database URLs, certificate/key paths,
+  or key material; the exact-digest local Postgres fixtures pass trusted CA,
+  hostname mismatch, explicit `verify_ca`, untrusted/expired certificate, no-
+  downgrade, mTLS, and two-CA rotation tests, while the hosted exact-SHA run is
+  still pending
 - the existing beta-candidate runner remains available for diagnostics, but it does not qualify a commercial beta until R4 replaces authored/path-based readiness with exact-candidate immutable evidence
 - the commercial readiness ledger now targets controlled design-partner alpha; commercial beta is blocked by six non-waivable remediation gates, and GA remains blocked by its separate release, support/security, distribution, and distributed-truth gates
 - a repeatable perturbation sweep now exists to run the persona pass, full-stack benchmark snapshot, host-aware drift checks, deeper ignored stress workloads, and single-node capacity projections in one artifact pack
@@ -185,7 +195,8 @@ Still open:
 - hosted confirmation that the new dependency/package supply-chain workflow,
   CodeQL, secret scanning, attestations, and protected repository controls pass
   for the exact candidate SHA
-- a supported transport-security boundary for remote Postgres and non-loopback HTTP
+- hosted confirmation that the verified-TLS Postgres matrix passes for the exact
+  candidate and that the supported ingress prevents direct backend reachability
 - post-v1 DSL ergonomics and document modularity beyond the current canonical surface
 - production hardening for the optional Postgres journal deployment path beyond current parity/concurrency coverage
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary

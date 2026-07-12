@@ -111,6 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             bind_addr: Some(bind_addr.to_string()),
             effective_namespace: None,
             service_mode: ServiceMode::Partitioned,
+            transport: aether_api::ServiceTransportStatus::default(),
             storage: ServiceStatusStorage {
                 database_path: None,
                 sidecar_path: None,

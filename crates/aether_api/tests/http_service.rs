@@ -1,6 +1,6 @@
 use aether_api::{
     coordination_pilot_dsl, coordination_pilot_seed_history, http_router, http_router_with_options,
-    http_router_with_partitioned_options, http_router_with_postgres_namespaces,
+    http_router_with_partitioned_options, http_router_with_postgres_namespaces_and_tls,
     http_router_with_sqlite_namespaces, ActivateSchemaRequest, AppendAdmissionRequest,
     AppendDryRunResponse, AppendReceipt, AppendRequest, AuditEntry, AuditLogResponse, AuthScope,
     AuthorityPartitionConfig, CoordinationCut, CoordinationDeltaReport,
@@ -902,6 +902,7 @@ async fn http_service_exposes_status_and_supports_auth_reload() {
         schema_version: "test-schema-v1".into(),
         service_mode: ServiceMode::SingleNode,
         bind_addr: "127.0.0.1:0".into(),
+        http_transport: aether_api::PilotHttpTransportConfig::default(),
         database_path: Some(database_path.clone()),
         storage: None,
         audit_log_path: Some(audit_path.clone()),
@@ -1755,6 +1756,7 @@ async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
             bind_addr: None,
             effective_namespace: None,
             service_mode: ServiceMode::Partitioned,
+            transport: aether_api::ServiceTransportStatus::default(),
             storage: aether_api::ServiceStatusStorage {
                 database_path: None,
                 sidecar_path: None,
@@ -2905,8 +2907,21 @@ async fn spawn_postgres_namespace_server(
         .expect("bind postgres namespace test listener");
     let address = listener.local_addr().expect("listener address");
     let server = tokio::spawn(async move {
-        let router =
-            http_router_with_postgres_namespaces(database_url, schema, sidecar_path, options);
+        let tls = std::env::var("AETHER_POSTGRES_TLS_CA")
+            .ok()
+            .map(|ca| aether_storage::PostgresTlsConfig {
+                ca_certificate_paths: vec![ca.into()],
+                disable_system_roots: true,
+                ..Default::default()
+            })
+            .unwrap_or_default();
+        let router = http_router_with_postgres_namespaces_and_tls(
+            database_url,
+            schema,
+            sidecar_path,
+            tls,
+            options,
+        );
         axum::serve(listener, router)
             .await
             .expect("serve postgres namespace http kernel");

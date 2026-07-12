@@ -22,6 +22,14 @@ pub struct ServiceStatusStorage {
     pub postgres_schema: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub postgres_url_configured: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub postgres_tls_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub postgres_ca_certificate_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub postgres_client_certificate_configured: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub postgres_system_roots_enabled: Option<bool>,
     #[serde(default = "default_sidecar_mode")]
     pub sidecar_mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -40,6 +48,10 @@ impl Default for ServiceStatusStorage {
             data_root: None,
             postgres_schema: None,
             postgres_url_configured: false,
+            postgres_tls_mode: None,
+            postgres_ca_certificate_count: None,
+            postgres_client_certificate_configured: None,
+            postgres_system_roots_enabled: None,
             sidecar_mode: default_sidecar_mode(),
             sidecar_path: None,
             audit_log_path: None,
@@ -92,6 +104,8 @@ pub struct ServiceStatusResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_namespace: Option<String>,
     pub service_mode: ServiceMode,
+    #[serde(default)]
+    pub transport: ServiceTransportStatus,
     pub storage: ServiceStatusStorage,
     #[serde(default)]
     pub active_namespace_count: usize,
@@ -122,11 +136,35 @@ impl ServiceStatusResponse {
             bind_addr: None,
             effective_namespace: None,
             service_mode: ServiceMode::SingleNode,
+            transport: ServiceTransportStatus::default(),
             storage: ServiceStatusStorage::default(),
             active_namespace_count: 1,
             namespaces: Vec::new(),
             principals: Vec::new(),
             replicas: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ServiceTransportStatus {
+    pub http_mode: String,
+    pub listener_loopback: bool,
+    pub listener_tls: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_https_origin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trusted_ingress: Option<String>,
+}
+
+impl Default for ServiceTransportStatus {
+    fn default() -> Self {
+        Self {
+            http_mode: "loopback_plaintext".into(),
+            listener_loopback: true,
+            listener_tls: false,
+            external_https_origin: None,
+            trusted_ingress: None,
         }
     }
 }

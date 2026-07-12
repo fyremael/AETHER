@@ -6,6 +6,25 @@ operational evidence source.
 
 This guide is for people running AETHER demonstrations, capturing reports, or presenting the project to others.
 
+## Transport and certificate rotation
+
+Remote Postgres uses `verify_full` by default. Configure one or more CA PEM
+paths and, for mTLS, a PEM client certificate plus PKCS #8 PEM key. Never put
+private-key bytes or database URLs in status, logs, or evidence envelopes.
+
+For CA rotation, first deploy a trust bundle containing both old and new CA
+files, prove both endpoints, rotate the server/client certificates, and only
+then remove the old CA after every supported client has crossed the transition.
+A failed TLS handshake is an incident; do not change the mode to
+`development_plaintext`. That mode is accepted only on literal loopback/Unix
+development paths.
+
+The HTTP service is either loopback-only plaintext or an explicitly declared
+backend behind a trusted HTTPS ingress. For ingress mode, network policy must
+prevent direct access to the backend listener. Rotate ingress certificates with
+an overlap window and verify the declared external `https://` origin before
+retiring the old certificate.
+
 It assumes you are not trying to extend the kernel. It assumes you want the cleanest path to showing what the system already does.
 
 ## The Short Version

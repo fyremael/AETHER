@@ -3,6 +3,9 @@
   "schema_version": "v1",
   "service_mode": "single_node",
   "bind_addr": "127.0.0.1:3000",
+  "http_transport": {
+    "mode": "loopback_plaintext"
+  },
   "database_path": "../data/coordination.sqlite",
   "audit_log_path": "../logs/audit.jsonl",
   "auth": {

@@ -82,7 +82,12 @@ ordinary feature backlog:
   vulnerability, license, secret, package, and supported-language CodeQL gates
   are implemented. Commercial beta remains blocked until those hosted gates,
   attestations, and repository protection settings pass for the exact candidate.
-- The optional Postgres journal uses plaintext `NoTls`, and a supported non-loopback HTTP TLS/ingress boundary is not yet enforced. Remote Postgres and non-loopback HTTP are outside the controlled-alpha claim.
+- The optional Postgres journal now defaults to forced `verify_full`, with explicit
+  `verify_ca`, CA-bundle, mTLS, and loopback-only development plaintext modes.
+  Non-loopback HTTP requires an explicitly named trusted HTTPS ingress. The local
+  contract and negative tests pass, but remote Postgres/non-loopback HTTP remain
+  outside the controlled-alpha claim until the hosted real-TLS matrix and ingress
+  isolation evidence pass for the exact candidate.
 - The new QA hardening workflow is intentionally non-blocking in phase one. It is a diagnostic program for surfacing admin, operator, user, and exec defects before stable subchecks are promoted into `CI` or release-readiness.
 - The repository now has a responsible-disclosure policy, but it is not yet advertising a paid public bug bounty.
 - Memory figures in the performance report are structural lower-bound estimates rather than allocator-exact telemetry.

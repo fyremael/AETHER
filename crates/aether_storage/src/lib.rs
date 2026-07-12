@@ -1,5 +1,7 @@
 use aether_ast::{Datom, ElementId};
-use postgres::{Client, NoTls};
+use native_tls::{Certificate, Identity, Protocol, TlsConnector};
+use postgres::{config::Host, Client, Config as PostgresConfig, NoTls};
+use postgres_native_tls::MakeTlsConnector;
 use rusqlite::{params, Connection, ErrorCode, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -8,6 +10,7 @@ use std::{
     collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 use thiserror::Error;
 
@@ -87,6 +90,95 @@ pub struct StoredSchemaRevision {
     pub predecessor_version: Option<String>,
     pub compatibility: String,
     pub status: String,
+}
+
+/// The only PostgreSQL transport modes accepted by the authoritative journal.
+///
+/// `VerifyFull` is the production default. `DevelopmentPlaintext` is an
+/// explicit escape hatch restricted to literal loopback endpoints and Unix
+/// sockets; it never falls back from a failed TLS handshake.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PostgresTlsMode {
+    #[default]
+    VerifyFull,
+    VerifyCa,
+    DevelopmentPlaintext,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PostgresTlsConfig {
+    #[serde(default)]
+    pub mode: PostgresTlsMode,
+    #[serde(default)]
+    pub ca_certificate_paths: Vec<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_certificate_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_private_key_path: Option<PathBuf>,
+    #[serde(default)]
+    pub disable_system_roots: bool,
+}
+
+impl PostgresTlsConfig {
+    pub fn development_plaintext() -> Self {
+        Self {
+            mode: PostgresTlsMode::DevelopmentPlaintext,
+            ..Self::default()
+        }
+    }
+
+    pub fn validate(&self, database_url: &str) -> Result<(), JournalError> {
+        let config = PostgresConfig::from_str(database_url).map_err(JournalError::Postgres)?;
+        let client_pair_complete =
+            self.client_certificate_path.is_some() == self.client_private_key_path.is_some();
+        if !client_pair_complete {
+            return Err(JournalError::InvalidTlsConfiguration(
+                "client_certificate_path and client_private_key_path must be configured together"
+                    .into(),
+            ));
+        }
+        match self.mode {
+            PostgresTlsMode::DevelopmentPlaintext => {
+                if !self.ca_certificate_paths.is_empty()
+                    || self.client_certificate_path.is_some()
+                    || self.disable_system_roots
+                {
+                    return Err(JournalError::InvalidTlsConfiguration(
+                        "development_plaintext cannot declare CA, client identity, or root-store options"
+                            .into(),
+                    ));
+                }
+                if !postgres_hosts_are_loopback(&config) {
+                    return Err(JournalError::PlaintextPostgresForbidden);
+                }
+            }
+            PostgresTlsMode::VerifyFull | PostgresTlsMode::VerifyCa => {
+                if self.disable_system_roots && self.ca_certificate_paths.is_empty() {
+                    return Err(JournalError::InvalidTlsConfiguration(
+                        "TLS with system roots disabled requires at least one CA certificate"
+                            .into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn postgres_hosts_are_loopback(config: &PostgresConfig) -> bool {
+    let hosts = config.get_hosts();
+    hosts.is_empty()
+        || hosts.iter().all(|host| match host {
+            Host::Tcp(host) => {
+                host.eq_ignore_ascii_case("localhost")
+                    || host
+                        .parse::<std::net::IpAddr>()
+                        .is_ok_and(|address| address.is_loopback())
+            }
+            #[cfg(unix)]
+            Host::Unix(_) => true,
+        })
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -591,14 +683,42 @@ impl Journal for SqliteJournal {
 }
 
 impl PostgresJournal {
+    /// Opens a production PostgreSQL journal using certificate and hostname
+    /// verification against the platform trust store.
     pub fn open(
         database_url: &str,
         schema: impl Into<String>,
         namespace: impl Into<String>,
     ) -> Result<Self, JournalError> {
+        Self::open_with_tls(
+            database_url,
+            schema,
+            namespace,
+            &PostgresTlsConfig::default(),
+        )
+    }
+
+    pub fn open_with_tls(
+        database_url: &str,
+        schema: impl Into<String>,
+        namespace: impl Into<String>,
+        tls: &PostgresTlsConfig,
+    ) -> Result<Self, JournalError> {
         let schema = validate_pg_identifier(&schema.into())?;
         let namespace = namespace.into();
-        let mut client = Client::connect(database_url, NoTls)?;
+        tls.validate(database_url)?;
+        let mut config = PostgresConfig::from_str(database_url)?;
+        let mut client = match tls.mode {
+            PostgresTlsMode::DevelopmentPlaintext => {
+                config.ssl_mode(postgres::config::SslMode::Disable);
+                config.connect(NoTls)?
+            }
+            PostgresTlsMode::VerifyFull | PostgresTlsMode::VerifyCa => {
+                config.ssl_mode(postgres::config::SslMode::Require);
+                let connector = postgres_tls_connector(tls)?;
+                config.connect(connector)?
+            }
+        };
         initialize_postgres_schema(&mut client, &schema)?;
         Ok(Self {
             client: RefCell::new(client),
@@ -622,6 +742,58 @@ impl PostgresJournal {
             quote_pg_identifier(table)
         )
     }
+}
+
+fn postgres_tls_connector(tls: &PostgresTlsConfig) -> Result<MakeTlsConnector, JournalError> {
+    let mut builder = TlsConnector::builder();
+    builder.min_protocol_version(Some(Protocol::Tlsv12));
+    builder.disable_built_in_roots(tls.disable_system_roots);
+    if matches!(tls.mode, PostgresTlsMode::VerifyCa) {
+        // verify_ca intentionally verifies certificate validity and trust while
+        // omitting hostname matching. This is never selected automatically.
+        builder.danger_accept_invalid_hostnames(true);
+    }
+    for path in &tls.ca_certificate_paths {
+        let pem = fs::read(path).map_err(|source| JournalError::TlsFile {
+            kind: "CA certificate",
+            path: path.clone(),
+            source,
+        })?;
+        let certificate =
+            Certificate::from_pem(&pem).map_err(|source| JournalError::InvalidTlsMaterial {
+                kind: "CA certificate",
+                source,
+            })?;
+        builder.add_root_certificate(certificate);
+    }
+    if let (Some(certificate_path), Some(private_key_path)) =
+        (&tls.client_certificate_path, &tls.client_private_key_path)
+    {
+        let certificate = fs::read(certificate_path).map_err(|source| JournalError::TlsFile {
+            kind: "client certificate",
+            path: certificate_path.clone(),
+            source,
+        })?;
+        let private_key = fs::read(private_key_path).map_err(|source| JournalError::TlsFile {
+            kind: "client private key",
+            path: PathBuf::from("<redacted>"),
+            source,
+        })?;
+        let identity = Identity::from_pkcs8(&certificate, &private_key).map_err(|source| {
+            JournalError::InvalidTlsMaterial {
+                kind: "client identity",
+                source,
+            }
+        })?;
+        builder.identity(identity);
+    }
+    let connector = builder
+        .build()
+        .map_err(|source| JournalError::InvalidTlsMaterial {
+            kind: "TLS connector",
+            source,
+        })?;
+    Ok(MakeTlsConnector::new(connector))
 }
 
 impl Journal for PostgresJournal {
@@ -1306,6 +1478,25 @@ pub enum JournalError {
     Sqlite(#[from] rusqlite::Error),
     #[error(transparent)]
     Postgres(#[from] postgres::Error),
+    #[error("invalid PostgreSQL TLS configuration: {0}")]
+    InvalidTlsConfiguration(String),
+    #[error(
+        "plaintext PostgreSQL is development-only and restricted to literal loopback endpoints"
+    )]
+    PlaintextPostgresForbidden,
+    #[error("failed to read {kind} at {path}: {source}")]
+    TlsFile {
+        kind: &'static str,
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("invalid {kind}: {source}")]
+    InvalidTlsMaterial {
+        kind: &'static str,
+        #[source]
+        source: native_tls::Error,
+    },
     #[error("invalid postgres identifier {0}")]
     InvalidPostgresIdentifier(String),
     #[error(transparent)]
@@ -1315,9 +1506,78 @@ pub enum JournalError {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppendReceiptDraft, InMemoryJournal, Journal, JournalError, PostgresJournal, SqliteJournal,
-        StoredSchemaRevision,
+        AppendReceiptDraft, InMemoryJournal, Journal, JournalError, PostgresJournal,
+        PostgresTlsConfig, PostgresTlsMode, SqliteJournal, StoredSchemaRevision,
     };
+
+    #[test]
+    fn postgres_tls_defaults_to_verify_full() {
+        let tls = PostgresTlsConfig::default();
+        assert_eq!(tls.mode, PostgresTlsMode::VerifyFull);
+        tls.validate("postgres://aether@example.invalid/aether")
+            .expect("production TLS configuration");
+    }
+
+    #[test]
+    fn development_plaintext_is_restricted_to_literal_loopback() {
+        let tls = PostgresTlsConfig::development_plaintext();
+        tls.validate("postgres://aether@127.0.0.1/aether?sslmode=require")
+            .expect("explicit loopback development mode");
+        tls.validate("postgres://aether@localhost/aether")
+            .expect("localhost development mode");
+        assert!(matches!(
+            tls.validate("postgres://aether@db.internal/aether?sslmode=disable"),
+            Err(JournalError::PlaintextPostgresForbidden)
+        ));
+    }
+
+    #[test]
+    fn postgres_tls_rejects_partial_client_identity_and_empty_private_roots() {
+        let partial_identity = PostgresTlsConfig {
+            client_certificate_path: Some(PathBuf::from("client.pem")),
+            ..PostgresTlsConfig::default()
+        };
+        assert!(matches!(
+            partial_identity.validate("postgres://aether@example.invalid/aether"),
+            Err(JournalError::InvalidTlsConfiguration(message))
+                if message.contains("configured together")
+        ));
+
+        let no_roots = PostgresTlsConfig {
+            disable_system_roots: true,
+            ..PostgresTlsConfig::default()
+        };
+        assert!(matches!(
+            no_roots.validate("postgres://aether@example.invalid/aether"),
+            Err(JournalError::InvalidTlsConfiguration(message))
+                if message.contains("at least one CA")
+        ));
+    }
+
+    #[test]
+    fn verify_ca_and_two_ca_rotation_are_explicit_valid_modes() {
+        let tls = PostgresTlsConfig {
+            mode: PostgresTlsMode::VerifyCa,
+            ca_certificate_paths: vec![PathBuf::from("old-ca.pem"), PathBuf::from("new-ca.pem")],
+            disable_system_roots: true,
+            ..PostgresTlsConfig::default()
+        };
+        tls.validate("postgres://aether@example.invalid/aether")
+            .expect("two-CA rotation configuration");
+        assert_eq!(tls.ca_certificate_paths.len(), 2);
+    }
+
+    #[test]
+    fn private_key_read_errors_are_redacted() {
+        let error = JournalError::TlsFile {
+            kind: "client private key",
+            path: PathBuf::from("<redacted>"),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "missing"),
+        };
+        let rendered = error.to_string();
+        assert!(rendered.contains("<redacted>"));
+        assert!(!rendered.contains("secret-client-key.pem"));
+    }
     use aether_ast::{
         AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, ReplicaId, Value,
     };
@@ -1671,7 +1931,7 @@ mod tests {
         };
         let namespace = unique_postgres_namespace("restart");
         {
-            let mut journal = PostgresJournal::open(&database_url, "aether_test", &namespace)
+            let mut journal = open_test_postgres(&database_url, "aether_test", &namespace)
                 .expect("open postgres journal");
             journal
                 .append(&[
@@ -1682,7 +1942,7 @@ mod tests {
                 .expect("append postgres entries");
         }
 
-        let journal = PostgresJournal::open(&database_url, "aether_test", &namespace)
+        let journal = open_test_postgres(&database_url, "aether_test", &namespace)
             .expect("reopen postgres journal");
         let history = journal.history().expect("history");
         assert_eq!(
@@ -1701,9 +1961,9 @@ mod tests {
         };
         let left_namespace = unique_postgres_namespace("left");
         let right_namespace = unique_postgres_namespace("right");
-        let mut left = PostgresJournal::open(&database_url, "aether_test", left_namespace)
+        let mut left = open_test_postgres(&database_url, "aether_test", left_namespace)
             .expect("open left postgres journal");
-        let mut right = PostgresJournal::open(&database_url, "aether_test", right_namespace)
+        let mut right = open_test_postgres(&database_url, "aether_test", right_namespace)
             .expect("open right postgres journal");
 
         left.append(&[sample_datom(1, "left")])
@@ -1727,9 +1987,8 @@ mod tests {
         let barrier = Arc::new(Barrier::new(4));
         let mut handles = Vec::new();
         for offset in 0..4 {
-            let mut journal =
-                PostgresJournal::open(&database_url, "aether_test", namespace.clone())
-                    .expect("open postgres journal");
+            let mut journal = open_test_postgres(&database_url, "aether_test", namespace.clone())
+                .expect("open postgres journal");
             let barrier = Arc::clone(&barrier);
             handles.push(thread::spawn(move || {
                 barrier.wait();
@@ -1742,7 +2001,7 @@ mod tests {
             handle.join().expect("join concurrent append");
         }
 
-        let journal = PostgresJournal::open(&database_url, "aether_test", namespace)
+        let journal = open_test_postgres(&database_url, "aether_test", namespace)
             .expect("reopen postgres journal");
         let history = journal.history().expect("history");
         assert_eq!(history.len(), 4);
@@ -1765,9 +2024,8 @@ mod tests {
         };
         let namespace = unique_postgres_namespace("append_activation_race");
         let initial = {
-            let mut journal =
-                PostgresJournal::open(&database_url, "aether_test", namespace.clone())
-                    .expect("open postgres journal");
+            let mut journal = open_test_postgres(&database_url, "aether_test", namespace.clone())
+                .expect("open postgres journal");
             journal
                 .register_schema_revision(&stored_schema("v1", "schema-digest"))
                 .expect("register v1");
@@ -1786,7 +2044,7 @@ mod tests {
         let append_cut = initial.clone();
         let append_barrier = barrier.clone();
         let append = thread::spawn(move || {
-            let mut journal = PostgresJournal::open(&append_url, "aether_test", append_namespace)
+            let mut journal = open_test_postgres(&append_url, "aether_test", append_namespace)
                 .expect("open append connection");
             append_barrier.wait();
             journal.append_if_cut(
@@ -1798,7 +2056,7 @@ mod tests {
         let activation_cut = initial;
         let activation_barrier = barrier.clone();
         let activation = thread::spawn(move || {
-            let mut journal = PostgresJournal::open(&database_url, "aether_test", namespace)
+            let mut journal = open_test_postgres(&database_url, "aether_test", namespace)
                 .expect("open activation connection");
             activation_barrier.wait();
             journal.activate_schema_revision(
@@ -1824,6 +2082,23 @@ mod tests {
             .ok()
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
+    }
+
+    fn open_test_postgres(
+        database_url: &str,
+        schema: &str,
+        namespace: impl Into<String>,
+    ) -> Result<PostgresJournal, JournalError> {
+        if let Ok(ca) = std::env::var("AETHER_POSTGRES_TLS_CA") {
+            let tls = PostgresTlsConfig {
+                ca_certificate_paths: vec![PathBuf::from(ca)],
+                disable_system_roots: true,
+                ..PostgresTlsConfig::default()
+            };
+            PostgresJournal::open_with_tls(database_url, schema, namespace, &tls)
+        } else {
+            PostgresJournal::open(database_url, schema, namespace)
+        }
     }
 
     fn unique_postgres_namespace(name: &str) -> String {

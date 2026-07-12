@@ -97,13 +97,31 @@ fn postgres_append_admission_contract_when_configured() {
             .as_nanos(),
         unique
     );
-    let service =
-        PostgresKernelService::open_postgres(&database_url, "aether_test", &namespace, temp.path())
-            .expect("open postgres admission service");
+    let tls = std::env::var("AETHER_POSTGRES_TLS_CA")
+        .ok()
+        .map(|ca| aether_storage::PostgresTlsConfig {
+            ca_certificate_paths: vec![ca.into()],
+            disable_system_roots: true,
+            ..Default::default()
+        })
+        .unwrap_or_default();
+    let service = PostgresKernelService::open_postgres_with_tls(
+        &database_url,
+        "aether_test",
+        &namespace,
+        temp.path(),
+        &tls,
+    )
+    .expect("open postgres admission service");
     admission_contract(service);
-    let service =
-        PostgresKernelService::open_postgres(&database_url, "aether_test", &namespace, temp.path())
-            .expect("reopen postgres admission service");
+    let service = PostgresKernelService::open_postgres_with_tls(
+        &database_url,
+        "aether_test",
+        &namespace,
+        temp.path(),
+        &tls,
+    )
+    .expect("reopen postgres admission service");
     assert_eq!(
         service.append_receipts().expect("postgres receipts").len(),
         2

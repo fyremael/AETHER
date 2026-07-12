@@ -12,6 +12,7 @@ use crate::{
     SqliteKernelService,
 };
 use aether_ast::PolicyContext;
+use aether_storage::PostgresTlsConfig;
 use axum::{
     extract::State,
     http::{header::AUTHORIZATION, HeaderMap, StatusCode},
@@ -82,8 +83,24 @@ impl HttpKernelState {
         sidecar_path: impl Into<PathBuf>,
         options: HttpKernelOptions,
     ) -> Self {
+        Self::with_postgres_namespaces_and_tls(
+            database_url,
+            schema,
+            sidecar_path,
+            PostgresTlsConfig::default(),
+            options,
+        )
+    }
+
+    pub fn with_postgres_namespaces_and_tls(
+        database_url: impl Into<String>,
+        schema: impl Into<String>,
+        sidecar_path: impl Into<PathBuf>,
+        tls: PostgresTlsConfig,
+        options: HttpKernelOptions,
+    ) -> Self {
         Self::with_service_store(
-            NamespaceServiceStore::postgres(database_url, schema, sidecar_path),
+            NamespaceServiceStore::postgres(database_url, schema, sidecar_path, tls),
             None,
             options,
         )
@@ -910,6 +927,22 @@ pub fn http_router_with_postgres_namespaces(
     sidecar_path: impl Into<PathBuf>,
     options: HttpKernelOptions,
 ) -> Router {
+    http_router_with_postgres_namespaces_and_tls(
+        database_url,
+        schema,
+        sidecar_path,
+        PostgresTlsConfig::default(),
+        options,
+    )
+}
+
+pub fn http_router_with_postgres_namespaces_and_tls(
+    database_url: impl Into<String>,
+    schema: impl Into<String>,
+    sidecar_path: impl Into<PathBuf>,
+    tls: PostgresTlsConfig,
+    options: HttpKernelOptions,
+) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/v1/status", get(service_status))
@@ -946,10 +979,11 @@ pub fn http_router_with_postgres_namespaces(
             post(register_vector_record),
         )
         .route("/v1/sidecars/vectors/search", post(search_vectors))
-        .with_state(HttpKernelState::with_postgres_namespaces(
+        .with_state(HttpKernelState::with_postgres_namespaces_and_tls(
             database_url,
             schema,
             sidecar_path,
+            tls,
             options,
         ))
 }
@@ -963,6 +997,7 @@ enum NamespaceServiceMode {
         database_url: String,
         schema: String,
         sidecar_path: PathBuf,
+        tls: PostgresTlsConfig,
     },
 }
 
@@ -994,12 +1029,14 @@ impl NamespaceServiceStore {
         database_url: impl Into<String>,
         schema: impl Into<String>,
         sidecar_path: impl Into<PathBuf>,
+        tls: PostgresTlsConfig,
     ) -> Self {
         Self {
             mode: NamespaceServiceMode::Postgres {
                 database_url: database_url.into(),
                 schema: schema.into(),
                 sidecar_path: sidecar_path.into(),
+                tls,
             },
             services: HashMap::new(),
         }
@@ -1046,6 +1083,10 @@ impl NamespaceServiceStore {
                 data_root: Some(data_root.clone()),
                 postgres_schema: None,
                 postgres_url_configured: false,
+                postgres_tls_mode: None,
+                postgres_ca_certificate_count: None,
+                postgres_client_certificate_configured: None,
+                postgres_system_roots_enabled: None,
                 sidecar_mode: "sqlite_local_per_namespace".into(),
                 sidecar_path: None,
                 audit_log_path,
@@ -1054,6 +1095,7 @@ impl NamespaceServiceStore {
             NamespaceServiceMode::Postgres {
                 schema,
                 sidecar_path,
+                tls,
                 ..
             } => ServiceStatusStorage {
                 backend: "postgres".into(),
@@ -1061,6 +1103,19 @@ impl NamespaceServiceStore {
                 data_root: None,
                 postgres_schema: Some(schema.clone()),
                 postgres_url_configured: true,
+                postgres_tls_mode: Some(
+                    match tls.mode {
+                        aether_storage::PostgresTlsMode::VerifyFull => "verify_full",
+                        aether_storage::PostgresTlsMode::VerifyCa => "verify_ca",
+                        aether_storage::PostgresTlsMode::DevelopmentPlaintext => {
+                            "development_plaintext"
+                        }
+                    }
+                    .into(),
+                ),
+                postgres_ca_certificate_count: Some(tls.ca_certificate_paths.len()),
+                postgres_client_certificate_configured: Some(tls.client_certificate_path.is_some()),
+                postgres_system_roots_enabled: Some(!tls.disable_system_roots),
                 sidecar_mode: "sqlite_local".into(),
                 sidecar_path: Some(sidecar_path.clone()),
                 audit_log_path,
@@ -1096,12 +1151,14 @@ impl NamespaceServiceStore {
                 database_url,
                 schema,
                 sidecar_path,
+                tls,
             } => Ok(Box::new(
-                PostgresKernelService::open_postgres(
+                PostgresKernelService::open_postgres_with_tls(
                     database_url,
                     schema,
                     namespace.as_str(),
                     namespace_sidecar_path(sidecar_path, namespace),
+                    tls,
                 )
                 .map_err(HttpError::Api)?,
             )),

@@ -86,24 +86,8 @@ jobs:
         run: go test ./...
 
   postgres-journal:
-    name: Postgres journal
+    name: Postgres verified TLS journal
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16@sha256:be01cf82fc7dbba824acf0a82e150b4b360f3ff93c6631d7844af431e841a95c
-        env:
-          POSTGRES_DB: aether
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d aether"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      AETHER_POSTGRES_TEST_URL: postgres://postgres:postgres@localhost:5432/aether
 
     steps:
       - name: Checkout
@@ -114,11 +98,21 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
+      - name: Start verified TLS, expiry, mTLS, and rotation fixtures
+        run: bash scripts/ci-postgres-tls.sh >> "$GITHUB_ENV"
+
       - name: Run Postgres journal parity tests
-        run: cargo test -p aether_storage postgres_journal -- --nocapture
+        run: cargo test -p aether_storage --lib -- --nocapture
+
+      - name: Run Postgres transport security matrix
+        run: cargo test -p aether_storage --test postgres_tls -- --nocapture
 
       - name: Run Postgres HTTP namespace integration test
         run: cargo test -p aether_api --test http_service http_service_postgres_namespaces -- --nocapture
+
+      - name: Stop Postgres TLS fixtures
+        if: always()
+        run: docker rm -f aether-postgres-tls-old aether-postgres-tls-expired aether-postgres-tls-new || true
 
   container-smoke:
     name: Container smoke
@@ -143,6 +137,11 @@ jobs:
             "schema_version": "v1",
             "service_mode": "single_node",
             "bind_addr": "0.0.0.0:3000",
+            "http_transport": {
+              "mode": "trusted_tls_ingress",
+              "external_https_origin": "https://aether.container-smoke.invalid",
+              "ingress": "github-actions-docker-port"
+            },
             "storage": {
               "kind": "sqlite",
               "data_root": "/var/lib/aether/namespaces"

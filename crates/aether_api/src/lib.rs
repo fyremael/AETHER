@@ -54,10 +54,12 @@ pub use admission::{
     SchemaBaselineReceipt, SchemaCatalogResponse, SchemaCompatibility, SchemaStatus,
 };
 pub use aether_storage::JournalCutRef;
+pub use aether_storage::{PostgresTlsConfig, PostgresTlsMode};
 pub use deployment::{
     default_audit_log_path, serve_pilot_http_service, DeploymentError, PilotAuthConfig,
-    PilotServiceConfig, PilotStorageConfig, PilotTokenConfig, ResolvedPilotServiceConfig,
-    ResolvedPilotStorage, ResolvedPilotTokenSummary,
+    PilotHttpTransportConfig, PilotServiceConfig, PilotStorageConfig, PilotTokenConfig,
+    ResolvedPilotHttpTransport, ResolvedPilotServiceConfig, ResolvedPilotStorage,
+    ResolvedPilotTokenSummary,
 };
 pub use execution::{
     ContentDigest, ExecutionId, ExecutionManifest, ExecutionReceipt, FederatedExecutionSource,
@@ -66,9 +68,10 @@ pub use execution::{
 };
 pub use http::{
     http_router, http_router_with_options, http_router_with_partitioned_options,
-    http_router_with_postgres_namespaces, http_router_with_sqlite_namespaces, AuditContext,
-    AuditEntry, AuditLogResponse, AuthScope, HealthResponse, HttpAccessToken, HttpAuthConfig,
-    HttpKernelOptions, HttpKernelState, AETHER_NAMESPACE_HEADER,
+    http_router_with_postgres_namespaces, http_router_with_postgres_namespaces_and_tls,
+    http_router_with_sqlite_namespaces, AuditContext, AuditEntry, AuditLogResponse, AuthScope,
+    HealthResponse, HttpAccessToken, HttpAuthConfig, HttpKernelOptions, HttpKernelState,
+    AETHER_NAMESPACE_HEADER,
 };
 pub use namespace::NamespaceId;
 pub use partitioned::{
@@ -104,7 +107,7 @@ pub use sidecar::{
 };
 pub use status::{
     AuthReloadResponse, NamespaceStatusSummary, PrincipalStatusSummary, ReplicaStatusSummary,
-    ServiceMode, ServiceStatusResponse, ServiceStatusStorage,
+    ServiceMode, ServiceStatusResponse, ServiceStatusStorage, ServiceTransportStatus,
 };
 
 pub trait KernelService {
@@ -222,12 +225,28 @@ impl KernelServiceCore<PostgresJournal, SqliteSidecarFederation> {
         namespace: &str,
         sidecar_path: impl AsRef<Path>,
     ) -> Result<Self, ApiError> {
+        Self::open_postgres_with_tls(
+            database_url,
+            schema,
+            namespace,
+            sidecar_path,
+            &PostgresTlsConfig::default(),
+        )
+    }
+
+    pub fn open_postgres_with_tls(
+        database_url: &str,
+        schema: &str,
+        namespace: &str,
+        sidecar_path: impl AsRef<Path>,
+        tls: &PostgresTlsConfig,
+    ) -> Result<Self, ApiError> {
         let sidecar_path = sidecar_path.as_ref();
         let execution_store =
             SqliteExecutionStore::open(execution_catalog_path_for_journal(sidecar_path))
                 .map_err(ExecutionError::from)?;
         Ok(Self::from_parts_with_execution_store(
-            PostgresJournal::open(database_url, schema, namespace)?,
+            PostgresJournal::open_with_tls(database_url, schema, namespace, tls)?,
             SqliteSidecarFederation::open(sidecar_path)?,
             NamespaceId::new(namespace).map_err(ApiError::Validation)?,
             Box::new(execution_store),
