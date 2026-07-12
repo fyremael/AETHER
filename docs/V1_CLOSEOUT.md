@@ -35,8 +35,11 @@ items remain supported for the unrestricted library slice:
 
 The local R1 and R2 implementations repair policy-aware semantics and proof
 identity, but this historical closeout still does not promote those claims:
-R3 append admission is implemented locally. R4 immutable exact-candidate
-evidence remains open, so the repaired contract is not yet a release claim.
+R3 append admission is implemented locally. R4's immutable evidence contracts,
+runner, deterministic bundle, verifier, negative tests, and reusable workflow
+are also implemented locally, but the required official run and independent
+downloaded verification remain open. The repaired contracts are therefore not
+yet a release claim.
 
 ## Acceptance Closure Against The Original Kernel Bar
 

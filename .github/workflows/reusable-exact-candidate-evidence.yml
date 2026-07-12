@@ -1,0 +1,108 @@
+name: Reusable Exact Candidate Evidence
+
+on:
+  workflow_call:
+    inputs:
+      candidate_sha:
+        description: Full candidate commit SHA
+        required: true
+        type: string
+      candidate_ref:
+        description: Exact candidate ref or tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  exact-candidate-evidence:
+    name: Exact candidate evidence
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout exact candidate detached
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+          cache-dependency-path: go/go.sum
+
+      - name: Install Rust toolchain and quality components
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.78.0 --profile minimal --component rustfmt --component clippy
+          rustup default 1.78.0
+
+      - name: Verify immutable candidate identity
+        id: candidate
+        shell: pwsh
+        run: |
+          $head = (git rev-parse HEAD).Trim()
+          $tree = (git rev-parse "HEAD^{tree}").Trim()
+          $dirty = git status --porcelain --untracked-files=all
+          if ($head -ne "${{ inputs.candidate_sha }}") { throw "HEAD $head does not match candidate" }
+          if ($dirty) { throw "candidate checkout is dirty" }
+          "tree_sha=$tree" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Capture exact gate outcomes
+        shell: pwsh
+        env:
+          AETHER_WORKFLOW_FILE: .github/workflows/reusable-exact-candidate-evidence.yml
+          AETHER_JOB_ID: exact-candidate-evidence
+          CARGO_BUILD_JOBS: "1"
+        run: |
+          python scripts/release_evidence.py capture `
+            --official `
+            --enforce `
+            --ref "${{ inputs.candidate_ref }}" `
+            --run-id "${{ github.run_id }}" `
+            --attempt "${{ github.run_attempt }}" `
+            --runner Windows `
+            --host github-windows-latest `
+            --output-dir artifacts/release/exact-candidate
+
+      - name: Build candidate package once
+        shell: pwsh
+        run: ./scripts/build-pilot-package.ps1
+
+      - name: Assemble and independently verify immutable bundle
+        shell: pwsh
+        run: |
+          $package = "artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip"
+          $packageSha = (Get-FileHash -Algorithm SHA256 $package).Hash.ToLowerInvariant()
+          python scripts/release_evidence.py assemble `
+            --evidence-dir artifacts/release/exact-candidate `
+            --package $package `
+            --package-attestation-sha256 $packageSha `
+            --output-dir artifacts/release/bundles
+          $bundle = Get-ChildItem artifacts/release/bundles/aether-release-evidence-*.zip | Select-Object -First 1
+          python scripts/verify_release_evidence.py $bundle.FullName `
+            --expected-commit-sha "${{ inputs.candidate_sha }}" `
+            --expected-tree-sha "${{ steps.candidate.outputs.tree_sha }}" `
+            --expected-ref "${{ inputs.candidate_ref }}" `
+            --require-official `
+            --out artifacts/release/verified-verdict.json
+
+      - name: Upload SHA-named evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-release-evidence-${{ inputs.candidate_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/release/exact-candidate
+            artifacts/release/bundles/aether-release-evidence-*.zip
+            artifacts/release/verified-verdict.json
+          if-no-files-found: error

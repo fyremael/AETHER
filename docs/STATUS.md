@@ -70,6 +70,16 @@ contends with append on the same cut. Partition leaders issue the receipt and
 followers preserve and verify its exact identity. Schema discovery/admin,
 dry-run, receipt, structured-error, Go, and Python surfaces are implemented.
 
+R4's immutable evidence layer is also implemented locally. Versioned envelope,
+bundle, waiver, and gate-policy contracts now separate release requirements
+from observations. A standard-library runner captures clean commit/tree/ref,
+workflow/run/job, exact commands, inputs, attempts, outputs, and expiry; the
+offline verifier re-hashes every byte and recomputes a deterministic verdict.
+The commercial ledger is policy-only and rejects authored outcomes. A reusable
+exact-candidate workflow builds one package and emits a SHA/run/attempt-named
+bundle. Official workflow evidence and the R5 supply-chain/transport/operations
+subjects remain pending, so this does not widen the controlled-alpha claim.
+
 Completed:
 
 - Rust workspace root created
@@ -84,6 +94,9 @@ Completed:
 - canonical namespace schema revisions, cut-bound activation, whole-batch
   admission, durable append receipts, idempotent retries, history baseline
   certification/quarantine, and leader/follower receipt verification implemented
+- immutable candidate evidence schemas, deterministic gate capture/bundling,
+  fail-closed offline verification, negative tamper/drift coverage, a policy-only
+  commercial ledger, and reusable exact-candidate workflow implemented locally
 - whole-document DSL parser implemented for the current canonical v1 surface: schema, attribute classes, facts, repeated queries, explain directives, temporal views, and policy annotations
 - `Current` and `AsOf` query execution implemented
 - policy annotations wired through state, document, explanation, report, federation, and sidecar paths as pre-replay/pre-compilation semantic scope; immutable release qualification remains pending
@@ -162,7 +175,8 @@ Still open:
 
 - policy-scoped semantic correctness before replay, negation, aggregation, and fixed-point execution
 - execution-scoped, durable, non-aliasing trace identity
-- immutable exact-candidate release evidence rather than authored status and path existence
+- a successful official exact-candidate workflow bundle and independently
+  downloaded verification; local tooling no longer trusts authored status or path existence
 - real dependency SBOM, vulnerability, license, and code-scanning evidence
 - a supported transport-security boundary for remote Postgres and non-loopback HTTP
 - post-v1 DSL ergonomics and document modularity beyond the current canonical surface
@@ -173,13 +187,15 @@ Still open:
 
 ## Immediate focus
 
-The immediate work is the ordered R0-R5 sequence in
+The immediate work is the ordered R4-R5 sequence in
 `docs/REMEDIATION_PROGRAMME.md`. Feature broadening across policy, service
 execution, append, proof identity, or release claims stays frozen until the
 relevant repaired contract is green:
 
 - keep the temporary controlled-alpha claim identical across status, roadmap, limitations, commercialization, and site source
 - preserve the now-green local R1-R3 semantic, proof-identity, and append-admission contracts while qualifying them through immutable exact-candidate evidence
+- run and independently verify the new official exact-candidate bundle; keep its
+  beta verdict blocked until every R5 subject is present and verified
 - replace self-authored readiness with immutable exact-candidate evidence before restoring any beta language
 - keep admin and operator hardening gates blocking, and do not promote user or exec checks until their release-blocking criteria are explicitly accepted
 - keep commercial beta and GA blocked until their separate programme gates are backed by current evidence

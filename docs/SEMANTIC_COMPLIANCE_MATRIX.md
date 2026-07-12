@@ -20,7 +20,8 @@ The bar here is intentionally narrow and strict:
 - deterministic `History`, `Current`, and `AsOf`
 - recursive derivation, stratified negation, bounded aggregation, provenance,
   policy-scoped semantics, execution-scoped proof identity, and sidecar
-  subordination, with immutable exact-candidate qualification still open
+  subordination, with immutable evidence tooling implemented locally and the
+  official exact-candidate qualification run still open
 - no implied claim of distributed runtime completion, multitenancy, or
   production platform completeness
 
@@ -31,7 +32,7 @@ called out explicitly instead of hidden.
 
 | SPEC section | Status | Evidence | v1 interpretation |
 | --- | --- | --- | --- |
-| `1. Objective` | Policy repair implemented; immutable evidence pending | `crates/aether_resolver/tests/policy_scoped_replay.rs`, `crates/aether_runtime/tests/policy_scoped_execution.rs`, `crates/aether_api/tests/policy_noninterference.rs` | Scoped replay, derivation, and projection-local metadata pass locally; Postgres/performance/exact-candidate evidence remains open |
+| `1. Objective` | Policy repair and immutable evidence verifier implemented locally | `crates/aether_resolver/tests/policy_scoped_replay.rs`, `crates/aether_runtime/tests/policy_scoped_execution.rs`, `crates/aether_api/tests/policy_noninterference.rs`, `python/tests/test_release_evidence.py` | Scoped semantics and fail-closed candidate evidence pass locally; official workflow/download verification plus R5 subjects remain open |
 | `2. Implementation language strategy` | Complete | Rust kernel crates, Go client/shell, Python SDK, CI in `.github/workflows/ci.yml` | Rust remains authoritative; Go/Python are boundary layers |
 | `3. Architectural thesis` | Complete | `docs/ARCHITECTURE.md`, `crates/aether_runtime`, `crates/aether_api/src/sidecar.rs` | Two-center kernel thesis is implemented locally |
 | `4. Design stance on Janus` | Complete | Repo layout and implementation shape | Janus remains reference-only, not a compatibility target |

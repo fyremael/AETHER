@@ -13,7 +13,16 @@ concurrency:
   group: release-readiness-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
+  exact-candidate-evidence:
+    uses: ./.github/workflows/reusable-exact-candidate-evidence.yml
+    with:
+      candidate_sha: ${{ github.sha }}
+      candidate_ref: ${{ github.ref }}
+
   release-readiness:
     name: Release Readiness (Windows)
     runs-on: windows-latest

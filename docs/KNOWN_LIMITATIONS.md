@@ -39,8 +39,9 @@ ordinary feature backlog:
   qualification: online mixed-schema history and in-place type/class changes
   are unsupported, and the compatibility release still permits omitted schema
   references to negotiate the active or conservative legacy-inferred schema.
-- Commercial readiness is computed from authored statuses and path existence,
-  not immutable outcomes for the exact candidate commit and package.
+- The authored/path-based readiness defect is repaired locally: the ledger is
+  policy-only and the verifier computes from exact candidate/package outcomes.
+  The official workflow run and R5 evidence subjects remain outstanding.
 
 ## Language And Runtime Scope
 
@@ -66,9 +67,16 @@ ordinary feature backlog:
 - The new capacity planner now produces concrete node-class guidance and explicit scale-out triggers, but those envelopes are still internal planning outputs from single-host calibration rather than public guarantees or cloud-SKU-specific commitments.
 - The accepted regression gate is still deliberately narrow: `core_kernel` and `service_in_process` on the canonical native Windows dev host are the tracked release baselines, while HTTP and replicated-partition suites remain observational until their variance is better understood.
 - The current measured default `M` envelope is conservative: it presently recommends `1,024` pilot-board tasks even though larger ladders run correctly, because operator/report latency degrades before replay or local storage become the limiting factor.
-- The structured release-readiness suite produces useful QA artifacts, but it does not bind every conclusion to an immutable exact-candidate evidence bundle. Authored statuses, source-path existence, and `latest` artifacts cannot qualify a release.
+- The new R4 verifier binds observations to clean commit/tree/ref identity,
+  exact commands, workflow attempts, output bytes, and package digest; authored
+  statuses, source-path existence, and `latest` inputs are rejected. An official
+  GitHub run and independently downloaded bundle are still required before this
+  local implementation satisfies the evidence-integrity release gate.
 - The commercial release readiness ledger targets controlled design-partner alpha. Commercial beta is blocked by six non-waivable gates: policy correctness, execution-scoped trace identity, transactional schema-valid append, immutable evidence, dependency SBOM/vulnerability/license evidence, and a supported transport-security boundary. GA remains separately blocked.
-- Existing Service v2 operability, backup/restore, performance, package, and customer-workflow artifacts are useful partial evidence only. They do not override the six blockers or qualify commercial beta.
+- Existing Service v2 operability, backup/restore, performance, package, and
+  customer-workflow artifacts remain useful partial evidence only until they
+  are emitted as verified subjects in the immutable candidate bundle. They do
+  not override the remaining blockers or qualify commercial beta.
 - The current package “SBOM” is a file/checksum manifest rather than a dependency SBOM; dependency versions, package identifiers, licenses, vulnerability scanning, and code scanning are not yet release gates.
 - The optional Postgres journal uses plaintext `NoTls`, and a supported non-loopback HTTP TLS/ingress boundary is not yet enforced. Remote Postgres and non-loopback HTTP are outside the controlled-alpha claim.
 - The new QA hardening workflow is intentionally non-blocking in phase one. It is a diagnostic program for surfacing admin, operator, user, and exec defects before stable subchecks are promoted into `CI` or release-readiness.

@@ -212,7 +212,9 @@ The repository now has five quality-automation paths:
 
 Treat any of these as release blockers:
 
-- current commercial target stage is not ready in `fixtures/release/commercial-readiness-ledger.json`
+- the immutable exact-candidate bundle is missing, invalid, non-official, or
+  computes a blocked verdict for the requested claim stage; the commercial
+  ledger defines policy and cannot itself be ready
 - `-CommercialBetaCandidate` is set and the Service v2 beta proof or rollback record is not green
 - format, lint, or test failures
 - Python or Go boundary-client regressions
@@ -230,7 +232,8 @@ The suite is comprehensive for the current single-node pilot release shape, but 
 Still open:
 
 - promotion of stable hardening subchecks into blocking CI
-- turning the commercial beta Service v2 ledger blockers green
+- satisfying the policy ledger's commercial-beta requirements through one
+  official immutable bundle rather than editing ledger outcomes
 - public bug-bounty launch posture
 - signed artifacts
 - multi-platform packaged bundles beyond the current Windows pilot package

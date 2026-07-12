@@ -32,7 +32,10 @@ reports, and sidecar cuts. R1 remains evidence-pending rather than externally
 closed until its scheduled Postgres parity and performance matrix are captured
 by the immutable R4 evidence pipeline. Execution-scoped trace handles and
 transactional namespace-schema append admission are now implemented locally;
-the active implementation dependency is R4 exact-candidate evidence.
+the R4 schemas, runner, deterministic bundler, verifier, policy-only ledger,
+negative suite, and reusable workflow are implemented locally. The active
+dependency is one official independently verified candidate run, followed by
+the R5 subjects that its computed beta verdict correctly reports as missing.
 
 The roadmap is no longer about proving the kernel can exist. Its immediate job
 is to repair the correctness and claim boundaries before widening resumes.
@@ -150,7 +153,7 @@ If the team needs a practical ordering, use this one:
 2. `R1`: make policy semantic input and prove noninterference
 3. `R2`: execution-scoped handles implemented locally; immutable candidate evidence remains pending
 4. `R3`: transactional namespace-schema append admission implemented locally; immutable candidate evidence remains pending
-5. `R4`: compute readiness from immutable exact-candidate evidence
+5. `R4`: immutable exact-candidate evidence implemented locally; official run and independent downloaded verification pending
 6. `R5`: harden supply chain, transport, concurrency, resource controls, and operational automation
 7. `R7`: requalify one selected commercial-beta candidate only after independent bundle verification
 8. `R6`: reorganize ownership boundaries after the repaired contracts stabilize

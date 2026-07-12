@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aether.dev/schemas/release/risk-waiver-v1.json",
+  "title": "AETHER candidate-bound risk waiver",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "waiver_id",
+    "gate_id",
+    "candidate_commit_sha",
+    "candidate_tree_sha",
+    "reason",
+    "compensating_controls",
+    "approved_by",
+    "approved_at",
+    "expires_at",
+    "signature"
+  ],
+  "properties": {
+    "schema_version": { "const": "aether.risk-waiver.v1" },
+    "waiver_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "gate_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]+$" },
+    "candidate_commit_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "candidate_tree_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "reason": { "type": "string", "minLength": 1 },
+    "compensating_controls": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "approved_by": { "type": "string", "minLength": 1 },
+    "approved_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scheme", "attestation_ref", "subject_digest"],
+      "properties": {
+        "scheme": { "const": "external_attestation" },
+        "attestation_ref": { "type": "string", "minLength": 1 },
+        "subject_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

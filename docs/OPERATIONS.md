@@ -1,5 +1,9 @@
 # Operator Guide
 
+Release-candidate capture and offline verification are documented in
+[`RELEASE_EVIDENCE.md`](RELEASE_EVIDENCE.md). Commercial claim policy is not an
+operational evidence source.
+
 This guide is for people running AETHER demonstrations, capturing reports, or presenting the project to others.
 
 It assumes you are not trying to extend the kernel. It assumes you want the cleanest path to showing what the system already does.

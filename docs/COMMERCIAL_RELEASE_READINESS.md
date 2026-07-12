@@ -34,9 +34,10 @@ All six gates are non-waivable:
 
 The tracked policy source is
 `fixtures/release/commercial-readiness-ledger.json`. During R0 that ledger
-records the contained posture and blockers; it does not prove that a gate ran.
-R4 replaces authored/path-based readiness with computation over immutable
-outcomes for an exact commit, tree, package, inputs, and workflow run.
+was used to record contained posture and blockers. Under R4 it is now strictly
+requirements/owner/claim policy and rejects authored outcome fields. R4
+computes blockers and verdict only from immutable outcomes for an exact commit,
+tree, package, inputs, and workflow run; see `docs/RELEASE_EVIDENCE.md`.
 
 ## Existing Release Artifacts
 
@@ -48,9 +49,9 @@ powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1
 
 It can produce package, performance, recovery, customer-workflow, and
 security/key-lifecycle artifacts under `artifacts/`. Those artifacts are not a
-commercial-beta qualification because they are mutable/ignored, are not all
-bound to one exact candidate, and the current ledger renderer trusts authored
-statuses and path existence.
+commercial-beta qualification because they are mutable/ignored and are not all
+bound to one exact candidate. The policy renderer no longer trusts or accepts
+authored statuses; only the immutable verifier may promote.
 
 The file currently called a package SBOM is a file/checksum manifest, not a
 dependency SBOM. Likewise, a `ci_blocking` marker or workflow source path is not

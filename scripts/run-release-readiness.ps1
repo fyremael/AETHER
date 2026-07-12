@@ -382,10 +382,9 @@ try {
         "render",
         "--ledger", $commercialLedgerPath,
         "--out-json", $commercialReadinessJsonPath,
-        "--out-md", $commercialReadinessSummaryPath,
-        "--enforce-current-target"
+        "--out-md", $commercialReadinessSummaryPath
     )
-    Invoke-Step "Commercial release readiness ledger" $python.Source $commercialReadinessArgs
+    Invoke-Step "Commercial claim policy (diagnostic renderer)" $python.Source $commercialReadinessArgs
     if (Test-Path $commercialReadinessJsonPath) {
         Copy-Item -Force $commercialReadinessJsonPath $latestCommercialReadinessJsonPath
     }

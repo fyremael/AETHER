@@ -40,3 +40,4 @@ The current numbered ADR set is:
 - `docs/ADR/0010-policy-scoped-semantic-snapshots.md`
 - `docs/ADR/0011-execution-receipts-and-trace-handles.md`
 - `docs/ADR/0012-namespace-schema-and-append-admission.md`
+- `docs/ADR/0013-immutable-release-evidence-and-claim-computation.md`

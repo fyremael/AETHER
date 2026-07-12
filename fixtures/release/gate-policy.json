@@ -1,0 +1,128 @@
+{
+  "schema_version": "aether.release-gate-policy.v1",
+  "policy_id": "commercial-beta-r4-v1",
+  "claim_stage": "commercial_beta_candidate",
+  "official_workflow": ".github/workflows/reusable-exact-candidate-evidence.yml",
+  "official_job": "exact-candidate-evidence",
+  "allowed_official_runners": ["Windows", "windows-latest"],
+  "allowed_observed_statuses": ["passed", "failed", "error", "skipped"],
+  "validity_hours": 24,
+  "non_waivable_gate_ids": [
+    "semantic.policy_noninterference",
+    "semantic.trace_handle_identity",
+    "storage.transactional_schema_append",
+    "semantic.full_acceptance",
+    "quality.rust_fmt_clippy_all_targets",
+    "quality.go_boundary",
+    "quality.python_boundary"
+  ],
+  "gates": [
+    {
+      "id": "semantic.policy_noninterference",
+      "owner": "kernel",
+      "requirement": "Policy scope is a semantic input before replay, compilation, and fixed-point execution.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": [
+        "cargo test -p aether_api --test policy_noninterference",
+        "cargo test -p aether_runtime --test policy_scoped_execution"
+      ],
+      "inputs": [
+        "Cargo.lock",
+        "crates/aether_api/tests/policy_noninterference.rs",
+        "crates/aether_runtime/tests/policy_scoped_execution.rs"
+      ]
+    },
+    {
+      "id": "semantic.trace_handle_identity",
+      "owner": "service",
+      "requirement": "Service proof identity is execution-scoped, durable, authorized, and replay-verifiable.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": [
+        "cargo test -p aether_api --test execution_handles"
+      ],
+      "inputs": [
+        "Cargo.lock",
+        "crates/aether_api/tests/execution_handles.rs"
+      ]
+    },
+    {
+      "id": "storage.transactional_schema_append",
+      "owner": "storage",
+      "requirement": "Every public append is schema-valid, dependency-valid, atomic, cut-bound, and durably receipted.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": [
+        "cargo test -p aether_api --test append_admission",
+        "cargo test -p aether_storage"
+      ],
+      "inputs": [
+        "Cargo.lock",
+        "crates/aether_api/tests/append_admission.rs",
+        "crates/aether_storage/src/lib.rs"
+      ]
+    },
+    {
+      "id": "semantic.full_acceptance",
+      "owner": "kernel",
+      "requirement": "The complete Rust workspace acceptance suite passes without ignored correctness debt.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": [
+        "cargo test --workspace"
+      ],
+      "inputs": ["Cargo.lock", "Cargo.toml"]
+    },
+    {
+      "id": "quality.rust_fmt_clippy_all_targets",
+      "owner": "kernel",
+      "requirement": "Rust formatting and strict all-target clippy pass at the declared MSRV.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": [
+        "cargo fmt --all --check",
+        "cargo clippy --workspace --all-targets -- -D warnings"
+      ],
+      "inputs": ["Cargo.lock", "Cargo.toml"]
+    },
+    {
+      "id": "quality.go_boundary",
+      "owner": "clients",
+      "requirement": "The complete Go shell and client boundary suite passes.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": "go",
+      "commands": ["go test ./..."],
+      "inputs": ["go/go.mod", "go/go.sum"]
+    },
+    {
+      "id": "quality.python_boundary",
+      "owner": "clients",
+      "requirement": "The complete Python SDK, notebook, and readiness test boundary passes.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": ["python -m pytest python/tests -q"],
+      "inputs": ["python/aether_sdk/client.py", "python/tests"]
+    }
+  ],
+  "future_required_bundle_subjects": [
+    "pilot-package-file-manifest",
+    "rust-sbom",
+    "go-sbom",
+    "assembled-package-sbom",
+    "vulnerability-scan",
+    "license-scan",
+    "code-scan",
+    "recovery",
+    "performance",
+    "soak",
+    "package-provenance"
+  ]
+}

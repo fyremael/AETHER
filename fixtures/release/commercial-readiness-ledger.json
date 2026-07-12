@@ -1,417 +1,162 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "current_target_stage": "design_partner_alpha",
-  "review_cadence": "review before every release-readiness run, after every remediation gate transition, and before any external claim change",
+  "review_cadence": "review before every candidate run, after every gate-policy transition, and before any external claim change",
   "stages": [
     {
       "id": "design_partner_alpha",
       "label": "Design-partner alpha",
-      "intent": "Controlled, named design-partner evaluation of the current single-node semantic kernel while the remediation programme is executed.",
+      "intent": "Controlled named-partner evaluation while exact-candidate qualification remains incomplete.",
       "claim_boundary": "Controlled single-node alpha with a real Rust semantic kernel, limited to one visibility domain, trusted appenders, and explicitly supported deployment boundaries.",
       "gates": [
         {
-          "id": "controlled_alpha_semantic_boundary",
-          "title": "The controlled-alpha semantic boundary is explicit",
+          "id": "alpha_semantic_boundary",
+          "title": "The contained semantic boundary remains explicit",
           "owner": "kernel",
           "gate_class": "blocking",
-          "status": "ready",
-          "evidence": [
-            {
-              "label": "Reopened v1 closeout",
-              "path": "docs/V1_CLOSEOUT.md"
-            },
-            {
-              "label": "Semantic compliance matrix",
-              "path": "docs/SEMANTIC_COMPLIANCE_MATRIX.md"
-            },
-            {
-              "label": "Semantic closure tests",
-              "path": "crates/aether_api/tests/semantic_closure.rs"
-            },
-            {
-              "label": "Comprehensive audit",
-              "path": "docs/COMPREHENSIVE_AUDIT_2026-07-09.md"
-            },
-            {
-              "label": "Binding remediation programme",
-              "path": "docs/REMEDIATION_PROGRAMME.md"
-            }
-          ],
-          "blockers": [],
-          "next_actions": [
-            "Keep the claim limited to one visibility domain and trusted appenders until the R1-R3 semantic gates pass."
-          ]
+          "requirement": "Policy, proof identity, and append admission contracts must pass for the exact candidate before widening the alpha boundary.",
+          "evidence_requirement": {
+            "gate_ids": [
+              "semantic.policy_noninterference",
+              "semantic.trace_handle_identity",
+              "storage.transactional_schema_append",
+              "semantic.full_acceptance"
+            ],
+            "bundle_subjects": []
+          }
         },
         {
-          "id": "pilot_release_evidence",
-          "title": "Pilot release-readiness evidence exists",
-          "owner": "release",
+          "id": "alpha_client_quality",
+          "title": "Boundary clients match the candidate kernel contract",
+          "owner": "clients",
           "gate_class": "blocking",
-          "status": "ready",
-          "evidence": [
-            {
-              "label": "Release-readiness runner",
-              "path": "scripts/run-release-readiness.ps1"
-            },
-            {
-              "label": "Release-readiness workflow",
-              "path": ".github/workflows/release-readiness.yml"
-            },
-            {
-              "label": "QA contract",
-              "path": "docs/QA.md"
-            }
-          ],
-          "blockers": [],
-          "next_actions": []
-        },
-        {
-          "id": "operator_package_path",
-          "title": "Operator package path is usable",
-          "owner": "ops",
-          "gate_class": "blocking",
-          "status": "ready",
-          "evidence": [
-            {
-              "label": "Pilot deployment guide",
-              "path": "docs/PILOT_DEPLOYMENT.md"
-            },
-            {
-              "label": "Pilot operations playbook",
-              "path": "docs/PILOT_OPERATIONS_PLAYBOOK.md"
-            },
-            {
-              "label": "Package builder",
-              "path": "scripts/build-pilot-package.ps1"
-            }
-          ],
-          "blockers": [],
-          "next_actions": []
-        },
-        {
-          "id": "controlled_alpha_deployment_boundary",
-          "title": "The supported alpha deployment boundary is explicit",
-          "owner": "service",
-          "gate_class": "blocking",
-          "status": "ready",
-          "evidence": [
-            {
-              "label": "Pilot deployment guide",
-              "path": "docs/PILOT_DEPLOYMENT.md"
-            },
-            {
-              "label": "Known limitations",
-              "path": "docs/KNOWN_LIMITATIONS.md"
-            },
-            {
-              "label": "Binding remediation programme",
-              "path": "docs/REMEDIATION_PROGRAMME.md"
-            }
-          ],
-          "blockers": [],
-          "next_actions": [
-            "Keep SQLite as the packaged default.",
-            "Keep optional Postgres and non-loopback network paths outside the supported external claim until the transport-security gate passes."
-          ]
-        },
-        {
-          "id": "hardening_tracker_visible",
-          "title": "Hardening promotion state is explicit",
-          "owner": "qa",
-          "gate_class": "diagnostic",
-          "status": "diagnostic",
-          "evidence": [
-            {
-              "label": "Hardening promotion state",
-              "path": ".github/hardening-promotion-state.json"
-            },
-            {
-              "label": "Hardening program",
-              "path": "docs/QA_HARDENING_PROGRAM.md"
-            }
-          ],
-          "blockers": [
-            "Hardening evidence does not promote the claim beyond controlled alpha while the remediation gates remain blocked."
-          ],
-          "next_actions": [
-            "Keep hardening findings visible and feed correctness-relevant failures into the stable remediation gates."
-          ]
+          "requirement": "Rust, Go, and Python quality gates must pass from one candidate-bound workflow run.",
+          "evidence_requirement": {
+            "gate_ids": [
+              "quality.rust_fmt_clippy_all_targets",
+              "quality.go_boundary",
+              "quality.python_boundary"
+            ],
+            "bundle_subjects": []
+          }
         }
       ]
     },
     {
       "id": "commercial_beta",
       "label": "Commercial beta",
-      "intent": "Future selected commercial beta, requalified only after every non-waivable remediation gate passes for one exact candidate and package.",
-      "claim_boundary": "Blocked. Commercial beta must not be claimed until the R7 exact-candidate qualification bundle verifies.",
+      "intent": "A selected supported package, network, and schema boundary qualified from one immutable evidence bundle.",
+      "claim_boundary": "No commercial-beta claim is allowed until every non-waivable exact-candidate gate passes and the bundle verifies independently.",
       "gates": [
         {
-          "id": "semantic.policy_noninterference",
-          "title": "Policy-scoped semantic correctness",
+          "id": "beta_semantic_integrity",
+          "title": "Central semantic contracts are exact",
           "owner": "kernel",
           "gate_class": "blocking",
-          "waivable": false,
-          "status": "blocked",
-          "evidence": [
-            {
-              "label": "Comprehensive audit",
-              "path": "docs/COMPREHENSIVE_AUDIT_2026-07-09.md"
-            },
-            {
-              "label": "Remediation R1",
-              "path": "docs/REMEDIATION_PROGRAMME.md"
-            }
-          ],
-          "blockers": [
-            "Policy is still applied after resolution or derivation on correctness-bearing paths, so hidden facts can alter visible truth."
-          ],
-          "next_actions": [
-            "Complete R1 and pass semantic.policy_noninterference without retrying correctness failures into green."
-          ]
+          "requirement": "R1-R3 and full semantic acceptance pass without waiver.",
+          "evidence_requirement": {
+            "gate_ids": [
+              "semantic.policy_noninterference",
+              "semantic.trace_handle_identity",
+              "storage.transactional_schema_append",
+              "semantic.full_acceptance"
+            ],
+            "bundle_subjects": []
+          }
         },
         {
-          "id": "semantic.trace_handle_identity",
-          "title": "Execution-scoped trace identity",
-          "owner": "service",
-          "gate_class": "blocking",
-          "waivable": false,
-          "status": "blocked",
-          "evidence": [
-            {
-              "label": "Comprehensive audit",
-              "path": "docs/COMPREHENSIVE_AUDIT_2026-07-09.md"
-            },
-            {
-              "label": "Remediation R2",
-              "path": "docs/REMEDIATION_PROGRAMME.md"
-            }
-          ],
-          "blockers": [
-            "Service-level explanation identity is process-local and tuple IDs can alias across executions."
-          ],
-          "next_actions": [
-            "Complete R2 and pass semantic.trace_handle_identity across runs, appends, restarts, namespaces, and policy scopes."
-          ]
-        },
-        {
-          "id": "storage.transactional_schema_append",
-          "title": "Transactional schema-valid append",
-          "owner": "storage",
-          "gate_class": "blocking",
-          "waivable": false,
-          "status": "blocked",
-          "evidence": [
-            {
-              "label": "Comprehensive audit",
-              "path": "docs/COMPREHENSIVE_AUDIT_2026-07-09.md"
-            },
-            {
-              "label": "Remediation R3",
-              "path": "docs/REMEDIATION_PROGRAMME.md"
-            },
-            {
-              "label": "Known limitations",
-              "path": "docs/KNOWN_LIMITATIONS.md"
-            }
-          ],
-          "blockers": [
-            "Append accepts data before namespace-schema validation and can poison later replay."
-          ],
-          "next_actions": [
-            "Complete R3 and pass storage.transactional_schema_append on every backend and write ingress."
-          ]
-        },
-        {
-          "id": "release.evidence_integrity",
-          "title": "Immutable release evidence",
+          "id": "beta_evidence_integrity",
+          "title": "Readiness is computed from immutable exact-candidate evidence",
           "owner": "release",
           "gate_class": "blocking",
-          "waivable": false,
-          "status": "blocked",
-          "evidence": [
-            {
-              "label": "Comprehensive audit",
-              "path": "docs/COMPREHENSIVE_AUDIT_2026-07-09.md"
-            },
-            {
-              "label": "Remediation R4",
-              "path": "docs/REMEDIATION_PROGRAMME.md"
-            }
-          ],
-          "blockers": [
-            "Readiness is derived from authored statuses and path existence rather than immutable outcomes for the exact candidate."
-          ],
-          "next_actions": [
-            "Complete R4 and verify one exact-SHA evidence bundle independently."
-          ]
+          "requirement": "The official SHA/run/attempt-named bundle verifies offline and names the package attestation subject.",
+          "evidence_requirement": {
+            "gate_ids": ["release.evidence_integrity"],
+            "bundle_subjects": ["package-provenance"]
+          }
         },
         {
-          "id": "security.dependency_supply_chain",
-          "title": "Dependency SBOM, vulnerability, and license evidence",
+          "id": "beta_supply_chain",
+          "title": "Dependency and package supply chain is known",
           "owner": "security",
           "gate_class": "blocking",
-          "waivable": false,
-          "status": "blocked",
-          "evidence": [
-            {
-              "label": "Comprehensive audit",
-              "path": "docs/COMPREHENSIVE_AUDIT_2026-07-09.md"
-            },
-            {
-              "label": "Remediation R5",
-              "path": "docs/REMEDIATION_PROGRAMME.md"
-            }
-          ],
-          "blockers": [
-            "The current package manifest is not a dependency SBOM, and vulnerability, license, and code-scanning gates are absent."
-          ],
-          "next_actions": [
-            "Complete the R5 supply-chain controls and verify the final package and SBOM provenance."
-          ]
+          "requirement": "Standard SBOM, vulnerability, license, code-scan, secret-scan, and package provenance subjects match the candidate package.",
+          "evidence_requirement": {
+            "gate_ids": ["security.supply_chain"],
+            "bundle_subjects": [
+              "pilot-package-file-manifest",
+              "rust-sbom",
+              "go-sbom",
+              "assembled-package-sbom",
+              "vulnerability-scan",
+              "license-scan",
+              "code-scan",
+              "package-provenance"
+            ]
+          }
         },
         {
-          "id": "service.transport_security",
-          "title": "Supported transport-security boundary",
+          "id": "beta_transport",
+          "title": "Supported remote transport is authenticated and encrypted",
           "owner": "security",
           "gate_class": "blocking",
-          "waivable": false,
-          "status": "blocked",
-          "evidence": [
-            {
-              "label": "Comprehensive audit",
-              "path": "docs/COMPREHENSIVE_AUDIT_2026-07-09.md"
-            },
-            {
-              "label": "Remediation R5",
-              "path": "docs/REMEDIATION_PROGRAMME.md"
-            },
-            {
-              "label": "Pilot deployment guide",
-              "path": "docs/PILOT_DEPLOYMENT.md"
-            }
-          ],
-          "blockers": [
-            "Remote Postgres cannot verify TLS and the supported non-loopback HTTP transport boundary is not yet enforced."
-          ],
-          "next_actions": [
-            "Complete the R5 transport contract and pass TLS identity, downgrade-rejection, and secret-redaction tests."
-          ]
+          "requirement": "Non-loopback HTTP and remote Postgres use verified TLS with no automatic plaintext downgrade.",
+          "evidence_requirement": {
+            "gate_ids": ["security.transport"],
+            "bundle_subjects": []
+          }
+        },
+        {
+          "id": "beta_operations",
+          "title": "Recovery, contention, performance, and soak limits are evidenced",
+          "owner": "ops",
+          "gate_class": "blocking",
+          "requirement": "The exact package passes declared recovery, namespace contention, resource, performance, and soak policies.",
+          "evidence_requirement": {
+            "gate_ids": ["operations.beta_service"],
+            "bundle_subjects": ["recovery", "performance", "soak"]
+          }
         }
       ]
     },
     {
       "id": "general_availability",
       "label": "General availability",
-      "intent": "Broad commercial release with repeatable artifact promotion, support posture, security posture, and conservative public claims.",
-      "claim_boundary": "AETHER can be sold beyond named design partners with supported deployment, upgrade, security, observability, and incident-response commitments. Distributed runtime claims still require separately gated evidence.",
+      "intent": "A separately governed support and distribution posture beyond the selected beta boundary.",
+      "claim_boundary": "GA requires independent support, incident, signed promotion, platform distribution, and distributed-truth decisions after beta.",
       "gates": [
         {
-          "id": "signed_release_pipeline",
-          "title": "Signed artifact and promotion pipeline",
+          "id": "ga_support_and_incident",
+          "title": "Support and incident response are contractual",
+          "owner": "operations",
+          "gate_class": "blocking",
+          "requirement": "Support ownership, escalation, incident response, and signed release promotion are proven for the GA package.",
+          "evidence_requirement": {
+            "gate_ids": ["ga.support_incident"],
+            "bundle_subjects": ["signed-promotion"]
+          }
+        },
+        {
+          "id": "ga_distribution",
+          "title": "Supported platform distribution is verified",
           "owner": "release",
           "gate_class": "blocking",
-          "status": "blocked",
-          "evidence": [
-            {
-              "label": "QA current frontier",
-              "path": "docs/QA.md"
-            },
-            {
-              "label": "Known limitations",
-              "path": "docs/KNOWN_LIMITATIONS.md"
-            }
-          ],
-          "blockers": [
-            "Release-readiness is still a pre-release verification flow, not a signed artifact promotion pipeline.",
-            "No GA-grade versioned changelog, artifact signing, or provenance attestation is enforced."
-          ],
-          "next_actions": [
-            "Add signed artifact generation and verification.",
-            "Tie release promotion to a versioned changelog and immutable release evidence bundle."
-          ]
+          "requirement": "Every advertised platform package installs, upgrades, rolls back, and verifies provenance.",
+          "evidence_requirement": {
+            "gate_ids": ["ga.platform_distribution"],
+            "bundle_subjects": ["multi-platform-provenance"]
+          }
         },
         {
-          "id": "support_and_incident_posture",
-          "title": "Support, incident, and disclosure posture",
-          "owner": "support",
-          "gate_class": "blocking",
-          "status": "blocked",
-          "evidence": [
-            {
-              "label": "Security policy",
-              "path": "SECURITY.md"
-            },
-            {
-              "label": "Operations guide",
-              "path": "docs/OPERATIONS.md"
-            },
-            {
-              "label": "Known limitations",
-              "path": "docs/KNOWN_LIMITATIONS.md"
-            }
-          ],
-          "blockers": [
-            "Responsible disclosure exists, but public bug bounty and customer support commitments are not yet in force.",
-            "Incident response and escalation playbooks are not yet formalized for external customers."
-          ],
-          "next_actions": [
-            "Create customer incident-response and escalation playbooks.",
-            "Decide if and when to launch a paid public bug bounty."
-          ]
-        },
-        {
-          "id": "multi_platform_distribution",
-          "title": "Multi-platform distribution is supported",
-          "owner": "release",
-          "gate_class": "blocking",
-          "status": "blocked",
-          "evidence": [
-            {
-              "label": "QA current frontier",
-              "path": "docs/QA.md"
-            },
-            {
-              "label": "Pilot package builder",
-              "path": "scripts/build-pilot-package.ps1"
-            }
-          ],
-          "blockers": [
-            "The first-class package is Windows-first.",
-            "Linux/macOS package parity and installation verification are not yet GA gates."
-          ],
-          "next_actions": [
-            "Add Linux and macOS package builders or explicitly scope GA to one supported platform.",
-            "Publish install and rollback evidence per supported platform."
-          ]
-        },
-        {
-          "id": "distributed_truth_claims",
-          "title": "Distributed truth claims are separately gated",
-          "owner": "architecture",
-          "gate_class": "blocking",
-          "status": "blocked",
-          "evidence": [
-            {
-              "label": "Federated truth implementation plan",
-              "path": "docs/FEDERATED_TRUTH_IMPLEMENTATION_PLAN.md"
-            },
-            {
-              "label": "Authority partition ADR",
-              "path": "docs/ADR/0001-authority-partitions-and-federated-cuts.md"
-            },
-            {
-              "label": "Known limitations",
-              "path": "docs/KNOWN_LIMITATIONS.md"
-            }
-          ],
-          "blockers": [
-            "Replicated authority partitions are a single-host manual-failover prototype.",
-            "No automatic election, quorum consensus, multi-host failover, or replicated sidecar plane is implemented."
-          ],
-          "next_actions": [
-            "Keep distributed runtime language out of GA claims until separately proven.",
-            "Continue exact-provenance partition work without pulling Raft or broad consensus into the beta gate."
-          ]
+          "id": "ga_distributed_truth",
+          "title": "Distributed-truth claims remain separately gated",
+          "owner": "kernel",
+          "gate_class": "future",
+          "requirement": "No generalized cluster or consensus claim follows from the single-host partition prototype.",
+          "evidence_requirement": {
+            "gate_ids": ["ga.distributed_truth"],
+            "bundle_subjects": []
+          }
         }
       ]
     }
