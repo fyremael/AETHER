@@ -1,0 +1,209 @@
+name: Supply Chain
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_AUDIT_VERSION: "0.22.2"
+  GOVULNCHECK_VERSION: "v1.6.0"
+
+jobs:
+  package:
+    name: Candidate package
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.26.5"
+          cache-dependency-path: go/go.sum
+
+      - name: Install Rust toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.86.0 --profile minimal
+          rustup default 1.86.0
+
+      - name: Build package once
+        shell: pwsh
+        run: ./scripts/build-pilot-package.ps1
+
+      - name: Attest package provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@f6bf1532d7d6793fce74eac584813a8eee607999 # v4
+        with:
+          subject-path: artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip
+
+      - name: Upload candidate package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: supply-chain-candidate-package
+          path: artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip
+          if-no-files-found: error
+
+  dependency-and-package:
+    name: Dependency, license, package, and secret gates
+    runs-on: ubuntu-latest
+    needs: package
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.26.5"
+          cache-dependency-path: go/go.sum
+
+      - name: Install Rust and pinned scanners
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.88.0 --profile minimal
+          rustup toolchain install 1.86.0 --profile minimal
+          rustup default 1.86.0
+          cargo +1.88.0 install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
+          go install "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION"
+          python -m pip install --disable-pip-version-check -r requirements-release.txt
+
+      - name: Download exact candidate package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: supply-chain-candidate-package
+          path: artifacts/pilot/packages
+
+      - name: Generate strict CycloneDX SBOMs and license verdict
+        run: |
+          python scripts/supply_chain.py generate \
+            --candidate-sha "$GITHUB_SHA" \
+            --package-zip artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip \
+            --out-dir artifacts/release/supply-chain
+
+      - name: Rust advisory gate
+        run: |
+          set -euo pipefail
+          cargo audit --json | tee artifacts/release/supply-chain/cargo-audit.json
+
+      - name: Go vulnerability gate
+        working-directory: go
+        run: |
+          set -euo pipefail
+          govulncheck -json ./... | tee ../artifacts/release/supply-chain/govulncheck.json
+
+      - name: Unpack assembled package for scanner
+        run: |
+          mkdir -p artifacts/release/package-scan-root
+          unzip -q artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip -d artifacts/release/package-scan-root
+
+      - name: Package and filesystem vulnerability gate
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          scan-type: fs
+          scan-ref: artifacts/release/package-scan-root
+          format: json
+          output: artifacts/release/supply-chain/trivy-package.json
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Secret scanning gate
+        uses: zricethezav/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Record scanner verdict subjects
+        if: success()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("artifacts/release/supply-chain")
+          for name, tools in {
+              "vulnerability-scan.json": ["cargo-audit", "govulncheck", "trivy"],
+              "secret-scan.json": ["gitleaks"],
+          }.items():
+              (root / name).write_text(
+                  json.dumps({"candidate_commit_sha": "${{ github.sha }}", "status": "passed", "tools": tools}, sort_keys=True) + "\n",
+                  encoding="utf-8",
+              )
+          PY
+
+      - name: Attest generated SBOMs
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@f6bf1532d7d6793fce74eac584813a8eee607999 # v4
+        with:
+          subject-path: artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip
+          sbom-path: artifacts/release/supply-chain/aether-package.cdx.json
+
+      - name: Upload supply-chain evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: supply-chain-evidence-${{ github.sha }}
+          path: artifacts/release/supply-chain
+          if-no-files-found: error
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, python]
+
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1ad29ea4a422cce9a242a9fae469541dcd08addc # v4
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Autobuild compiled language
+        if: matrix.language == 'go'
+        uses: github/codeql-action/autobuild@1ad29ea4a422cce9a242a9fae469541dcd08addc # v4
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@1ad29ea4a422cce9a242a9fae469541dcd08addc # v4
+        with:
+          category: /language:${{ matrix.language }}

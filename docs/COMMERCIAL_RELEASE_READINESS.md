@@ -53,9 +53,11 @@ commercial-beta qualification because they are mutable/ignored and are not all
 bound to one exact candidate. The policy renderer no longer trusts or accepts
 authored statuses; only the immutable verifier may promote.
 
-The file currently called a package SBOM is a file/checksum manifest, not a
-dependency SBOM. Likewise, a `ci_blocking` marker or workflow source path is not
-evidence that the matching job succeeded for the candidate.
+The operational package inventory is now correctly named a file manifest.
+Strict CycloneDX dependency/package SBOMs and the scanner/attestation workflow
+are implemented, but their source files are not evidence that the hosted jobs
+succeeded for the candidate. Likewise, a `ci_blocking` marker or workflow
+source path is not an observed outcome.
 
 ## Promotion Rule
 

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/fyremael/AETHER/actions/workflows/ci.yml/badge.svg)](https://github.com/fyremael/AETHER/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-pages-0f766e)](https://fyremael.github.io/AETHER/)
-[![Rust 1.78+](https://img.shields.io/badge/rust-1.78%2B-93450a?logo=rust)](https://www.rust-lang.org/)
+[![Rust 1.86+](https://img.shields.io/badge/rust-1.86%2B-93450a?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-4b5563)](./LICENSE-MIT)
 
 AETHER's current release boundary is:

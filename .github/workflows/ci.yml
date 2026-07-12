@@ -12,6 +12,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
 jobs:
   hardening-promotion-state:
     name: Hardening promotion state
@@ -24,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Read hardening promotion state
         id: state
@@ -43,12 +46,12 @@ jobs:
           - ubuntu-latest
           - windows-latest
         toolchain:
-          - "1.78.0"
+          - "1.86.0"
           - stable
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install toolchain
         run: |
@@ -70,12 +73,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.1"
+          go-version: "1.26.5"
           cache-dependency-path: go/go.sum
 
       - name: Run Go tests
@@ -87,7 +90,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16@sha256:be01cf82fc7dbba824acf0a82e150b4b360f3ff93c6631d7844af431e841a95c
         env:
           POSTGRES_DB: aether
           POSTGRES_PASSWORD: postgres
@@ -104,7 +107,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install stable toolchain
         run: |
@@ -123,7 +126,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Build pilot service image
         run: docker build -t aether-pilot-service:ci .
@@ -280,10 +283,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
@@ -301,7 +304,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install stable toolchain
         run: |
@@ -320,7 +323,7 @@ jobs:
 
       - name: Upload pilot gate artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pilot-launch-gate-artifacts
           path: |
@@ -343,7 +346,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install stable toolchain
         run: |
@@ -351,9 +354,9 @@ jobs:
           rustup default stable
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.1"
+          go-version: "1.26.5"
           cache-dependency-path: go/go.sum
 
       - name: Build packaged pilot bundle
@@ -361,7 +364,7 @@ jobs:
         run: ./scripts/build-pilot-package.ps1
 
       - name: Upload pilot package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: aether-pilot-service-windows-x86_64
           path: |
@@ -378,17 +381,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.1"
+          go-version: "1.26.5"
           cache-dependency-path: go/go.sum
 
       - name: Install stable toolchain
@@ -409,17 +412,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.1"
+          go-version: "1.26.5"
           cache-dependency-path: go/go.sum
 
       - name: Install stable toolchain
@@ -440,17 +443,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.1"
+          go-version: "1.26.5"
           cache-dependency-path: go/go.sum
 
       - name: Install stable toolchain
@@ -471,17 +474,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.1"
+          go-version: "1.26.5"
           cache-dependency-path: go/go.sum
 
       - name: Install stable toolchain

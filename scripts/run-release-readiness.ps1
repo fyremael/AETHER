@@ -55,6 +55,7 @@ $pilotPackageRoot = Join-Path $repoRoot "artifacts\pilot\packages\aether-pilot-s
 $pilotPackageZip = "$pilotPackageRoot.zip"
 $serviceV2PackageProofDir = Join-Path $reportDir ("service-v2-package-proof-" + $outputTimestamp)
 $securityKeyProofDir = Join-Path $reportDir ("security-key-proof-" + $outputTimestamp)
+$supplyChainProofDir = Join-Path $reportDir ("supply-chain-proof-" + $outputTimestamp)
 $transcript = [System.Collections.Generic.List[string]]::new()
 if (-not $HostManifestPath) {
     $HostManifestPath = Join-Path $repoRoot "fixtures\performance\hosts\dev-chad-windows-native.json"
@@ -306,6 +307,13 @@ try {
         Copy-Item -Force $performanceBetaSummaryPath $latestPerformanceBetaSummaryPath
     }
     Invoke-Step "Pilot package build" $pwsh.Source @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $repoRoot "scripts/build-pilot-package.ps1"))
+    Invoke-Step "CycloneDX SBOM, license, and delivery-input gate" $python.Source @(
+        (Join-Path $repoRoot "scripts\supply_chain.py"),
+        "generate",
+        "--candidate-sha", $commit,
+        "--package-zip", $pilotPackageZip,
+        "--out-dir", $supplyChainProofDir
+    )
     $securityKeyArgs = @(
         (Join-Path $repoRoot "scripts\security_key_lifecycle.py"),
         "run",
@@ -421,11 +429,12 @@ $summaryLines.Add("9. Criterion benchmark compile")
 $summaryLines.Add("10. Pilot launch validation pack")
 $summaryLines.Add("11. Performance beta gate")
 $summaryLines.Add("12. Packaged pilot bundle build")
-$summaryLines.Add("13. Security and key lifecycle gate")
-$summaryLines.Add("14. Service v2 operability proof")
-$summaryLines.Add("15. Release rollback record")
-$summaryLines.Add("16. Customer workflow acceptance")
-$summaryLines.Add("17. Commercial release readiness ledger")
+$summaryLines.Add("13. CycloneDX SBOM, license, and delivery-input gate")
+$summaryLines.Add("14. Security and key lifecycle gate")
+$summaryLines.Add("15. Service v2 operability proof")
+$summaryLines.Add("16. Release rollback record")
+$summaryLines.Add("17. Customer workflow acceptance")
+$summaryLines.Add("18. Commercial release readiness ledger")
 $summaryLines.Add("")
 $summaryLines.Add("## Primary artifacts")
 $summaryLines.Add("")
@@ -436,6 +445,8 @@ $summaryLines.Add('- `artifacts/qa/release-readiness/performance-beta-latest.md`
 $summaryLines.Add('- `artifacts/qa/release-readiness/performance-beta-latest.json`')
 $summaryLines.Add('- `artifacts/qa/release-readiness/security-key-lifecycle-latest.md`')
 $summaryLines.Add('- `artifacts/qa/release-readiness/security-key-lifecycle-latest.json`')
+$summaryLines.Add('- `artifacts/qa/release-readiness/supply-chain-proof-*/supply-chain-summary.json`')
+$summaryLines.Add('- `artifacts/qa/release-readiness/supply-chain-proof-*/*.cdx.json`')
 $summaryLines.Add('- `artifacts/qa/release-readiness/service-v2-operability-latest.md`')
 $summaryLines.Add('- `artifacts/qa/release-readiness/service-v2-operability-latest.json`')
 $summaryLines.Add('- `artifacts/qa/release-readiness/rollback-record-latest.md`')

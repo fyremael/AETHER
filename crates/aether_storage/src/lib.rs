@@ -439,6 +439,7 @@ impl Journal for SqliteJournal {
         })
     }
 
+    #[allow(clippy::let_and_return)]
     fn append_receipts(&self) -> Result<Vec<StoredAppendReceipt>, JournalError> {
         let mut statement = self
             .connection
@@ -450,6 +451,7 @@ impl Journal for SqliteJournal {
         receipts
     }
 
+    #[allow(clippy::let_and_return)]
     fn schema_revisions(&self) -> Result<Vec<StoredSchemaRevision>, JournalError> {
         let mut statement = self
             .connection
@@ -477,6 +479,7 @@ impl Journal for SqliteJournal {
             .map_err(JournalError::from)
     }
 
+    #[allow(clippy::let_and_return)]
     fn history_certifications(&self) -> Result<Vec<StoredHistoryCertification>, JournalError> {
         let mut statement = self
             .connection

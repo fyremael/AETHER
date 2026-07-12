@@ -415,4 +415,5 @@ Run Demo 03 and keep the report from that run. It is the best current summary of
 - `scripts/README.md` for launcher details
 - `docs/PILOT_LAUNCH.md` for the launch-readiness contract and full validation pack
 - `docs/PERFORMANCE.md` for the benchmark harness and interpretation guidance
+- `docs/SUPPLY_CHAIN_SECURITY.md` for SBOM, scanner, attestation, and repository-control gates
 - `examples/demo-03-coordination-situation-room.md` for the flagship narrative

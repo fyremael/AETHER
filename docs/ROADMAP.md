@@ -121,8 +121,9 @@ Focus:
 - stronger release promotion evidence
 - keep controlled design-partner alpha as the active target until R7
 - replace authored/path-based readiness with immutable exact-candidate evidence
-- add a real dependency SBOM, vulnerability/license/code gates, and verified
-  package provenance
+- obtain exact-SHA hosted evidence from the implemented CycloneDX,
+  vulnerability/license/code/secret gates and verify package/SBOM attestations
+  plus repository protection settings
 
 ### 6. Product legibility and design-partner packaging
 

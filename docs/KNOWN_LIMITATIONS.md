@@ -77,7 +77,11 @@ ordinary feature backlog:
   customer-workflow artifacts remain useful partial evidence only until they
   are emitted as verified subjects in the immutable candidate bundle. They do
   not override the remaining blockers or qualify commercial beta.
-- The current package “SBOM” is a file/checksum manifest rather than a dependency SBOM; dependency versions, package identifiers, licenses, vulnerability scanning, and code scanning are not yet release gates.
+- The operational file/checksum inventory is now honestly named a file
+  manifest. Strict CycloneDX Rust, Go, and assembled-package SBOMs plus pinned
+  vulnerability, license, secret, package, and supported-language CodeQL gates
+  are implemented. Commercial beta remains blocked until those hosted gates,
+  attestations, and repository protection settings pass for the exact candidate.
 - The optional Postgres journal uses plaintext `NoTls`, and a supported non-loopback HTTP TLS/ingress boundary is not yet enforced. Remote Postgres and non-loopback HTTP are outside the controlled-alpha claim.
 - The new QA hardening workflow is intentionally non-blocking in phase one. It is a diagnostic program for surfacing admin, operator, user, and exec defects before stable subchecks are promoted into `CI` or release-readiness.
 - The repository now has a responsible-disclosure policy, but it is not yet advertising a paid public bug bounty.

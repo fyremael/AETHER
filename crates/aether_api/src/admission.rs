@@ -573,9 +573,10 @@ pub(crate) fn resolve_idempotent_append(
         return Ok(None);
     };
     let batch_digest = digest_json(&request.datoms)?;
-    let schema_matches = request.schema_ref.as_ref().map_or(true, |reference| {
-        reference.digest.0 == receipt.draft.schema_digest
-    });
+    let schema_matches = request
+        .schema_ref
+        .as_ref()
+        .is_none_or(|reference| reference.digest.0 == receipt.draft.schema_digest);
     if batch_digest != receipt.draft.batch_digest || !schema_matches {
         return Err(aether_storage::JournalError::IdempotencyConflict(key.clone()).into());
     }

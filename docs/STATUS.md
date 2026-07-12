@@ -164,7 +164,12 @@ Completed:
 - release-readiness now emits a versioned rollback record that ties the packaged bundle, package-local backup/restore proof, restart/replay evidence, packaged upgrade/rollback playbook, and Postgres export/restore boundary into one release artifact
 - release-readiness now emits a customer workflow acceptance artifact that runs the AI support resolution desk demo and checks the buyer-facing workflow markers
 - release-readiness now emits a performance beta gate artifact that enforces explicit canonical-host thresholds for gated drift, restart/replay, in-process report latency, and pilot HTTP read paths
-- release-readiness emits a security/key lifecycle artifact that verifies package token rotation, token-command/auth-reload tests, secret-manager documentation, and a package file/checksum manifest; that manifest is not a dependency SBOM
+- release-readiness emits a security/key lifecycle artifact that verifies package token rotation, token-command/auth-reload tests, secret-manager documentation, and an honestly named package file/checksum manifest
+- strict CycloneDX 1.5 Rust, Go, and assembled-package SBOM generation now
+  covers lockfiles, package URLs, hashes, licenses, dependency graphs, and every
+  packaged file; pinned cargo-audit, govulncheck, Trivy, Gitleaks, CodeQL,
+  provenance/SBOM attestations, immutable Actions/images, and Dependabot are
+  wired into the Supply Chain workflow, pending a successful hosted exact-SHA run
 - the existing beta-candidate runner remains available for diagnostics, but it does not qualify a commercial beta until R4 replaces authored/path-based readiness with exact-candidate immutable evidence
 - the commercial readiness ledger now targets controlled design-partner alpha; commercial beta is blocked by six non-waivable remediation gates, and GA remains blocked by its separate release, support/security, distribution, and distributed-truth gates
 - a repeatable perturbation sweep now exists to run the persona pass, full-stack benchmark snapshot, host-aware drift checks, deeper ignored stress workloads, and single-node capacity projections in one artifact pack
@@ -177,7 +182,9 @@ Still open:
 - execution-scoped, durable, non-aliasing trace identity
 - a successful official exact-candidate workflow bundle and independently
   downloaded verification; local tooling no longer trusts authored status or path existence
-- real dependency SBOM, vulnerability, license, and code-scanning evidence
+- hosted confirmation that the new dependency/package supply-chain workflow,
+  CodeQL, secret scanning, attestations, and protected repository controls pass
+  for the exact candidate SHA
 - a supported transport-security boundary for remote Postgres and non-loopback HTTP
 - post-v1 DSL ergonomics and document modularity beyond the current canonical surface
 - production hardening for the optional Postgres journal deployment path beyond current parity/concurrency coverage

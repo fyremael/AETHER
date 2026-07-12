@@ -489,7 +489,7 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
                 valid: request
                     .expected_cut
                     .as_ref()
-                    .map_or(true, |expected| expected == &current_cut),
+                    .is_none_or(|expected| expected == &current_cut),
                 schema_ref: Some(batch.schema_ref().clone()),
                 current_cut: Some(current_cut),
                 batch_digest: Some(batch.batch_digest().clone()),
