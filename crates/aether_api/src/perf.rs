@@ -1596,6 +1596,7 @@ fn build_http_fixture() -> Result<HttpFixture, ApiError> {
             build_version: env!("CARGO_PKG_VERSION").into(),
             config_version: "pilot-v1".into(),
             schema_version: "v1".into(),
+            capabilities: crate::status::capability_flags(),
             bind_addr: Some("127.0.0.1:3000".into()),
             effective_namespace: None,
             service_mode: ServiceMode::SingleNode,
@@ -2076,11 +2077,13 @@ fn build_replicated_partition_fixture() -> Result<ReplicatedPartitionFixture, Ap
         partition: PartitionId::new("readiness"),
         leader_epoch: None,
         datoms: vec![partition_status_datom(1, "ready", 1)],
+        ..Default::default()
     })?;
     service.append_partition(PartitionAppendRequest {
         partition: PartitionId::new("authority"),
         leader_epoch: None,
         datoms: vec![partition_owner_datom(1, "worker-a", 3)],
+        ..Default::default()
     })?;
 
     Ok(ReplicatedPartitionFixture {
@@ -2215,6 +2218,7 @@ fn benchmark_replicated_leader_append_impl(
                 partition: fixture.partition.clone(),
                 leader_epoch: None,
                 datoms: fixture.leader_append_datoms.clone(),
+                ..Default::default()
             })
         },
     )
@@ -2252,6 +2256,7 @@ fn benchmark_replicated_follower_replay_impl(
                 partition: fixture.partition.clone(),
                 leader_epoch: None,
                 datoms: fixture.leader_append_datoms.clone(),
+                ..Default::default()
             })?;
             let status = service.partition_status()?;
             let authority = status
@@ -2424,6 +2429,7 @@ fn benchmark_replicated_stale_append_impl(
                 partition: fixture.partition.clone(),
                 leader_epoch: Some(fixture.stale_epoch.clone()),
                 datoms: fixture.leader_append_datoms.clone(),
+                ..Default::default()
             }) {
                 Ok(_) => Err(ApiError::Validation(
                     "stale leader append benchmark unexpectedly succeeded".into(),

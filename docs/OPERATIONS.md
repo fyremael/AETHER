@@ -212,6 +212,11 @@ Available endpoints today:
 - `GET /v1/status`
 - `POST /v1/admin/auth/reload`
 - `POST /v1/append`
+- `POST /v1/append/dry-run`
+- `GET /v1/append/receipts`
+- `GET /v1/schema`
+- `POST /v1/schema/register`
+- `POST /v1/schema/activate`
 - `POST /v1/state/current`
 - `POST /v1/state/as-of`
 - `POST /v1/documents/parse`
@@ -225,6 +230,14 @@ Available endpoints today:
 - `POST /v1/sidecars/artifacts/get`
 - `POST /v1/sidecars/vectors/register`
 - `POST /v1/sidecars/vectors/search`
+
+`POST /v1/append` returns a durable admission receipt. Strict writers should
+discover the active schema, provide its `schema_ref`, provide an
+`expected_cut`, and use an idempotency key. Omitted schema references remain a
+one-release compatibility path and are marked by
+`schema_ref_was_implicit: true`; they are not an unvalidated bypass. A
+quarantined baseline is read-only until an operator registers a compatible
+schema or migrates into a new namespace generation.
 
 ## Reports
 

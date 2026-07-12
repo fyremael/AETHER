@@ -1,6 +1,6 @@
 # V1 Closeout
 
-- Status: Reopened in part; append admission and immutable qualification remain unsatisfied
+- Status: Reopened in part; immutable qualification remains unsatisfied
 - Date: 2026-03-28
 - Reopened: 2026-07-09 following the comprehensive audit
 - Scope: historical v1 acceptance record, now limited to the unrestricted
@@ -35,7 +35,8 @@ items remain supported for the unrestricted library slice:
 
 The local R1 and R2 implementations repair policy-aware semantics and proof
 identity, but this historical closeout still does not promote those claims:
-R3 append admission and R4 immutable exact-candidate evidence remain open.
+R3 append admission is implemented locally. R4 immutable exact-candidate
+evidence remains open, so the repaired contract is not yet a release claim.
 
 ## Acceptance Closure Against The Original Kernel Bar
 

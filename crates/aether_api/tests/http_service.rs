@@ -1,17 +1,19 @@
 use aether_api::{
     coordination_pilot_dsl, coordination_pilot_seed_history, http_router, http_router_with_options,
     http_router_with_partitioned_options, http_router_with_postgres_namespaces,
-    http_router_with_sqlite_namespaces, AppendRequest, AuditEntry, AuditLogResponse, AuthScope,
+    http_router_with_sqlite_namespaces, ActivateSchemaRequest, AppendAdmissionRequest,
+    AppendDryRunResponse, AppendReceipt, AppendRequest, AuditEntry, AuditLogResponse, AuthScope,
     AuthorityPartitionConfig, CoordinationCut, CoordinationDeltaReport,
     CoordinationDeltaReportRequest, CoordinationPilotReport, CoordinationPilotReportRequest,
     ExplainTupleRequest, FederatedExplainReport, FederatedRunDocumentRequest,
     GetArtifactReferenceRequest, HealthResponse, HistoryResponse, HttpAccessToken, HttpAuthConfig,
     HttpKernelOptions, ImportedFactQueryRequest, InMemoryKernelService, KernelService, NamespaceId,
-    ParseDocumentRequest, ParseDocumentResponse, PartitionAppendRequest, PartitionStatusResponse,
-    PilotAuthConfig, PilotServiceConfig, PilotTokenConfig, PromoteReplicaRequest,
-    RegisterArtifactReferenceRequest, RegisterVectorRecordRequest, ReplicaConfig, ReplicaRole,
-    ReplicatedAuthorityPartitionService, ResolveTraceHandleRequest, RunDocumentRequest,
-    RunDocumentResponse, SearchVectorsRequest, SearchVectorsResponse, ServiceMode,
+    NamespaceSchemaRevision, ParseDocumentRequest, ParseDocumentResponse, PartitionAppendRequest,
+    PartitionStatusResponse, PilotAuthConfig, PilotServiceConfig, PilotTokenConfig,
+    PromoteReplicaRequest, RegisterArtifactReferenceRequest, RegisterSchemaRequest,
+    RegisterVectorRecordRequest, ReplicaConfig, ReplicaRole, ReplicatedAuthorityPartitionService,
+    ResolveTraceHandleRequest, RunDocumentRequest, RunDocumentResponse, SchemaCatalogResponse,
+    SchemaCompatibility, SearchVectorsRequest, SearchVectorsResponse, ServiceMode,
     ServiceStatusResponse, SqliteKernelService, VectorFactProjection, VectorMetric,
     AETHER_NAMESPACE_HEADER, COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
     COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
@@ -20,6 +22,7 @@ use aether_ast::{
     AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PartitionCut,
     PartitionId, PolicyContext, PolicyEnvelope, PredicateId, PredicateRef, ReplicaId, Value,
 };
+use aether_schema::{AttributeClass, AttributeSchema, Schema, ValueType};
 use reqwest::Client;
 use std::collections::BTreeMap;
 use std::{
@@ -77,6 +80,148 @@ async fn http_service_exposes_health_and_history() {
         25
     );
 
+    server.abort();
+}
+
+#[tokio::test]
+async fn http_schema_admission_contract_is_structured_and_idempotent() {
+    let (base_url, server) = spawn_server(InMemoryKernelService::new()).await;
+    let client = Client::new();
+    let mut schema = Schema::new("http-strict-v1");
+    schema
+        .register_attribute(AttributeSchema {
+            id: AttributeId::new(1),
+            name: "task.status".into(),
+            class: AttributeClass::ScalarLww,
+            value_type: ValueType::String,
+        })
+        .expect("register test attribute");
+    let registered = client
+        .post(format!("{base_url}/v1/schema/register"))
+        .json(&RegisterSchemaRequest {
+            schema,
+            predecessor: None,
+            compatibility: SchemaCompatibility::Exact,
+        })
+        .send()
+        .await
+        .expect("register schema")
+        .json::<NamespaceSchemaRevision>()
+        .await
+        .expect("registered schema response");
+    let active = client
+        .post(format!("{base_url}/v1/schema/activate"))
+        .json(&ActivateSchemaRequest {
+            schema_ref: registered.schema_ref.clone(),
+            expected_active: None,
+        })
+        .send()
+        .await
+        .expect("activate schema")
+        .json::<NamespaceSchemaRevision>()
+        .await
+        .expect("active schema response");
+    let catalog = client
+        .get(format!("{base_url}/v1/schema"))
+        .send()
+        .await
+        .expect("schema catalog")
+        .json::<SchemaCatalogResponse>()
+        .await
+        .expect("schema catalog response");
+    assert_eq!(
+        catalog.active.expect("active schema").schema_ref,
+        active.schema_ref
+    );
+    assert_eq!(catalog.baselines.len(), 1);
+
+    let datom = Datom {
+        entity: EntityId::new(1),
+        attribute: AttributeId::new(1),
+        value: Value::String("ready".into()),
+        op: OperationKind::Assert,
+        element: ElementId::new(1),
+        replica: ReplicaId::new(1),
+        causal_context: Default::default(),
+        provenance: DatomProvenance {
+            author_principal: "http-test".into(),
+            agent_id: "integration".into(),
+            tool_id: "reqwest".into(),
+            session_id: "schema-admission".into(),
+            source_ref: Default::default(),
+            parent_datom_ids: Vec::new(),
+            confidence: 1.0,
+            trust_domain: "test".into(),
+            schema_version: active.schema_ref.version.clone(),
+        },
+        policy: None,
+    };
+    let mut request = AppendAdmissionRequest {
+        schema_ref: Some(active.schema_ref.clone()),
+        expected_cut: None,
+        idempotency_key: Some("http-idempotency".into()),
+        datoms: vec![datom],
+        principal: None,
+    };
+    let dry_run = client
+        .post(format!("{base_url}/v1/append/dry-run"))
+        .json(&request)
+        .send()
+        .await
+        .expect("append dry run")
+        .json::<AppendDryRunResponse>()
+        .await
+        .expect("dry run response");
+    assert!(dry_run.valid);
+    request.expected_cut = dry_run.current_cut;
+    let receipt = client
+        .post(format!("{base_url}/v1/append"))
+        .json(&request)
+        .send()
+        .await
+        .expect("append")
+        .json::<AppendReceipt>()
+        .await
+        .expect("append receipt");
+    let replay = client
+        .post(format!("{base_url}/v1/append"))
+        .json(&request)
+        .send()
+        .await
+        .expect("append replay")
+        .json::<AppendReceipt>()
+        .await
+        .expect("append replay receipt");
+    assert!(replay.idempotent_replay);
+    assert_eq!(receipt.batch_id, replay.batch_id);
+
+    let mut wrong = request;
+    wrong.idempotency_key = None;
+    wrong.expected_cut = Some(receipt.committed_cut.clone());
+    wrong.schema_ref.as_mut().expect("schema ref").digest.0 = "wrong".into();
+    let response = client
+        .post(format!("{base_url}/v1/append"))
+        .json(&wrong)
+        .send()
+        .await
+        .expect("wrong schema response");
+    assert_eq!(response.status(), reqwest::StatusCode::CONFLICT);
+    let body = response
+        .json::<serde_json::Value>()
+        .await
+        .expect("structured error");
+    assert_eq!(body["code"], "schema_mismatch");
+
+    let receipts = client
+        .get(format!("{base_url}/v1/append/receipts"))
+        .send()
+        .await
+        .expect("append receipts")
+        .json::<Vec<AppendReceipt>>()
+        .await
+        .expect("append receipt list");
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0].batch_id, receipt.batch_id);
     server.abort();
 }
 
@@ -1618,6 +1763,7 @@ async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
                 ..Default::default()
             },
             active_namespace_count: 1,
+            capabilities: aether_api::status::capability_flags(),
             namespaces: Vec::new(),
             principals: Vec::new(),
             replicas: Vec::new(),
@@ -1641,6 +1787,7 @@ async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
                 partition: PartitionId::new(partition),
                 leader_epoch: None,
                 datoms,
+                ..Default::default()
             })
             .send()
             .await
@@ -1826,6 +1973,7 @@ async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
             partition: PartitionId::new("authority"),
             leader_epoch: Some(aether_api::LeaderEpoch::new(1)),
             datoms: vec![partition_owner_datom(1, "worker-b", 4, None)],
+            ..Default::default()
         })
         .send()
         .await

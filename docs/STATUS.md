@@ -46,8 +46,8 @@ binding repair sequence are recorded in
 `docs/REMEDIATION_PROGRAMME.md`. `docs/V1_CLOSEOUT.md` and the semantic
 compliance matrix now carry that reopened boundary explicitly.
 
-Remediation execution has completed the local R1 semantic repair and R2 proof
-identity repair: normalized
+Remediation execution has completed the local R1 semantic repair, R2 proof
+identity repair, and R3 transactional append-admission repair: normalized
 `PolicyScope`, cut-then-project scoped replay, dependency-closure
 certification, scoped program compilation, typed scoped runtime bundles, a
 central service evaluation path, federated/sidecar projection, and
@@ -62,6 +62,14 @@ notebooks use handles; bare tuple explanation returns
 claims remain contained until the later immutable-evidence and operational
 qualification phases bind these local results to an exact candidate.
 
+Namespace writes now pass one canonical active schema before journal commit.
+In-memory, SQLite, and Postgres compare schema identity and exact journal cut
+atomically with batch append and durable receipt creation. Existing prefixes
+are sealed as certified baselines or visible quarantines; schema activation
+contends with append on the same cut. Partition leaders issue the receipt and
+followers preserve and verify its exact identity. Schema discovery/admin,
+dry-run, receipt, structured-error, Go, and Python surfaces are implemented.
+
 Completed:
 
 - Rust workspace root created
@@ -73,6 +81,9 @@ Completed:
 - first recursive tuple explainer implemented
 - execution-scoped proof manifests, receipts, opaque trace handles, durable
   SQLite resolution, authorization re-checks, and optional replay verification implemented
+- canonical namespace schema revisions, cut-bound activation, whole-batch
+  admission, durable append receipts, idempotent retries, history baseline
+  certification/quarantine, and leader/follower receipt verification implemented
 - whole-document DSL parser implemented for the current canonical v1 surface: schema, attribute classes, facts, repeated queries, explain directives, temporal views, and policy annotations
 - `Current` and `AsOf` query execution implemented
 - policy annotations wired through state, document, explanation, report, federation, and sidecar paths as pre-replay/pre-compilation semantic scope; immutable release qualification remains pending
@@ -151,7 +162,6 @@ Still open:
 
 - policy-scoped semantic correctness before replay, negation, aggregation, and fixed-point execution
 - execution-scoped, durable, non-aliasing trace identity
-- transactional namespace-schema validation before append reaches journal authority
 - immutable exact-candidate release evidence rather than authored status and path existence
 - real dependency SBOM, vulnerability, license, and code-scanning evidence
 - a supported transport-security boundary for remote Postgres and non-loopback HTTP
@@ -169,7 +179,7 @@ execution, append, proof identity, or release claims stays frozen until the
 relevant repaired contract is green:
 
 - keep the temporary controlled-alpha claim identical across status, roadmap, limitations, commercialization, and site source
-- complete policy noninterference, then proof identity, then transactional append admission in that order
+- preserve the now-green local R1-R3 semantic, proof-identity, and append-admission contracts while qualifying them through immutable exact-candidate evidence
 - replace self-authored readiness with immutable exact-candidate evidence before restoring any beta language
 - keep admin and operator hardening gates blocking, and do not promote user or exec checks until their release-blocking criteria are explicitly accepted
 - keep commercial beta and GA blocked until their separate programme gates are backed by current evidence

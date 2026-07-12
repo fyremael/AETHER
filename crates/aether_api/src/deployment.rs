@@ -356,6 +356,7 @@ impl ResolvedPilotServiceConfig {
             build_version: env!("CARGO_PKG_VERSION").into(),
             config_version: self.config_version.clone(),
             schema_version: self.schema_version.clone(),
+            capabilities: crate::status::capability_flags(),
             bind_addr: Some(self.bind_addr.clone()),
             effective_namespace: None,
             service_mode: self.service_mode.clone(),

@@ -4,7 +4,7 @@ use crate::{
         persist_execution, resolve_trace, ExecutionStore, InMemoryExecutionStore,
         SqliteExecutionStore,
     },
-    ApiError, AppendRequest, ContentDigest, CurrentStateRequest, ExecutionId, ExplainArtifact,
+    ApiError, ContentDigest, CurrentStateRequest, ExecutionId, ExplainArtifact,
     FederatedExecutionSource, FederationManifest, HistoryRequest, InMemoryKernelService,
     KernelService, NamedExplainResult, NamedQueryResult, NamespaceId, ParseDocumentRequest,
     ResolveTraceHandleRequest, ResolveTraceHandleResponse, RunDocumentRequest, RunDocumentResponse,
@@ -144,17 +144,30 @@ impl PartitionedInMemoryKernelService {
         request: PartitionAppendRequest,
     ) -> Result<PartitionAppendResponse, ApiError> {
         let PartitionAppendRequest {
-            partition, datoms, ..
+            partition,
+            schema_ref,
+            expected_cut,
+            idempotency_key,
+            datoms,
+            principal,
+            ..
         } = request;
-        let response = self
+        let receipt = self
             .partitions
             .entry(partition.clone())
             .or_default()
-            .append(AppendRequest { datoms })?;
+            .admit_append(crate::AppendAdmissionRequest {
+                schema_ref,
+                expected_cut,
+                idempotency_key,
+                datoms,
+                principal,
+            })?;
         Ok(PartitionAppendResponse {
             partition,
             leader_epoch: None,
-            appended: response.appended,
+            appended: receipt.appended,
+            receipt: Some(receipt),
         })
     }
 
@@ -282,18 +295,31 @@ impl SqlitePartitionedKernelService {
         request: PartitionAppendRequest,
     ) -> Result<PartitionAppendResponse, ApiError> {
         let PartitionAppendRequest {
-            partition, datoms, ..
+            partition,
+            schema_ref,
+            expected_cut,
+            idempotency_key,
+            datoms,
+            principal,
+            ..
         } = request;
         self.ensure_partition_open(&partition, true)?;
         let mut partitions = self.partitions.borrow_mut();
-        let response = partitions
+        let receipt = partitions
             .get_mut(&partition)
             .expect("partition should be open")
-            .append(AppendRequest { datoms })?;
+            .admit_append(crate::AppendAdmissionRequest {
+                schema_ref,
+                expected_cut,
+                idempotency_key,
+                datoms,
+                principal,
+            })?;
         Ok(PartitionAppendResponse {
             partition,
             leader_epoch: None,
-            appended: response.appended,
+            appended: receipt.appended,
+            receipt: Some(receipt),
         })
     }
 
@@ -698,19 +724,61 @@ impl ReplicatedPartition {
                 replica_id.0, request.partition
             )));
         }
-        let service = self
-            .replicas
-            .get_mut(&replica_id)
-            .ok_or_else(|| ApiError::Validation(format!("unknown replica {}", replica_id.0)))?;
-        let response = service.append(AppendRequest {
-            datoms: request.datoms,
-        })?;
-        self.replicate_followers()?;
+        let datoms = request.datoms;
+        let (receipt, revision) = {
+            let service = self
+                .replicas
+                .get_mut(&replica_id)
+                .ok_or_else(|| ApiError::Validation(format!("unknown replica {}", replica_id.0)))?;
+            let receipt = service.admit_append(crate::AppendAdmissionRequest {
+                schema_ref: request.schema_ref,
+                expected_cut: request.expected_cut,
+                idempotency_key: request.idempotency_key,
+                datoms: datoms.clone(),
+                principal: request.principal,
+            })?;
+            let revision = service
+                .schema_catalog()?
+                .revisions
+                .into_iter()
+                .find(|revision| revision.schema_ref == receipt.schema_ref)
+                .ok_or_else(|| {
+                    ApiError::Validation(
+                        "leader receipt schema was absent from the schema catalog".into(),
+                    )
+                })?;
+            (receipt, revision)
+        };
+        self.replicate_followers_admitted(&datoms, &revision, &receipt)?;
         Ok(PartitionAppendResponse {
             partition: request.partition,
             leader_epoch: Some(self.metadata.leader_epoch.clone()),
-            appended: response.appended,
+            appended: receipt.appended,
+            receipt: Some(receipt),
         })
+    }
+
+    fn replicate_followers_admitted(
+        &mut self,
+        datoms: &[Datom],
+        revision: &crate::NamespaceSchemaRevision,
+        receipt: &crate::AppendReceipt,
+    ) -> Result<(), ApiError> {
+        let leader_id = self.leader_id()?;
+        let follower_ids = self
+            .metadata
+            .replicas
+            .iter()
+            .filter(|config| config.replica_id != leader_id)
+            .map(|config| config.replica_id)
+            .collect::<Vec<_>>();
+        for follower_id in follower_ids {
+            let follower = self.replicas.get_mut(&follower_id).ok_or_else(|| {
+                ApiError::Validation(format!("unknown follower replica {}", follower_id.0))
+            })?;
+            follower.replicate_admitted_append(revision, receipt, datoms.to_vec())?;
+        }
+        Ok(())
     }
 
     fn leader_service_mut(&mut self) -> Result<&mut crate::SqliteKernelService, ApiError> {
@@ -741,24 +809,7 @@ impl ReplicatedPartition {
                 replica_id.0, self.metadata.partition
             )));
         }
-        let leader_history = {
-            let leader = self.leader_service_mut()?;
-            leader
-                .history(HistoryRequest {
-                    policy_context: None,
-                })?
-                .datoms
-        };
-        let replica = self
-            .replicas
-            .get_mut(&replica_id)
-            .ok_or_else(|| ApiError::Validation(format!("unknown replica {}", replica_id.0)))?;
-        sync_replica_history(
-            replica,
-            &leader_history,
-            &self.metadata.partition,
-            replica_id,
-        )?;
+        self.replicate_followers()?;
 
         for config in &mut self.metadata.replicas {
             config.role = if config.replica_id == replica_id {
@@ -775,16 +826,16 @@ impl ReplicatedPartition {
 
     fn replicate_followers(&mut self) -> Result<(), ApiError> {
         let leader_id = self.leader_id()?;
-        let leader_history = {
+        let (leader_history, leader_receipts, schema_catalog) = {
             let leader = self
                 .replicas
                 .get_mut(&leader_id)
                 .ok_or_else(|| ApiError::Validation(format!("unknown leader {}", leader_id.0)))?;
-            leader
-                .history(HistoryRequest {
-                    policy_context: None,
-                })?
-                .datoms
+            (
+                leader.authority_history()?,
+                leader.authority_append_receipts()?,
+                leader.authority_schema_catalog()?,
+            )
         };
         for replica in &self.metadata.replicas {
             if replica.replica_id == leader_id {
@@ -793,12 +844,48 @@ impl ReplicatedPartition {
             let follower = self.replicas.get_mut(&replica.replica_id).ok_or_else(|| {
                 ApiError::Validation(format!("unknown replica {}", replica.replica_id.0))
             })?;
-            sync_replica_history(
-                follower,
-                &leader_history,
-                &self.metadata.partition,
-                replica.replica_id,
-            )?;
+            let follower_history = follower.authority_history()?;
+            validate_replica_prefix(&follower_history, &leader_history).map_err(|detail| {
+                ApiError::Validation(format!(
+                    "replica {} for partition {} diverged from leader prefix: {}",
+                    replica.replica_id.0, self.metadata.partition, detail
+                ))
+            })?;
+            let mut applied = follower_history.len() as u64;
+            for receipt in &leader_receipts {
+                if receipt.committed_cut.entry_count <= applied {
+                    continue;
+                }
+                if receipt.prior_cut.entry_count != applied {
+                    return Err(ApiError::Validation(format!(
+                        "replica {} for partition {} is not aligned to a leader receipt boundary",
+                        replica.replica_id.0, self.metadata.partition
+                    )));
+                }
+                let revision = schema_catalog
+                    .revisions
+                    .iter()
+                    .find(|revision| revision.schema_ref == receipt.schema_ref)
+                    .ok_or_else(|| {
+                        ApiError::Validation(
+                            "leader receipt schema was absent from the schema catalog".into(),
+                        )
+                    })?;
+                let start = receipt.prior_cut.entry_count as usize;
+                let end = receipt.committed_cut.entry_count as usize;
+                follower.replicate_admitted_append(
+                    revision,
+                    receipt,
+                    leader_history[start..end].to_vec(),
+                )?;
+                applied = receipt.committed_cut.entry_count;
+            }
+            if applied != leader_history.len() as u64 {
+                return Err(ApiError::Validation(format!(
+                    "replica {} for partition {} cannot catch up because leader history lacks admission receipts",
+                    replica.replica_id.0, self.metadata.partition
+                )));
+            }
         }
         Ok(())
     }
@@ -809,10 +896,7 @@ impl ReplicatedPartition {
             .replicas
             .get(&leader_id)
             .ok_or_else(|| ApiError::Validation(format!("unknown leader {}", leader_id.0)))?
-            .history(HistoryRequest {
-                policy_context: None,
-            })?
-            .datoms;
+            .authority_history()?;
         let leader_last = leader_history.last().map(|datom| datom.element);
 
         let mut replicas = Vec::new();
@@ -820,11 +904,7 @@ impl ReplicatedPartition {
             let service = self.replicas.get(&config.replica_id).ok_or_else(|| {
                 ApiError::Validation(format!("unknown replica {}", config.replica_id.0))
             })?;
-            let history = service
-                .history(HistoryRequest {
-                    policy_context: None,
-                })?
-                .datoms;
+            let history = service.authority_history()?;
             let last = history.last().map(|datom| datom.element);
             let mismatch = validate_replica_prefix(&history, &leader_history).err();
             let replication_lag = leader_last
@@ -893,31 +973,6 @@ fn write_partition_metadata(
             error
         ))
     })
-}
-
-fn sync_replica_history(
-    replica: &mut crate::SqliteKernelService,
-    leader_history: &[Datom],
-    partition: &PartitionId,
-    replica_id: ReplicaId,
-) -> Result<(), ApiError> {
-    let follower_history = replica
-        .history(HistoryRequest {
-            policy_context: None,
-        })?
-        .datoms;
-    validate_replica_prefix(&follower_history, leader_history).map_err(|detail| {
-        ApiError::Validation(format!(
-            "replica {} for partition {} diverged from leader prefix: {}",
-            replica_id.0, partition, detail
-        ))
-    })?;
-    if follower_history.len() < leader_history.len() {
-        replica.append(AppendRequest {
-            datoms: leader_history[follower_history.len()..].to_vec(),
-        })?;
-    }
-    Ok(())
 }
 
 fn validate_replica_prefix(
@@ -1857,7 +1912,15 @@ pub struct PartitionAppendRequest {
     pub partition: PartitionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub leader_epoch: Option<LeaderEpoch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_ref: Option<crate::SchemaRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_cut: Option<aether_storage::JournalCutRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idempotency_key: Option<String>,
     pub datoms: Vec<Datom>,
+    #[serde(skip)]
+    pub principal: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -1866,6 +1929,8 @@ pub struct PartitionAppendResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub leader_epoch: Option<LeaderEpoch>,
     pub appended: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<crate::AppendReceipt>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -2035,6 +2100,10 @@ mod tests {
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("tenant-a"),
                 leader_epoch: None,
+                schema_ref: None,
+                expected_cut: None,
+                idempotency_key: None,
+                principal: None,
                 datoms: vec![
                     sample_datom(1, 1, "tenant-a-open", 1, None),
                     sample_datom(1, 1, "tenant-a-running", 2, None),
@@ -2045,6 +2114,10 @@ mod tests {
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("tenant-b"),
                 leader_epoch: None,
+                schema_ref: None,
+                expected_cut: None,
+                idempotency_key: None,
+                principal: None,
                 datoms: vec![sample_datom(1, 1, "tenant-b-ready", 1, None)],
             })
             .expect("append tenant-b");
@@ -2102,6 +2175,10 @@ mod tests {
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("tenant-a"),
                 leader_epoch: None,
+                schema_ref: None,
+                expected_cut: None,
+                idempotency_key: None,
+                principal: None,
                 datoms: vec![sample_datom(1, 1, "alpha", 1, None)],
             })
             .expect("append tenant-a");
@@ -2109,6 +2186,10 @@ mod tests {
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("tenant-b"),
                 leader_epoch: None,
+                schema_ref: None,
+                expected_cut: None,
+                idempotency_key: None,
+                principal: None,
                 datoms: vec![sample_datom(
                     1,
                     1,
@@ -2184,6 +2265,10 @@ mod tests {
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("readiness"),
                 leader_epoch: None,
+                schema_ref: None,
+                expected_cut: None,
+                idempotency_key: None,
+                principal: None,
                 datoms: vec![sample_datom(1, 1, "ready", 1, None)],
             })
             .expect("append readiness datoms");
@@ -2191,6 +2276,10 @@ mod tests {
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("authority"),
                 leader_epoch: None,
+                schema_ref: None,
+                expected_cut: None,
+                idempotency_key: None,
+                principal: None,
                 datoms: vec![sample_datom(1, 1, "worker-a", 3, None)],
             })
             .expect("append authority datoms");
@@ -2368,6 +2457,10 @@ mod tests {
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("joined"),
                 leader_epoch: None,
+                schema_ref: None,
+                expected_cut: None,
+                idempotency_key: None,
+                principal: None,
                 datoms: vec![
                     sample_datom(1, 1, "ready", 1, None),
                     Datom {
@@ -2418,6 +2511,10 @@ mod tests {
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("secure"),
                 leader_epoch: None,
+                schema_ref: None,
+                expected_cut: None,
+                idempotency_key: None,
+                principal: None,
                 datoms: vec![
                     sample_datom(1, 1, "ready", 1, None),
                     sample_datom(
@@ -2481,6 +2578,10 @@ mod tests {
                 .append_partition(PartitionAppendRequest {
                     partition: PartitionId::new("readiness"),
                     leader_epoch: None,
+                    schema_ref: None,
+                    expected_cut: None,
+                    idempotency_key: None,
+                    principal: None,
                     datoms: vec![sample_datom(1, 1, "ready", 1, None)],
                 })
                 .expect("append readiness datoms");
@@ -2488,6 +2589,10 @@ mod tests {
                 .append_partition(PartitionAppendRequest {
                     partition: PartitionId::new("authority"),
                     leader_epoch: None,
+                    schema_ref: None,
+                    expected_cut: None,
+                    idempotency_key: None,
+                    principal: None,
                     datoms: vec![sample_datom(1, 1, "worker-a", 3, None)],
                 })
                 .expect("append authority datoms");
@@ -2590,10 +2695,34 @@ mod tests {
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("authority"),
                 leader_epoch: None,
+                schema_ref: None,
+                expected_cut: None,
+                idempotency_key: None,
+                principal: None,
                 datoms: vec![sample_datom(1, 1, "worker-a", 1, None)],
             })
             .expect("append through leader");
         assert_eq!(appended.leader_epoch.expect("leader epoch").0, 1);
+        let leader = crate::SqliteKernelService::open(temp.path().join("authority-leader.sqlite"))
+            .expect("reopen leader authority");
+        let follower =
+            crate::SqliteKernelService::open(temp.path().join("authority-follower.sqlite"))
+                .expect("reopen follower authority");
+        let leader_receipts = leader.authority_append_receipts().expect("leader receipts");
+        let follower_receipts = follower
+            .authority_append_receipts()
+            .expect("follower receipts");
+        assert_eq!(leader_receipts, follower_receipts);
+        assert_eq!(
+            leader_receipts[0].batch_id,
+            appended.receipt.expect("partition append receipt").batch_id
+        );
+        assert_eq!(
+            leader.authority_schema_catalog().expect("leader schemas"),
+            follower
+                .authority_schema_catalog()
+                .expect("follower schemas")
+        );
 
         let status = service.partition_status().expect("partition status");
         let authority = &status.partitions[0];
@@ -2616,6 +2745,10 @@ mod tests {
         let stale = service.append_partition(PartitionAppendRequest {
             partition: PartitionId::new("authority"),
             leader_epoch: Some(LeaderEpoch::new(1)),
+            schema_ref: None,
+            expected_cut: None,
+            idempotency_key: None,
+            principal: None,
             datoms: vec![sample_datom(1, 1, "worker-b", 2, None)],
         });
         assert!(matches!(
@@ -2628,6 +2761,10 @@ mod tests {
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("authority"),
                 leader_epoch: Some(LeaderEpoch::new(2)),
+                schema_ref: None,
+                expected_cut: None,
+                idempotency_key: None,
+                principal: None,
                 datoms: vec![sample_datom(1, 1, "worker-b", 2, None)],
             })
             .expect("append after promotion");
@@ -2669,6 +2806,10 @@ mod tests {
                 .append_partition(PartitionAppendRequest {
                     partition: PartitionId::new("authority"),
                     leader_epoch: None,
+                    schema_ref: None,
+                    expected_cut: None,
+                    idempotency_key: None,
+                    principal: None,
                     datoms: vec![sample_datom(1, 1, "worker-a", 1, None)],
                 })
                 .expect("append before restart");
@@ -2703,6 +2844,10 @@ mod tests {
         let stale = service.append_partition(PartitionAppendRequest {
             partition: PartitionId::new("authority"),
             leader_epoch: Some(LeaderEpoch::new(1)),
+            schema_ref: None,
+            expected_cut: None,
+            idempotency_key: None,
+            principal: None,
             datoms: vec![sample_datom(1, 1, "stale-worker", 2, None)],
         });
         assert!(matches!(
@@ -2715,6 +2860,10 @@ mod tests {
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("authority"),
                 leader_epoch: Some(LeaderEpoch::new(2)),
+                schema_ref: None,
+                expected_cut: None,
+                idempotency_key: None,
+                principal: None,
                 datoms: vec![sample_datom(1, 1, "worker-b", 2, None)],
             })
             .expect("append under promoted epoch");
@@ -2754,6 +2903,10 @@ mod tests {
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("authority"),
                 leader_epoch: None,
+                schema_ref: None,
+                expected_cut: None,
+                idempotency_key: None,
+                principal: None,
                 datoms: vec![sample_datom(1, 1, "worker-a", 1, None)],
             })
             .expect("append through leader");
@@ -2874,6 +3027,10 @@ mod tests {
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("readiness"),
                 leader_epoch: None,
+                schema_ref: None,
+                expected_cut: None,
+                idempotency_key: None,
+                principal: None,
                 datoms: vec![sample_datom(1, 1, "ready", 1, None)],
             })
             .expect("append readiness");
@@ -2881,6 +3038,10 @@ mod tests {
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("authority"),
                 leader_epoch: None,
+                schema_ref: None,
+                expected_cut: None,
+                idempotency_key: None,
+                principal: None,
                 datoms: vec![sample_datom(1, 1, "worker-a", 2, None)],
             })
             .expect("append authority");
@@ -2936,6 +3097,10 @@ mod tests {
             .append_partition(PartitionAppendRequest {
                 partition: PartitionId::new("authority"),
                 leader_epoch: None,
+                schema_ref: None,
+                expected_cut: None,
+                idempotency_key: None,
+                principal: None,
                 datoms: vec![sample_datom(1, 1, "worker-b", 3, None)],
             })
             .expect("append updated authority");

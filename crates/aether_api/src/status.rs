@@ -85,6 +85,8 @@ pub struct ServiceStatusResponse {
     pub build_version: String,
     pub config_version: String,
     pub schema_version: String,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bind_addr: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -116,6 +118,7 @@ impl ServiceStatusResponse {
             build_version: build_version.into(),
             config_version: config_version.into(),
             schema_version: schema_version.into(),
+            capabilities: capability_flags(),
             bind_addr: None,
             effective_namespace: None,
             service_mode: ServiceMode::SingleNode,
@@ -126,6 +129,15 @@ impl ServiceStatusResponse {
             replicas: Vec::new(),
         }
     }
+}
+
+pub fn capability_flags() -> Vec<String> {
+    vec![
+        "trace_handles_v1".into(),
+        "namespace_schema_ref_v1".into(),
+        "append_receipts_v1".into(),
+        "structured_errors_v1".into(),
+    ]
 }
 
 fn default_storage_backend() -> String {

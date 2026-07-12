@@ -1,6 +1,7 @@
 use aether_api::{
     ApiError, AppendRequest, AsOfRequest, CurrentStateRequest, HistoryRequest,
-    InMemoryKernelService, KernelService, RunDocumentRequest, SqliteKernelService,
+    InMemoryKernelService, KernelService, KernelServiceCore, RunDocumentRequest,
+    SqliteKernelService,
 };
 use aether_ast::{
     AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PolicyContext,
@@ -8,6 +9,7 @@ use aether_ast::{
 };
 use aether_resolver::{JournalDependencyKind, ResolveError, ResolvedState, ResolvedValue};
 use aether_schema::{AttributeClass, AttributeSchema, Schema, ValueType};
+use aether_storage::{InMemoryJournal, Journal};
 use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
@@ -218,15 +220,16 @@ fn sequence_projection_ignores_hidden_insert_and_remove_but_rejects_hidden_ancho
     );
     assert_eq!(privileged.as_of, Some(ElementId::new(3)));
 
-    let mut invalid = InMemoryKernelService::new();
-    invalid
-        .append(AppendRequest {
-            datoms: vec![
-                sequence_datom("hidden-parent", 1, &[], true),
-                sequence_datom("public-child", 2, &[1], false),
-            ],
-        })
-        .expect("append legacy invalid sequence for scanner coverage");
+    // Replay still fails closed for a pre-R3 journal prefix created through
+    // the deliberately low-level raw storage boundary.
+    let mut journal = InMemoryJournal::new();
+    journal
+        .append(&[
+            sequence_datom("hidden-parent", 1, &[], true),
+            sequence_datom("public-child", 2, &[1], false),
+        ])
+        .expect("seed legacy invalid sequence for scanner coverage");
+    let invalid: InMemoryKernelService = KernelServiceCore::from_journal(journal);
     let error = invalid
         .current_state(CurrentStateRequest {
             schema: schema(),

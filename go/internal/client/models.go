@@ -196,6 +196,77 @@ type HistoryResponse struct {
 	Datoms []Datom `json:"datoms"`
 }
 
+type SchemaRef struct {
+	Version string `json:"version"`
+	Digest  string `json:"digest"`
+}
+
+type JournalCutRef struct {
+	LastElement  *ElementID `json:"last_element,omitempty"`
+	EntryCount   uint64     `json:"entry_count"`
+	PrefixDigest string     `json:"prefix_digest"`
+}
+
+type AppendAdmissionRequest struct {
+	SchemaRef      *SchemaRef     `json:"schema_ref,omitempty"`
+	ExpectedCut    *JournalCutRef `json:"expected_cut,omitempty"`
+	IdempotencyKey *string        `json:"idempotency_key,omitempty"`
+	Datoms         []Datom        `json:"datoms"`
+}
+
+type AppendReceipt struct {
+	BatchID              string        `json:"batch_id"`
+	SchemaRef            SchemaRef     `json:"schema_ref"`
+	PriorCut             JournalCutRef `json:"prior_cut"`
+	CommittedCut         JournalCutRef `json:"committed_cut"`
+	BatchDigest          string        `json:"batch_digest"`
+	Appended             int           `json:"appended"`
+	IdempotentReplay     bool          `json:"idempotent_replay"`
+	SchemaRefWasImplicit bool          `json:"schema_ref_was_implicit"`
+}
+
+type AppendDryRunResponse struct {
+	Valid       bool           `json:"valid"`
+	SchemaRef   *SchemaRef     `json:"schema_ref,omitempty"`
+	CurrentCut  *JournalCutRef `json:"current_cut,omitempty"`
+	BatchDigest *string        `json:"batch_digest,omitempty"`
+	Diagnostics []string       `json:"diagnostics"`
+}
+
+type RegisterSchemaRequest struct {
+	Schema        map[string]any `json:"schema"`
+	Predecessor   *SchemaRef     `json:"predecessor,omitempty"`
+	Compatibility string         `json:"compatibility"`
+}
+
+type ActivateSchemaRequest struct {
+	SchemaRef      SchemaRef  `json:"schema_ref"`
+	ExpectedActive *SchemaRef `json:"expected_active,omitempty"`
+}
+
+type NamespaceSchemaRevision struct {
+	SchemaRef     SchemaRef      `json:"schema_ref"`
+	Schema        map[string]any `json:"schema"`
+	Predecessor   *SchemaRef     `json:"predecessor,omitempty"`
+	Compatibility string         `json:"compatibility"`
+	Status        string         `json:"status"`
+}
+
+type SchemaBaselineReceipt struct {
+	SchemaRef               SchemaRef     `json:"schema_ref"`
+	Cut                     JournalCutRef `json:"cut"`
+	Status                  string        `json:"status"`
+	ValidationEngineVersion string        `json:"validation_engine_version"`
+	Diagnostics             []string      `json:"diagnostics"`
+	MigrationManifestJSON   *string       `json:"migration_manifest_json,omitempty"`
+}
+
+type SchemaCatalogResponse struct {
+	Active    *NamespaceSchemaRevision  `json:"active,omitempty"`
+	Revisions []NamespaceSchemaRevision `json:"revisions"`
+	Baselines []SchemaBaselineReceipt   `json:"baselines"`
+}
+
 type RunDocumentRequest struct {
 	DSL           string         `json:"dsl"`
 	PolicyContext *PolicyContext `json:"policy_context,omitempty"`
@@ -256,6 +327,7 @@ type ServiceStatusResponse struct {
 	ServiceMode          string                   `json:"service_mode"`
 	Storage              ServiceStatusStorage     `json:"storage"`
 	ActiveNamespaceCount int                      `json:"active_namespace_count"`
+	Capabilities         []string                 `json:"capabilities"`
 	Namespaces           []NamespaceStatusSummary `json:"namespaces"`
 	Principals           []PrincipalStatusSummary `json:"principals"`
 	Replicas             []ReplicaStatusSummary   `json:"replicas"`

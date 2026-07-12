@@ -23,15 +23,16 @@ The active external claim during remediation is:
 | `M1` | Complete | Deterministic resolver core exists |
 | `M2` | Complete | Rule compiler and planning exist |
 | `M3` | Reopened for policy-aware execution | Recursive runtime, stratified negation, provenance, and bounded aggregation work unrestricted; policy projection must move before compilation/evaluation |
-| `M4` | Controlled-alpha boundary only | Authenticated service, reports, and pilot workflows exist, but proof identity, append admission, transport, and release evidence remain blocked |
+| `M4` | Controlled-alpha boundary only | Authenticated service, reports, execution-scoped proof identity, and schema-admitted writes exist; transport and immutable release evidence remain blocked |
 | `M5` | Complete for first boundary layer | Go shell and Python SDK are real, but still early ecosystems |
 
-R1 is locally implemented and green across the workspace: policy scope is now
+R1-R3 are locally implemented and green across the workspace: policy scope is now
 semantic input to replay, compilation, runtime, service documents, federation,
 reports, and sidecar cuts. R1 remains evidence-pending rather than externally
 closed until its scheduled Postgres parity and performance matrix are captured
-by the immutable R4 evidence pipeline. The active implementation dependency is
-therefore R2 execution-scoped trace identity, followed by R3 append admission.
+by the immutable R4 evidence pipeline. Execution-scoped trace handles and
+transactional namespace-schema append admission are now implemented locally;
+the active implementation dependency is R4 exact-candidate evidence.
 
 The roadmap is no longer about proving the kernel can exist. Its immediate job
 is to repair the correctness and claim boundaries before widening resumes.
@@ -148,7 +149,7 @@ If the team needs a practical ordering, use this one:
 1. `R0`: contain claims and freeze scope
 2. `R1`: make policy semantic input and prove noninterference
 3. `R2`: execution-scoped handles implemented locally; immutable candidate evidence remains pending
-4. `R3`: enforce transactional namespace-schema append admission
+4. `R3`: transactional namespace-schema append admission implemented locally; immutable candidate evidence remains pending
 5. `R4`: compute readiness from immutable exact-candidate evidence
 6. `R5`: harden supply chain, transport, concurrency, resource controls, and operational automation
 7. `R7`: requalify one selected commercial-beta candidate only after independent bundle verification

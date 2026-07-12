@@ -96,7 +96,8 @@ If the bind or storage paths changed, restart the service instead of reloading a
 
 3. Preserve the generated snapshot directory with the release evidence.
 
-The helper snapshots the journal, sidecar catalog, execution metadata database
+The helper snapshots the journal (including namespace schema revisions,
+activation state, append receipts, and baseline/migration records), sidecar catalog, execution metadata database
 (`*.executions.sqlite`), their SQLite WAL/SHM companions, audit log, config,
 and token files. A trace handle is durable only when its execution database is
 restored with the journal cut that produced it.
@@ -115,6 +116,8 @@ To restore:
    - `/health`
    - `/v1/status`
    - authenticated query
+   - active schema digest and baseline status via `/v1/schema`
+   - pre-snapshot batch identity via `/v1/append/receipts`
    - resolution of a pre-snapshot trace handle with replay verification
    - audit append
 

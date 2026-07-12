@@ -18,9 +18,16 @@ use thiserror::Error;
 
 pub(crate) const ENGINE_SEMANTICS_VERSION: &str = "aether-semantic-v1-policy-scope-1";
 
+mod admission;
 mod evaluation;
 pub mod execution;
 
+use admission::{
+    activate_schema, append_receipts as list_append_receipts, commit_append,
+    document_schema_compatible, ensure_legacy_schema, extend_legacy_schema_if_needed,
+    register_schema, replicate_append_receipt, resolve_idempotent_append, schema_catalog,
+    validate_append, AdmissionError,
+};
 use evaluation::{
     project_history, project_history_at_view, resolve_snapshot, EvaluationKey,
     ScopedEvaluationBuilder,
@@ -41,6 +48,12 @@ pub mod report;
 pub mod sidecar;
 pub mod status;
 
+pub use admission::{
+    ActivateSchemaRequest, AppendAdmissionRequest, AppendDryRunResponse, AppendReceipt, BatchId,
+    HistoryCertificationStatus, NamespaceSchemaRevision, RegisterSchemaRequest,
+    SchemaBaselineReceipt, SchemaCatalogResponse, SchemaCompatibility, SchemaStatus,
+};
+pub use aether_storage::JournalCutRef;
 pub use deployment::{
     default_audit_log_path, serve_pilot_http_service, DeploymentError, PilotAuthConfig,
     PilotServiceConfig, PilotStorageConfig, PilotTokenConfig, ResolvedPilotServiceConfig,
@@ -96,6 +109,21 @@ pub use status::{
 
 pub trait KernelService {
     fn append(&mut self, request: AppendRequest) -> Result<AppendResponse, ApiError>;
+    fn admit_append(&mut self, request: AppendAdmissionRequest) -> Result<AppendReceipt, ApiError>;
+    fn dry_run_append(
+        &mut self,
+        request: AppendAdmissionRequest,
+    ) -> Result<AppendDryRunResponse, ApiError>;
+    fn append_receipts(&self) -> Result<Vec<AppendReceipt>, ApiError>;
+    fn register_schema(
+        &mut self,
+        request: RegisterSchemaRequest,
+    ) -> Result<NamespaceSchemaRevision, ApiError>;
+    fn activate_schema(
+        &mut self,
+        request: ActivateSchemaRequest,
+    ) -> Result<NamespaceSchemaRevision, ApiError>;
+    fn schema_catalog(&self) -> Result<SchemaCatalogResponse, ApiError>;
     fn history(&self, request: HistoryRequest) -> Result<HistoryResponse, ApiError>;
     fn current_state(&self, request: CurrentStateRequest)
         -> Result<CurrentStateResponse, ApiError>;
@@ -236,6 +264,32 @@ impl<J: Journal, S: SidecarFederation> KernelServiceCore<J, S> {
         self
     }
 
+    pub(crate) fn replicate_admitted_append(
+        &mut self,
+        revision: &NamespaceSchemaRevision,
+        receipt: &AppendReceipt,
+        datoms: Vec<Datom>,
+    ) -> Result<AppendReceipt, ApiError> {
+        Ok(replicate_append_receipt(
+            &mut self.journal,
+            revision,
+            receipt,
+            datoms,
+        )?)
+    }
+
+    pub(crate) fn authority_history(&self) -> Result<Vec<Datom>, ApiError> {
+        Ok(self.journal.history()?)
+    }
+
+    pub(crate) fn authority_append_receipts(&self) -> Result<Vec<AppendReceipt>, ApiError> {
+        Ok(list_append_receipts(&self.journal)?)
+    }
+
+    pub(crate) fn authority_schema_catalog(&self) -> Result<SchemaCatalogResponse, ApiError> {
+        Ok(schema_catalog(&self.journal)?)
+    }
+
     fn datoms_or_history(&self, datoms: &[Datom]) -> Result<Vec<Datom>, ApiError> {
         if datoms.is_empty() {
             Ok(self.journal.history()?)
@@ -354,10 +408,123 @@ struct DocumentEvaluation {
 
 impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S> {
     fn append(&mut self, request: AppendRequest) -> Result<AppendResponse, ApiError> {
-        self.journal.append(&request.datoms)?;
+        let receipt = self.admit_append(AppendAdmissionRequest {
+            schema_ref: None,
+            expected_cut: None,
+            idempotency_key: None,
+            datoms: request.datoms,
+            principal: None,
+        })?;
         Ok(AppendResponse {
-            appended: request.datoms.len(),
+            appended: receipt.appended,
+            receipt: Some(receipt),
         })
+    }
+
+    fn admit_append(&mut self, request: AppendAdmissionRequest) -> Result<AppendReceipt, ApiError> {
+        if let Some(receipt) = resolve_idempotent_append(&self.journal, &request)? {
+            return Ok(receipt);
+        }
+        let current_cut = self.journal.cut()?;
+        if request.idempotency_key.is_none() {
+            if let Some(expected) = &request.expected_cut {
+                if expected != &current_cut {
+                    return Err(
+                        AdmissionError::Storage(aether_storage::JournalError::StaleCut {
+                            expected: expected.clone(),
+                            actual: current_cut,
+                        })
+                        .into(),
+                    );
+                }
+            }
+        }
+        let active = match schema_catalog(&self.journal)?.active {
+            Some(active) => active,
+            None if request.schema_ref.is_none() => {
+                ensure_legacy_schema(&mut self.journal, &request)?
+            }
+            None => return Err(AdmissionError::NoActiveSchema.into()),
+        };
+        let active = if request.schema_ref.is_none() {
+            extend_legacy_schema_if_needed(&mut self.journal, active, &request)?
+        } else {
+            active
+        };
+        let history = self.journal.history()?;
+        let expected = request
+            .expected_cut
+            .as_ref()
+            .unwrap_or(&current_cut)
+            .clone();
+        let batch = validate_append(&history, &active, &request)?;
+        Ok(commit_append(
+            &mut self.journal,
+            &expected,
+            &request,
+            batch,
+            request.principal.as_deref().unwrap_or("service"),
+        )?)
+    }
+
+    fn dry_run_append(
+        &mut self,
+        request: AppendAdmissionRequest,
+    ) -> Result<AppendDryRunResponse, ApiError> {
+        let active = match schema_catalog(&self.journal)?.active {
+            Some(active) => active,
+            None => {
+                return Ok(AppendDryRunResponse {
+                    valid: false,
+                    schema_ref: None,
+                    current_cut: Some(self.journal.cut()?),
+                    batch_digest: None,
+                    diagnostics: vec![AdmissionError::NoActiveSchema.to_string()],
+                })
+            }
+        };
+        let current_cut = self.journal.cut()?;
+        match validate_append(&self.journal.history()?, &active, &request) {
+            Ok(batch) => Ok(AppendDryRunResponse {
+                valid: request
+                    .expected_cut
+                    .as_ref()
+                    .map_or(true, |expected| expected == &current_cut),
+                schema_ref: Some(batch.schema_ref().clone()),
+                current_cut: Some(current_cut),
+                batch_digest: Some(batch.batch_digest().clone()),
+                diagnostics: Vec::new(),
+            }),
+            Err(error) => Ok(AppendDryRunResponse {
+                valid: false,
+                schema_ref: Some(active.schema_ref),
+                current_cut: Some(current_cut),
+                batch_digest: None,
+                diagnostics: vec![error.to_string()],
+            }),
+        }
+    }
+
+    fn append_receipts(&self) -> Result<Vec<AppendReceipt>, ApiError> {
+        Ok(list_append_receipts(&self.journal)?)
+    }
+
+    fn register_schema(
+        &mut self,
+        request: RegisterSchemaRequest,
+    ) -> Result<NamespaceSchemaRevision, ApiError> {
+        Ok(register_schema(&mut self.journal, request)?)
+    }
+
+    fn activate_schema(
+        &mut self,
+        request: ActivateSchemaRequest,
+    ) -> Result<NamespaceSchemaRevision, ApiError> {
+        Ok(activate_schema(&mut self.journal, request)?)
+    }
+
+    fn schema_catalog(&self) -> Result<SchemaCatalogResponse, ApiError> {
+        Ok(schema_catalog(&self.journal)?)
     }
 
     fn history(&self, request: HistoryRequest) -> Result<HistoryResponse, ApiError> {
@@ -464,6 +631,9 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
             policy_context,
         } = request;
         let document = DefaultDslParser.parse_document(&dsl)?;
+        if let Some(active) = schema_catalog(&self.journal)?.active {
+            document_schema_compatible(&active, &document.schema)?;
+        }
         let datoms = self.datoms_or_history(&[])?;
         let scope = PolicyScope::from_optional(policy_context);
         let builder = ScopedEvaluationBuilder::new_in_namespace(
@@ -621,6 +791,8 @@ pub struct AppendRequest {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AppendResponse {
     pub appended: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<AppendReceipt>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -826,6 +998,8 @@ fn find_matching_derived_tuple(derived: &DerivedSet, atom: &aether_ast::Atom) ->
 pub enum ApiError {
     #[error("bare tuple ids are execution-local; resolve an opaque trace handle instead")]
     AmbiguousTupleReference,
+    #[error(transparent)]
+    Admission(#[from] AdmissionError),
     #[error("validation error: {0}")]
     Validation(String),
     #[error(transparent)]

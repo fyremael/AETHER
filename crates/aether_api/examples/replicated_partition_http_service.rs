@@ -107,6 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             build_version: env!("CARGO_PKG_VERSION").into(),
             config_version: "replicated-prototype".into(),
             schema_version: "v1".into(),
+            capabilities: aether_api::status::capability_flags(),
             bind_addr: Some(bind_addr.to_string()),
             effective_namespace: None,
             service_mode: ServiceMode::Partitioned,

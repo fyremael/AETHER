@@ -22,6 +22,7 @@ from aether_sdk import (  # noqa: E402
     make_datom,
     make_policy,
     make_policy_context,
+    make_provenance,
     make_vector_record,
     value_string,
 )
@@ -143,7 +144,7 @@ query current_cut {
   keep t
 }
 """
-        client.append(
+        first_append = client.append(
             [
                 make_datom(
                     entity=1,
@@ -159,6 +160,17 @@ query current_cut {
                     policy=make_policy(capability="executor"),
                 ),
             ]
+        )
+        self.assertFalse(first_append["idempotent_replay"])
+        self.assertTrue(first_append["schema_ref_was_implicit"])
+        schema_ref = first_append["schema_ref"]
+        strict_provenance = make_provenance(
+            author_principal="python-client",
+            agent_id="integration-test",
+            tool_id="aether-sdk",
+            session_id="http-client-test",
+            trust_domain="test",
+            schema_version=schema_ref["version"],
         )
 
         default_policy_run = client.run_document(policy_document)
@@ -176,7 +188,7 @@ query current_cut {
             [[{"Entity": 1}], [{"Entity": 2}], [{"Entity": 3}]],
         )
 
-        client.append(
+        second_append = client.append(
             [
                 make_datom(
                     entity=1,
@@ -184,8 +196,12 @@ query current_cut {
                     value=value_string("sidecar-anchor-1"),
                     element=3,
                     op="Annotate",
+                    provenance=strict_provenance,
                 ),
-            ]
+            ],
+            schema_ref=schema_ref,
+            expected_cut=first_append["committed_cut"],
+            idempotency_key="python-sidecar-anchor-1",
         )
 
         client.register_artifact_reference(
@@ -210,8 +226,12 @@ query current_cut {
                     value=value_string("sidecar-anchor-2"),
                     element=4,
                     op="Annotate",
+                    provenance=strict_provenance,
                 )
-            ]
+            ],
+            schema_ref=schema_ref,
+            expected_cut=second_append["committed_cut"],
+            idempotency_key="python-sidecar-anchor-2",
         )
         client.register_vector_record(
             record=make_vector_record(

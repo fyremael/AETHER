@@ -76,6 +76,54 @@ func (c *Client) History(ctx context.Context) (*HistoryResponse, error) {
 	return &response, nil
 }
 
+func (c *Client) Append(ctx context.Context, request AppendAdmissionRequest) (*AppendReceipt, error) {
+	var response AppendReceipt
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/append", request, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+func (c *Client) AppendDryRun(ctx context.Context, request AppendAdmissionRequest) (*AppendDryRunResponse, error) {
+	var response AppendDryRunResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/append/dry-run", request, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+func (c *Client) AppendReceipts(ctx context.Context) ([]AppendReceipt, error) {
+	var response []AppendReceipt
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/append/receipts", nil, &response); err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
+func (c *Client) SchemaCatalog(ctx context.Context) (*SchemaCatalogResponse, error) {
+	var response SchemaCatalogResponse
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/schema", nil, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+func (c *Client) RegisterSchema(ctx context.Context, request RegisterSchemaRequest) (*NamespaceSchemaRevision, error) {
+	var response NamespaceSchemaRevision
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/schema/register", request, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+func (c *Client) ActivateSchema(ctx context.Context, request ActivateSchemaRequest) (*NamespaceSchemaRevision, error) {
+	var response NamespaceSchemaRevision
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/schema/activate", request, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
 func (c *Client) AuditLog(ctx context.Context) (*AuditLogResponse, error) {
 	var response AuditLogResponse
 	if err := c.doJSON(ctx, http.MethodGet, "/v1/audit", nil, &response); err != nil {

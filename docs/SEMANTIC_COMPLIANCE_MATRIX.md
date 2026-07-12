@@ -35,13 +35,13 @@ called out explicitly instead of hidden.
 | `2. Implementation language strategy` | Complete | Rust kernel crates, Go client/shell, Python SDK, CI in `.github/workflows/ci.yml` | Rust remains authoritative; Go/Python are boundary layers |
 | `3. Architectural thesis` | Complete | `docs/ARCHITECTURE.md`, `crates/aether_runtime`, `crates/aether_api/src/sidecar.rs` | Two-center kernel thesis is implemented locally |
 | `4. Design stance on Janus` | Complete | Repo layout and implementation shape | Janus remains reference-only, not a compatibility target |
-| `5. Core data model` | Reopened at append admission | `crates/aether_ast`, `crates/aether_resolver`, resolver tests, comprehensive audit | Resolver validation exists, but namespace-schema validity is not enforced transactionally before append |
+| `5. Core data model` | Transactional append admission implemented locally | `crates/aether_ast`, `crates/aether_resolver`, `crates/aether_api/tests/append_admission.rs`, storage race tests | Namespace schema, recursive type, operation, provenance, dependency, cut, and idempotency checks precede atomic append/receipt commit; immutable candidate qualification remains R4 |
 | `6. Provenance model` | Execution-scoped proof identity implemented locally | `crates/aether_api/tests/execution_handles.rs`, execution-store unit tests, HTTP/federation tests | Kernel `TupleId` remains local; service proofs use authorization-checked opaque handles bound to immutable execution manifests and replay digests |
 | `7. Temporal model` | Policy-scoped implementation complete locally | scoped resolver tests and API noninterference suite | Physical cut selection precedes policy projection; visible cuts and hidden/nonexistent errors are projection-local |
 | `8. Query and phase model` | Policy-scoped implementation complete locally | `crates/aether_rules`, `crates/aether_plan`, `crates/aether_api/src/evaluation.rs` | Extensional facts are projected before compiler validation and planning; scoped query execution consumes one evaluation bundle |
 | `9. Rule model` | Policy-scoped implementation complete locally | `crates/aether_runtime/tests/policy_scoped_execution.rs`, API projection-equivalence test | Recursion, negation, aggregates, tuple IDs, indexes, and iterations are computed inside the effective scope |
 | `10. Coordination model` | Policy- and proof-scoped implementation complete locally | pilot/report tests, API noninterference suite, `execution_handles.rs` | Coordination documents and reports run from scoped snapshots and carry execution IDs plus durable trace handles |
-| `11. Sidecar model` | Policy-scoped reads implemented locally | sidecar unit/federation tests and semantic closure suite | Sidecar cuts use projected journal catalogs and protected/absent reads share an opaque error; append-time dependency admission remains R3 |
+| `11. Sidecar model` | Policy-scoped reads and dependency admission implemented locally | sidecar unit/federation tests, semantic closure suite, append admission tests | Sidecar cuts use projected journal catalogs, protected/absent reads share an opaque error, and new journal dependencies are admitted before commit; immutable candidate qualification remains R4 |
 
 ## Section Detail
 
@@ -109,16 +109,18 @@ compatibility as a product constraint.
 
 ### `5. Core data model`
 
-**Status:** Complete for resolver-time operation/class interpretation; reopened
-for transactional namespace-schema append admission.
+**Status:** Transactional namespace-schema append admission implemented locally;
+immutable exact-candidate qualification remains R4.
 
 Implemented:
 
 - all v1 operation kinds are represented in the AST
 - attribute classes drive deterministic resolver behavior
-- op/class compatibility is validated during resolution, but invalid batches
-  are not yet rejected atomically before append
+- op/class compatibility, recursive types, provenance, causal dependencies,
+  active schema, expected cut, and idempotency are validated before atomic
+  append and durable receipt creation
 - `InsertAfter` is anchored and replay-stable for `SequenceRGA`
+- existing prefixes receive immutable certified or quarantined baseline records
 
 Primary evidence:
 
@@ -165,6 +167,7 @@ Primary evidence:
 - [crates/aether_storage/src/lib.rs](../crates/aether_storage/src/lib.rs)
 - [crates/aether_resolver/src/lib.rs](../crates/aether_resolver/src/lib.rs)
 - [crates/aether_api/tests/semantic_closure.rs](../crates/aether_api/tests/semantic_closure.rs)
+- [crates/aether_api/tests/append_admission.rs](../crates/aether_api/tests/append_admission.rs)
 - [crates/aether_resolver/tests/policy_scoped_replay.rs](../crates/aether_resolver/tests/policy_scoped_replay.rs)
 - [crates/aether_api/tests/policy_noninterference.rs](../crates/aether_api/tests/policy_noninterference.rs)
 
@@ -243,8 +246,8 @@ Normalization note:
 
 ### `11. Sidecar model`
 
-**Status:** Policy-scoped sidecar reads and projection implemented locally;
-append-time dependency admission remains R3.
+**Status:** Policy-scoped sidecar reads, projection, and append-time dependency
+admission implemented locally; immutable exact-candidate qualification remains R4.
 
 Implemented:
 

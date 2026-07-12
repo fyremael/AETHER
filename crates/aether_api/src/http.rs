@@ -1,11 +1,12 @@
 use crate::{
-    deployment::PilotServiceConfig, ApiError, AppendRequest, AsOfRequest, AuthReloadResponse,
-    CoordinationCut, CoordinationDeltaReportRequest, CoordinationPilotReportRequest,
-    CurrentStateRequest, ExplainTupleRequest, FederatedExplainReport, FederatedHistoryRequest,
-    FederatedRunDocumentRequest, GetArtifactReferenceRequest, HistoryRequest, KernelService,
-    NamespaceId, ParseDocumentRequest, PartitionAppendRequest, PartitionHistoryRequest,
-    PartitionStateRequest, PartitionStatusResponse, PostgresKernelService, PromoteReplicaRequest,
-    RegisterArtifactReferenceRequest, RegisterVectorRecordRequest,
+    deployment::PilotServiceConfig, ActivateSchemaRequest, ApiError, AppendAdmissionRequest,
+    AsOfRequest, AuthReloadResponse, CoordinationCut, CoordinationDeltaReportRequest,
+    CoordinationPilotReportRequest, CurrentStateRequest, ExplainTupleRequest,
+    FederatedExplainReport, FederatedHistoryRequest, FederatedRunDocumentRequest,
+    GetArtifactReferenceRequest, HistoryRequest, KernelService, NamespaceId, ParseDocumentRequest,
+    PartitionAppendRequest, PartitionHistoryRequest, PartitionStateRequest,
+    PartitionStatusResponse, PostgresKernelService, PromoteReplicaRequest,
+    RegisterArtifactReferenceRequest, RegisterSchemaRequest, RegisterVectorRecordRequest,
     ReplicatedAuthorityPartitionService, ResolveTraceHandleRequest, RunDocumentRequest,
     SearchVectorsRequest, ServiceMode, ServiceStatusResponse, ServiceStatusStorage,
     SqliteKernelService,
@@ -773,6 +774,11 @@ pub fn http_router_with_partitioned_options(
         .route("/v1/audit", get(audit_log))
         .route("/v1/admin/auth/reload", post(reload_auth))
         .route("/v1/append", post(append))
+        .route("/v1/append/dry-run", post(append_dry_run))
+        .route("/v1/append/receipts", get(append_receipts_endpoint))
+        .route("/v1/schema", get(schema_catalog_endpoint))
+        .route("/v1/schema/register", post(register_schema_endpoint))
+        .route("/v1/schema/activate", post(activate_schema_endpoint))
         .route("/v1/state/current", post(current_state))
         .route("/v1/state/as-of", post(as_of))
         .route("/v1/documents/parse", post(parse_document))
@@ -823,6 +829,11 @@ pub fn http_router_with_options(
         .route("/v1/audit", get(audit_log))
         .route("/v1/admin/auth/reload", post(reload_auth))
         .route("/v1/append", post(append))
+        .route("/v1/append/dry-run", post(append_dry_run))
+        .route("/v1/append/receipts", get(append_receipts_endpoint))
+        .route("/v1/schema", get(schema_catalog_endpoint))
+        .route("/v1/schema/register", post(register_schema_endpoint))
+        .route("/v1/schema/activate", post(activate_schema_endpoint))
         .route("/v1/state/current", post(current_state))
         .route("/v1/state/as-of", post(as_of))
         .route("/v1/documents/parse", post(parse_document))
@@ -861,6 +872,11 @@ pub fn http_router_with_sqlite_namespaces(
         .route("/v1/audit", get(audit_log))
         .route("/v1/admin/auth/reload", post(reload_auth))
         .route("/v1/append", post(append))
+        .route("/v1/append/dry-run", post(append_dry_run))
+        .route("/v1/append/receipts", get(append_receipts_endpoint))
+        .route("/v1/schema", get(schema_catalog_endpoint))
+        .route("/v1/schema/register", post(register_schema_endpoint))
+        .route("/v1/schema/activate", post(activate_schema_endpoint))
         .route("/v1/state/current", post(current_state))
         .route("/v1/state/as-of", post(as_of))
         .route("/v1/documents/parse", post(parse_document))
@@ -901,6 +917,11 @@ pub fn http_router_with_postgres_namespaces(
         .route("/v1/audit", get(audit_log))
         .route("/v1/admin/auth/reload", post(reload_auth))
         .route("/v1/append", post(append))
+        .route("/v1/append/dry-run", post(append_dry_run))
+        .route("/v1/append/receipts", get(append_receipts_endpoint))
+        .route("/v1/schema", get(schema_catalog_endpoint))
+        .route("/v1/schema/register", post(register_schema_endpoint))
+        .route("/v1/schema/activate", post(activate_schema_endpoint))
         .route("/v1/state/current", post(current_state))
         .route("/v1/state/as-of", post(as_of))
         .route("/v1/documents/parse", post(parse_document))
@@ -1559,6 +1580,27 @@ fn api_error_code(error: &ApiError) -> &'static str {
             "insufficient_policy"
         }
         ApiError::Execution(_) => "execution_integrity_failure",
+        ApiError::Admission(error) => match error {
+            crate::admission::AdmissionError::SchemaMismatch { .. }
+            | crate::admission::AdmissionError::NoActiveSchema
+            | crate::admission::AdmissionError::UnknownSchema(_)
+            | crate::admission::AdmissionError::SchemaActivationPrecondition
+            | crate::admission::AdmissionError::Storage(
+                aether_storage::JournalError::StaleSchemaActivation
+                | aether_storage::JournalError::UnknownSchemaDigest(_)
+                | aether_storage::JournalError::ActiveSchemaChanged { .. },
+            ) => "schema_mismatch",
+            crate::admission::AdmissionError::ExistingHistoryQuarantined(_) => {
+                "history_quarantined"
+            }
+            crate::admission::AdmissionError::Storage(aether_storage::JournalError::StaleCut {
+                ..
+            }) => "stale_cut",
+            crate::admission::AdmissionError::Storage(
+                aether_storage::JournalError::IdempotencyConflict(_),
+            ) => "idempotency_conflict",
+            _ => "append_validation_failed",
+        },
         ApiError::Journal(_) => "journal_conflict",
         ApiError::Validation(_) => "validation_error",
         ApiError::Sidecar(_) => "sidecar_error",
@@ -1581,6 +1623,22 @@ fn status_for_api_error(error: &ApiError) -> StatusCode {
         | ApiError::Runtime(_)
         | ApiError::Explain(_) => StatusCode::BAD_REQUEST,
         ApiError::Journal(_) => StatusCode::CONFLICT,
+        ApiError::Admission(error) => match error {
+            crate::admission::AdmissionError::SchemaMismatch { .. }
+            | crate::admission::AdmissionError::NoActiveSchema
+            | crate::admission::AdmissionError::UnknownSchema(_)
+            | crate::admission::AdmissionError::SchemaActivationPrecondition
+            | crate::admission::AdmissionError::ExistingHistoryQuarantined(_)
+            | crate::admission::AdmissionError::ReplicationReceiptMismatch
+            | crate::admission::AdmissionError::Storage(
+                aether_storage::JournalError::StaleCut { .. }
+                | aether_storage::JournalError::StaleSchemaActivation
+                | aether_storage::JournalError::UnknownSchemaDigest(_)
+                | aether_storage::JournalError::IdempotencyConflict(_)
+                | aether_storage::JournalError::ActiveSchemaChanged { .. },
+            ) => StatusCode::CONFLICT,
+            _ => StatusCode::BAD_REQUEST,
+        },
         ApiError::Execution(error) => match error {
             crate::execution::ExecutionError::MalformedTraceHandle => StatusCode::BAD_REQUEST,
             crate::execution::ExecutionError::UnknownTraceHandle => StatusCode::NOT_FOUND,
@@ -1732,8 +1790,8 @@ async fn reload_auth(
 async fn append(
     State(state): State<HttpKernelState>,
     headers: HeaderMap,
-    Json(request): Json<AppendRequest>,
-) -> Result<Json<crate::AppendResponse>, HttpError> {
+    Json(request): Json<AppendAdmissionRequest>,
+) -> Result<Json<crate::AppendReceipt>, HttpError> {
     let request_context = audit_context_for_append(&request);
     let response = state.execute(
         &headers,
@@ -1741,9 +1799,110 @@ async fn append(
         "/v1/append",
         AuthScope::Append,
         request_context.clone(),
-        move |service, _principal, _context| {
-            let response = service.append(request).map_err(HttpError::Api)?;
+        move |service, principal, _context| {
+            let mut request = request;
+            request.principal = Some(principal.id.clone());
+            let response = service.admit_append(request).map_err(HttpError::Api)?;
             Ok(response)
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn append_dry_run(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<AppendAdmissionRequest>,
+) -> Result<Json<crate::AppendDryRunResponse>, HttpError> {
+    let request_context = audit_context_for_append(&request);
+    let response = state.execute(
+        &headers,
+        "POST",
+        "/v1/append/dry-run",
+        AuthScope::Append,
+        request_context,
+        move |service, principal, _context| {
+            let mut request = request;
+            request.principal = Some(principal.id.clone());
+            service.dry_run_append(request).map_err(HttpError::Api)
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn append_receipts_endpoint(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<crate::AppendReceipt>>, HttpError> {
+    let response = state.execute(
+        &headers,
+        "GET",
+        "/v1/append/receipts",
+        AuthScope::Ops,
+        AuditContext {
+            temporal_view: Some("append_receipts".into()),
+            ..Default::default()
+        },
+        move |service, _principal, _context| service.append_receipts().map_err(HttpError::Api),
+    )?;
+    Ok(Json(response))
+}
+
+async fn schema_catalog_endpoint(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+) -> Result<Json<crate::SchemaCatalogResponse>, HttpError> {
+    let response = state.execute(
+        &headers,
+        "GET",
+        "/v1/schema",
+        AuthScope::Query,
+        AuditContext {
+            temporal_view: Some("schema_catalog".into()),
+            ..Default::default()
+        },
+        move |service, _principal, _context| service.schema_catalog().map_err(HttpError::Api),
+    )?;
+    Ok(Json(response))
+}
+
+async fn register_schema_endpoint(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<RegisterSchemaRequest>,
+) -> Result<Json<crate::NamespaceSchemaRevision>, HttpError> {
+    let response = state.execute(
+        &headers,
+        "POST",
+        "/v1/schema/register",
+        AuthScope::Ops,
+        AuditContext {
+            temporal_view: Some("schema_register".into()),
+            ..Default::default()
+        },
+        move |service, _principal, _context| {
+            service.register_schema(request).map_err(HttpError::Api)
+        },
+    )?;
+    Ok(Json(response))
+}
+
+async fn activate_schema_endpoint(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Json(request): Json<ActivateSchemaRequest>,
+) -> Result<Json<crate::NamespaceSchemaRevision>, HttpError> {
+    let response = state.execute(
+        &headers,
+        "POST",
+        "/v1/schema/activate",
+        AuthScope::Ops,
+        AuditContext {
+            temporal_view: Some("schema_activate".into()),
+            ..Default::default()
+        },
+        move |service, _principal, _context| {
+            service.activate_schema(request).map_err(HttpError::Api)
         },
     )?;
     Ok(Json(response))
@@ -2009,7 +2168,7 @@ async fn promote_replica(
 async fn partition_append(
     State(state): State<HttpKernelState>,
     headers: HeaderMap,
-    Json(request): Json<PartitionAppendRequest>,
+    Json(mut request): Json<PartitionAppendRequest>,
 ) -> Result<Json<crate::PartitionAppendResponse>, HttpError> {
     let request_context = AuditContext {
         temporal_view: Some(format!("partition({})", request.partition)),
@@ -2023,7 +2182,8 @@ async fn partition_append(
         "/v1/partitions/append",
         AuthScope::Append,
         request_context,
-        move |service, _principal, context| {
+        move |service, principal, context| {
+            request.principal = Some(principal.id.clone());
             let response = service.append_partition(request).map_err(HttpError::Api)?;
             context.requested_element = response.leader_epoch.as_ref().map(|epoch| epoch.0);
             Ok(response)
@@ -2365,7 +2525,7 @@ async fn search_vectors(
     Ok(Json(response))
 }
 
-fn audit_context_for_append(request: &AppendRequest) -> AuditContext {
+fn audit_context_for_append(request: &AppendAdmissionRequest) -> AuditContext {
     AuditContext {
         command_source: Some("http".into()),
         datom_count: Some(request.datoms.len()),

@@ -37,3 +37,6 @@ The current numbered ADR set is:
 - `docs/ADR/0007-sidecars-remain-subordinate-to-semantic-control.md`
 - `docs/ADR/0008-ai-support-resolution-desk-is-reference-app-packaging.md`
 - `docs/ADR/0009-service-v2-namespaces-and-postgres-journal.md`
+- `docs/ADR/0010-policy-scoped-semantic-snapshots.md`
+- `docs/ADR/0011-execution-receipts-and-trace-handles.md`
+- `docs/ADR/0012-namespace-schema-and-append-admission.md`

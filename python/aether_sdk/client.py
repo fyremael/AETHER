@@ -58,8 +58,78 @@ class AetherClient:
     def history(self) -> dict[str, Any]:
         return self._request_json("GET", "/v1/history")
 
-    def append(self, datoms: list[dict[str, Any] | Datom]) -> dict[str, Any]:
-        return self._request_json("POST", "/v1/append", {"datoms": datoms})
+    def append(
+        self,
+        datoms: list[dict[str, Any] | Datom],
+        *,
+        schema_ref: dict[str, Any] | None = None,
+        expected_cut: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            "/v1/append",
+            {
+                "schema_ref": schema_ref,
+                "expected_cut": expected_cut,
+                "idempotency_key": idempotency_key,
+                "datoms": datoms,
+            },
+        )
+
+    def append_dry_run(
+        self,
+        datoms: list[dict[str, Any] | Datom],
+        *,
+        schema_ref: dict[str, Any] | None = None,
+        expected_cut: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            "/v1/append/dry-run",
+            {
+                "schema_ref": schema_ref,
+                "expected_cut": expected_cut,
+                "idempotency_key": idempotency_key,
+                "datoms": datoms,
+            },
+        )
+
+    def append_receipts(self) -> dict[str, Any]:
+        return self._request_json("GET", "/v1/append/receipts")
+
+    def schema_catalog(self) -> dict[str, Any]:
+        return self._request_json("GET", "/v1/schema")
+
+    def register_schema(
+        self,
+        schema: dict[str, Any],
+        *,
+        predecessor: dict[str, Any] | None = None,
+        compatibility: str = "exact",
+    ) -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            "/v1/schema/register",
+            {
+                "schema": schema,
+                "predecessor": predecessor,
+                "compatibility": compatibility,
+            },
+        )
+
+    def activate_schema(
+        self,
+        schema_ref: dict[str, Any],
+        *,
+        expected_active: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            "/v1/schema/activate",
+            {"schema_ref": schema_ref, "expected_active": expected_active},
+        )
 
     def current_state(
         self,
