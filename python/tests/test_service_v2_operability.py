@@ -63,11 +63,11 @@ class ServiceV2OperabilityTests(unittest.TestCase):
         self.assertIsInstance(status["operator"], bool)
 
     def test_namespace_concurrency_contract_is_bounded(self) -> None:
-        http_source = (REPO_ROOT / "crates" / "aether_api" / "src" / "http.rs").read_text(
+        http_source = (REPO_ROOT / "crates" / "aether_http" / "src" / "http.rs").read_text(
             encoding="utf-8"
         )
         partition_source = (
-            REPO_ROOT / "crates" / "aether_api" / "src" / "partitioned.rs"
+            REPO_ROOT / "crates" / "aether_partition" / "src" / "lib.rs"
         ).read_text(encoding="utf-8")
 
         for marker in (
