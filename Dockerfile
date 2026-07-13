@@ -6,7 +6,10 @@ RUN cargo build --release -p aether_api --bin aether_pilot_service
 
 FROM debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df
 
-RUN useradd --create-home --shell /usr/sbin/nologin aether
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates libssl3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /usr/sbin/nologin aether
 COPY --from=build /src/target/release/aether_pilot_service /usr/local/bin/aether_pilot_service
 
 USER aether

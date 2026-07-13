@@ -130,6 +130,12 @@ class SupplyChainTests(unittest.TestCase):
             [],
         )
 
+    def test_container_runtime_declares_native_tls_dependencies(self) -> None:
+        dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertIn("ca-certificates", dockerfile)
+        self.assertIn("libssl3", dockerfile)
+
     def test_mutable_action_image_and_write_all_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
