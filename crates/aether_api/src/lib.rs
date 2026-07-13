@@ -22,10 +22,26 @@ pub mod http;
 pub mod partitioned;
 #[doc(hidden)]
 pub mod perf;
-pub mod pilot;
-pub mod report;
+pub mod pilot {
+    pub use aether_pilot::pilot::*;
+}
+pub mod report {
+    pub use aether_pilot::report::*;
+}
 pub mod status;
 
+pub use aether_pilot::{
+    build_coordination_delta_report, build_coordination_pilot_report,
+    build_coordination_pilot_report_with_policy, render_coordination_delta_report_markdown,
+    render_coordination_pilot_report_markdown, CoordinationCut, CoordinationDeltaReport,
+    CoordinationDeltaReportRequest, CoordinationPilotReport, CoordinationPilotReportRequest,
+    CoordinationTraceHandle, ReportRow, ReportRowChange, ReportRowDiff, ReportSectionDelta,
+    TraceSummary, TraceTupleSummary,
+};
+pub use aether_pilot::{
+    coordination_pilot_dsl, coordination_pilot_seed_history,
+    COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
+};
 pub use deployment::{
     default_audit_log_path, serve_pilot_http_service, DeploymentError, PilotAuthConfig,
     PilotConcurrencyConfig, PilotHttpTransportConfig, PilotServiceConfig, PilotStorageConfig,
@@ -51,18 +67,6 @@ pub use partitioned::{
     PartitionedInMemoryKernelService, PromoteReplicaRequest, PromoteReplicaResponse, ReplicaConfig,
     ReplicaRole, ReplicaStatus, ReplicatedAuthorityPartitionService,
     SqlitePartitionedKernelService,
-};
-pub use pilot::{
-    coordination_pilot_dsl, coordination_pilot_seed_history,
-    COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
-};
-pub use report::{
-    build_coordination_delta_report, build_coordination_pilot_report,
-    build_coordination_pilot_report_with_policy, render_coordination_delta_report_markdown,
-    render_coordination_pilot_report_markdown, CoordinationCut, CoordinationDeltaReport,
-    CoordinationDeltaReportRequest, CoordinationPilotReport, CoordinationPilotReportRequest,
-    CoordinationTraceHandle, ReportRow, ReportRowChange, ReportRowDiff, ReportSectionDelta,
-    TraceSummary, TraceTupleSummary,
 };
 pub use status::{
     AuthReloadResponse, NamespaceStatusSummary, PrincipalStatusSummary, ReplicaStatusSummary,

@@ -23,6 +23,7 @@ version = "0.1.0"
 dependencies = [
  "aether_ast",
  "aether_explain",
+ "aether_pilot",
  "aether_plan",
  "aether_resolver",
  "aether_rules",
@@ -66,6 +67,15 @@ dependencies = [
  "aether_schema",
  "indexmap",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "aether_pilot"
+version = "0.1.0"
+dependencies = [
+ "aether_ast",
+ "aether_service_core",
+ "serde",
 ]
 
 [[package]]
