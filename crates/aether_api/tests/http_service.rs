@@ -29,7 +29,7 @@ use std::collections::BTreeMap;
 use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(1);
@@ -1024,12 +1024,15 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
             && entry.context.legacy_endpoint
     }));
 
-    let audit_contents =
-        std::fs::read_to_string(audit.path()).expect("read persisted audit log contents");
-    assert!(audit_contents.contains("\"path\":\"/v1/append\""));
-    assert!(audit_contents.contains("\"path\":\"/v1/documents/run\""));
-    assert!(audit_contents.contains("\"temporal_view\":\"current\""));
-    assert!(audit_contents.contains("\"query_goal\":\"execution_authorized(t, worker, epoch)\""));
+    wait_for_audit_contents(
+        audit.path(),
+        &[
+            "\"path\":\"/v1/append\"",
+            "\"path\":\"/v1/documents/run\"",
+            "\"temporal_view\":\"current\"",
+            "\"query_goal\":\"execution_authorized(t, worker, epoch)\"",
+        ],
+    );
 
     stop_server(server).await;
 }
@@ -3392,6 +3395,23 @@ fn read_audit_entries(path: &Path) -> Vec<AuditEntry> {
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).expect("parse audit entry"))
         .collect()
+}
+
+fn wait_for_audit_contents(path: &Path, expected: &[&str]) -> String {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let contents = std::fs::read_to_string(path).unwrap_or_default();
+        if expected.iter().all(|needle| contents.contains(needle)) {
+            return contents;
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "audit log did not contain {expected:?} before the bounded persistence timeout; \
+                 observed contents: {contents}"
+            );
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn replicated_partition_service(root: &Path) -> ReplicatedAuthorityPartitionService {
