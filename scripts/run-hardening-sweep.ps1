@@ -564,6 +564,7 @@ function Invoke-AdminPack {
                 $proofRun = Invoke-JsonRequest -Method "POST" -Url "$baseUrl/v1/documents/run" -Token $token -Body @{
                     dsl = @'
 schema proof_backup_v1 {
+  attr attribute_1: ScalarLWW<String>
 }
 
 predicates {
