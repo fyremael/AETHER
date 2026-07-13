@@ -17,8 +17,12 @@ pub mod sidecar {
     pub use aether_sidecar::*;
 }
 
-pub mod deployment;
-pub mod http;
+pub mod deployment {
+    pub use aether_http::deployment::*;
+}
+pub mod http {
+    pub use aether_http::http::*;
+}
 pub mod partitioned {
     pub use aether_partition::*;
 }
@@ -30,8 +34,29 @@ pub mod pilot {
 pub mod report {
     pub use aether_pilot::report::*;
 }
-pub mod status;
+pub mod status {
+    pub use aether_http::status::*;
+}
 
+pub use aether_http::{
+    default_audit_log_path, serve_pilot_http_service, DeploymentError, PilotAuthConfig,
+    PilotConcurrencyConfig, PilotHttpTransportConfig, PilotServiceConfig, PilotStorageConfig,
+    PilotTokenConfig, ResolvedPilotHttpTransport, ResolvedPilotServiceConfig, ResolvedPilotStorage,
+    ResolvedPilotTokenSummary,
+};
+pub use aether_http::{
+    http_router, http_router_with_options, http_router_with_partitioned_options,
+    http_router_with_postgres_namespaces, http_router_with_postgres_namespaces_and_tls,
+    http_router_with_sqlite_namespaces, AuditContext, AuditEntry, AuditLogResponse, AuthScope,
+    HealthResponse, HttpAccessToken, HttpAuthConfig, HttpKernelOptions, HttpKernelState,
+    HttpResourceLimits, PageInfo, PageRequest, PagedHistoryResponse, PagedRunDocumentResponse,
+    PagedTraceResponse, StructuredErrorResponse, AETHER_NAMESPACE_HEADER, AETHER_REQUEST_ID_HEADER,
+};
+pub use aether_http::{
+    AuthReloadResponse, NamespaceStatusSummary, PrincipalStatusSummary, ReplicaStatusSummary,
+    ServiceMode, ServiceResourceControlStatus, ServiceStatusResponse, ServiceStatusStorage,
+    ServiceTransportStatus,
+};
 pub use aether_partition::{
     render_federated_explain_report_markdown, AuthorityPartitionConfig, FederatedExplainReport,
     FederatedHistoryRequest, FederatedHistoryResponse, FederatedImportedSourceSummary,
@@ -55,25 +80,6 @@ pub use aether_pilot::{
 pub use aether_pilot::{
     coordination_pilot_dsl, coordination_pilot_seed_history,
     COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
-};
-pub use deployment::{
-    default_audit_log_path, serve_pilot_http_service, DeploymentError, PilotAuthConfig,
-    PilotConcurrencyConfig, PilotHttpTransportConfig, PilotServiceConfig, PilotStorageConfig,
-    PilotTokenConfig, ResolvedPilotHttpTransport, ResolvedPilotServiceConfig, ResolvedPilotStorage,
-    ResolvedPilotTokenSummary,
-};
-pub use http::{
-    http_router, http_router_with_options, http_router_with_partitioned_options,
-    http_router_with_postgres_namespaces, http_router_with_postgres_namespaces_and_tls,
-    http_router_with_sqlite_namespaces, AuditContext, AuditEntry, AuditLogResponse, AuthScope,
-    HealthResponse, HttpAccessToken, HttpAuthConfig, HttpKernelOptions, HttpKernelState,
-    HttpResourceLimits, PageInfo, PageRequest, PagedHistoryResponse, PagedRunDocumentResponse,
-    PagedTraceResponse, StructuredErrorResponse, AETHER_NAMESPACE_HEADER, AETHER_REQUEST_ID_HEADER,
-};
-pub use status::{
-    AuthReloadResponse, NamespaceStatusSummary, PrincipalStatusSummary, ReplicaStatusSummary,
-    ServiceMode, ServiceResourceControlStatus, ServiceStatusResponse, ServiceStatusStorage,
-    ServiceTransportStatus,
 };
 
 #[cfg(test)]
