@@ -8,6 +8,7 @@ version.workspace = true
 [dependencies]
 aether_ast = { path = "../aether_ast" }
 aether_explain = { path = "../aether_explain" }
+aether_partition = { path = "../aether_partition" }
 aether_plan = { path = "../aether_plan" }
 aether_pilot = { path = "../aether_pilot" }
 aether_resolver = { path = "../aether_resolver" }

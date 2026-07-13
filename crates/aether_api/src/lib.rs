@@ -19,7 +19,9 @@ pub mod sidecar {
 
 pub mod deployment;
 pub mod http;
-pub mod partitioned;
+pub mod partitioned {
+    pub use aether_partition::*;
+}
 #[doc(hidden)]
 pub mod perf;
 pub mod pilot {
@@ -30,6 +32,18 @@ pub mod report {
 }
 pub mod status;
 
+pub use aether_partition::{
+    render_federated_explain_report_markdown, AuthorityPartitionConfig, FederatedExplainReport,
+    FederatedHistoryRequest, FederatedHistoryResponse, FederatedImportedSourceSummary,
+    FederatedNamedQuerySummary, FederatedReportRow, FederatedRunDocumentRequest,
+    FederatedRunDocumentResponse, FederatedTraceSummary, FederatedTraceTupleSummary,
+    ImportedFactQueryRequest, ImportedFactQueryResponse, LeaderEpoch, PartitionAppendRequest,
+    PartitionAppendResponse, PartitionHistoryRequest, PartitionHistoryResponse,
+    PartitionStateRequest, PartitionStateResponse, PartitionStatus, PartitionStatusResponse,
+    PartitionedInMemoryKernelService, PromoteReplicaRequest, PromoteReplicaResponse, ReplicaConfig,
+    ReplicaRole, ReplicaStatus, ReplicatedAuthorityPartitionService,
+    SqlitePartitionedKernelService,
+};
 pub use aether_pilot::{
     build_coordination_delta_report, build_coordination_pilot_report,
     build_coordination_pilot_report_with_policy, render_coordination_delta_report_markdown,
@@ -55,18 +69,6 @@ pub use http::{
     HealthResponse, HttpAccessToken, HttpAuthConfig, HttpKernelOptions, HttpKernelState,
     HttpResourceLimits, PageInfo, PageRequest, PagedHistoryResponse, PagedRunDocumentResponse,
     PagedTraceResponse, StructuredErrorResponse, AETHER_NAMESPACE_HEADER, AETHER_REQUEST_ID_HEADER,
-};
-pub use partitioned::{
-    render_federated_explain_report_markdown, AuthorityPartitionConfig, FederatedExplainReport,
-    FederatedHistoryRequest, FederatedHistoryResponse, FederatedImportedSourceSummary,
-    FederatedNamedQuerySummary, FederatedReportRow, FederatedRunDocumentRequest,
-    FederatedRunDocumentResponse, FederatedTraceSummary, FederatedTraceTupleSummary,
-    ImportedFactQueryRequest, ImportedFactQueryResponse, LeaderEpoch, PartitionAppendRequest,
-    PartitionAppendResponse, PartitionHistoryRequest, PartitionHistoryResponse,
-    PartitionStateRequest, PartitionStateResponse, PartitionStatus, PartitionStatusResponse,
-    PartitionedInMemoryKernelService, PromoteReplicaRequest, PromoteReplicaResponse, ReplicaConfig,
-    ReplicaRole, ReplicaStatus, ReplicatedAuthorityPartitionService,
-    SqlitePartitionedKernelService,
 };
 pub use status::{
     AuthReloadResponse, NamespaceStatusSummary, PrincipalStatusSummary, ReplicaStatusSummary,

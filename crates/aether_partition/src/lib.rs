@@ -1,13 +1,19 @@
+use aether_service_core::*;
+
+#[doc(hidden)]
+pub mod evaluation {
+    pub use aether_service_core::evaluation::*;
+}
+pub mod execution {
+    pub use aether_service_core::execution::*;
+}
+
 use crate::{
     evaluation::{FederationIdentityMaterial, ScopedEvaluationBuilder},
     execution::{
         persist_execution, resolve_trace, ExecutionStore, InMemoryExecutionStore,
         SqliteExecutionStore,
     },
-    ApiError, ContentDigest, CurrentStateRequest, ExecutionId, ExplainArtifact,
-    FederatedExecutionSource, FederationManifest, HistoryRequest, InMemoryKernelService,
-    KernelService, NamedExplainResult, NamedQueryResult, NamespaceId, ParseDocumentRequest,
-    ResolveTraceHandleRequest, ResolveTraceHandleResponse, RunDocumentRequest, RunDocumentResponse,
 };
 use aether_ast::{
     merge_partition_cuts, Atom, Datom, ExplainSpec, ExplainTarget, ExtensionalFact, FactProvenance,

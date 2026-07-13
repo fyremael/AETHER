@@ -11,6 +11,7 @@ members = [
     "crates/aether_sidecar",
     "crates/aether_service_core",
     "crates/aether_pilot",
+    "crates/aether_partition",
     "crates/aether_api",
 ]
 resolver = "2"
