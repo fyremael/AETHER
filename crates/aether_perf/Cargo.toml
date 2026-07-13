@@ -1,5 +1,5 @@
 [package]
-name = "aether_api"
+name = "aether_perf"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -10,9 +10,8 @@ aether_ast = { path = "../aether_ast" }
 aether_explain = { path = "../aether_explain" }
 aether_http = { path = "../aether_http" }
 aether_partition = { path = "../aether_partition" }
-aether_perf = { path = "../aether_perf" }
-aether_plan = { path = "../aether_plan" }
 aether_pilot = { path = "../aether_pilot" }
+aether_plan = { path = "../aether_plan" }
 aether_resolver = { path = "../aether_resolver" }
 aether_rules = { path = "../aether_rules" }
 aether_runtime = { path = "../aether_runtime" }
@@ -21,22 +20,8 @@ aether_service_core = { path = "../aether_service_core" }
 aether_sidecar = { path = "../aether_sidecar" }
 aether_storage = { path = "../aether_storage" }
 axum = { version = "=0.7.9", features = ["json"] }
-indexmap.workspace = true
-rand.workspace = true
-rusqlite = { version = "=0.32.1", features = ["bundled"] }
 serde.workspace = true
 serde_json = "1.0.133"
-sha2.workspace = true
 sysinfo = "=0.30.13"
-thiserror.workspace = true
 tokio = { version = "=1.44.2", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
 tower = { version = "=0.5.3", features = ["util"] }
-
-[dev-dependencies]
-clap = "=4.5.20"
-criterion = "=0.5.1"
-reqwest = { version = "=0.12.24", default-features = false, features = ["json", "rustls-tls"] }
-
-[[bench]]
-name = "kernel_perf"
-harness = false

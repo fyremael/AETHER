@@ -1,3 +1,14 @@
+use aether_http::*;
+use aether_partition::*;
+use aether_pilot::*;
+
+pub mod sidecar {
+    pub use aether_sidecar::*;
+}
+pub mod status {
+    pub use aether_http::status::*;
+}
+
 use crate::{
     build_coordination_delta_report, build_coordination_pilot_report,
     coordination_pilot_seed_history, http_router_with_options, ApiError, AppendRequest, AuthScope,

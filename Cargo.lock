@@ -25,6 +25,7 @@ dependencies = [
  "aether_explain",
  "aether_http",
  "aether_partition",
+ "aether_perf",
  "aether_pilot",
  "aether_plan",
  "aether_resolver",
@@ -104,6 +105,31 @@ dependencies = [
  "indexmap",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "aether_perf"
+version = "0.1.0"
+dependencies = [
+ "aether_ast",
+ "aether_explain",
+ "aether_http",
+ "aether_partition",
+ "aether_pilot",
+ "aether_plan",
+ "aether_resolver",
+ "aether_rules",
+ "aether_runtime",
+ "aether_schema",
+ "aether_service_core",
+ "aether_sidecar",
+ "aether_storage",
+ "axum",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tokio",
+ "tower",
 ]
 
 [[package]]

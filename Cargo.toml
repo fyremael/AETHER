@@ -13,6 +13,7 @@ members = [
     "crates/aether_pilot",
     "crates/aether_partition",
     "crates/aether_http",
+    "crates/aether_perf",
     "crates/aether_api",
 ]
 resolver = "2"

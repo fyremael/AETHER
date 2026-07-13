@@ -27,7 +27,9 @@ pub mod partitioned {
     pub use aether_partition::*;
 }
 #[doc(hidden)]
-pub mod perf;
+pub mod perf {
+    pub use aether_perf::*;
+}
 pub mod pilot {
     pub use aether_pilot::pilot::*;
 }
