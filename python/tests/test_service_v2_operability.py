@@ -18,6 +18,14 @@ def load_module():
 
 
 class ServiceV2OperabilityTests(unittest.TestCase):
+    def test_python_ci_installs_evidence_test_dependencies(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        python_job = workflow.split("  python-sdk:", 1)[1].split("  pilot-launch-gate:", 1)[0]
+        self.assertIn("requirements-release.txt", python_job)
+        self.assertIn("python -m unittest discover python/tests -v", python_job)
+
     def test_container_ci_smoke_has_required_markers(self) -> None:
         module = load_module()
         ok, missing = module.file_contains_all(
