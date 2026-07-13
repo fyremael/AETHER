@@ -4,7 +4,10 @@ use aether_ast::{
     PolicyEnvelope, PolicyScope, PredicateId, QueryAst, QueryResult, QueryRow, RuleAst, RuleId,
     Term, Tuple, TupleId, Value, Variable,
 };
-use aether_plan::{CompiledProgram, ScopedProgram};
+use aether_plan::{
+    CompiledProgram, DeltaAnchorStrategy, ProvenanceRequirement, ScopedProgram,
+    EXECUTABLE_PLAN_FORMAT_VERSION,
+};
 use aether_resolver::{ResolvedSnapshot, ResolvedState};
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
@@ -164,6 +167,12 @@ impl SemiNaiveRuntime {
         program: &CompiledProgram,
         limits: RuntimeLimits,
     ) -> Result<DerivedSet, RuntimeError> {
+        if program.plan_format_version != EXECUTABLE_PLAN_FORMAT_VERSION {
+            return Err(RuntimeError::UnsupportedPlanFormat {
+                expected: EXECUTABLE_PLAN_FORMAT_VERSION,
+                actual: program.plan_format_version.clone(),
+            });
+        }
         let extensional_rows = build_extensional_rows(state, program);
         let intensional_predicates: IndexSet<PredicateId> = program
             .rules
@@ -171,7 +180,7 @@ impl SemiNaiveRuntime {
             .map(|rule| rule.head.predicate.id)
             .collect();
         let scc_lookup = build_scc_lookup(program);
-        let scc_order = build_scc_evaluation_order(program, &scc_lookup);
+        let scc_order = program.schedule.scc_order.clone();
         let rules_by_scc = build_rules_by_scc(program, &scc_lookup);
 
         let mut derived_by_predicate: IndexMap<PredicateId, Vec<RelationRow>> = IndexMap::new();
@@ -187,11 +196,13 @@ impl SemiNaiveRuntime {
             };
             let current_scc_predicates: IndexSet<PredicateId> =
                 rules.iter().map(|rule| rule.head.predicate.id).collect();
-            let stratum = rules
-                .first()
-                .and_then(|rule| program.predicate_strata.get(&rule.head.predicate.id))
-                .copied()
-                .unwrap_or_default();
+            let stratum = program
+                .schedule
+                .sccs
+                .iter()
+                .find(|plan| plan.scc_id == scc_id)
+                .map(|plan| plan.stratum)
+                .ok_or(RuntimeError::MissingSccPlan { scc_id })?;
 
             let mut delta_rows: IndexMap<PredicateId, Vec<RelationRow>> = IndexMap::new();
             loop {
@@ -204,22 +215,41 @@ impl SemiNaiveRuntime {
                 let mut batch_tuples = Vec::new();
 
                 for rule in rules {
-                    let aggregates = head_aggregates(rule);
-                    let anchor_indices = if aggregates.is_empty() {
-                        current_scc_positive_indices(rule, &current_scc_predicates)
-                    } else {
-                        Vec::new()
-                    };
-                    let anchor_plan = if delta_rows.is_empty() {
-                        if anchor_indices.is_empty() {
-                            vec![None]
-                        } else {
-                            Vec::new()
+                    let execution_plan = program
+                        .rule_plans
+                        .get(&rule.id)
+                        .ok_or(RuntimeError::MissingRulePlan { rule_id: rule.id })?;
+                    if execution_plan.scc_id != scc_id || execution_plan.stratum != stratum {
+                        return Err(RuntimeError::RulePlanScheduleMismatch { rule_id: rule.id });
+                    }
+                    match execution_plan.provenance {
+                        ProvenanceRequirement::CompleteParentsSourcesImportsAndPolicy => {}
+                    }
+                    let aggregates = execution_plan
+                        .aggregates
+                        .iter()
+                        .map(|node| match rule.head.terms.get(node.output_index) {
+                            Some(Term::Aggregate(aggregate))
+                                if aggregate.function == node.function
+                                    && aggregate.variable == node.input_variable =>
+                            {
+                                Ok((node.output_index, aggregate))
+                            }
+                            _ => Err(RuntimeError::MalformedAggregatePlan {
+                                rule_id: rule.id,
+                                output_index: node.output_index,
+                            }),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let anchor_plan = match (&execution_plan.delta_anchor, delta_rows.is_empty()) {
+                        (DeltaAnchorStrategy::SeedOnce, true)
+                        | (DeltaAnchorStrategy::AggregateFullInputOnce, true) => vec![None],
+                        (DeltaAnchorStrategy::PositiveBodyIndices(_), true)
+                        | (DeltaAnchorStrategy::SeedOnce, false)
+                        | (DeltaAnchorStrategy::AggregateFullInputOnce, false) => Vec::new(),
+                        (DeltaAnchorStrategy::PositiveBodyIndices(indices), false) => {
+                            indices.iter().copied().map(Some).collect()
                         }
-                    } else if anchor_indices.is_empty() {
-                        Vec::new()
-                    } else {
-                        anchor_indices.into_iter().map(Some).collect()
                     };
 
                     let mut aggregate_matches = Vec::new();
@@ -601,98 +631,6 @@ fn build_rules_by_scc<'a>(
     rules
 }
 
-fn build_scc_evaluation_order(
-    program: &CompiledProgram,
-    scc_lookup: &IndexMap<PredicateId, usize>,
-) -> Vec<usize> {
-    let mut edges = IndexSet::new();
-    let mut indegree = program
-        .sccs
-        .iter()
-        .map(|scc| (scc.id, 0usize))
-        .collect::<IndexMap<_, _>>();
-    let mut outgoing = program
-        .sccs
-        .iter()
-        .map(|scc| (scc.id, Vec::new()))
-        .collect::<IndexMap<_, _>>();
-
-    for (head, dependencies) in &program.dependency_graph.edges {
-        let head_scc = *scc_lookup
-            .get(head)
-            .expect("head predicate should be present in scc lookup");
-        for dependency in dependencies {
-            let dependency_scc = *scc_lookup
-                .get(dependency)
-                .expect("dependency predicate should be present in scc lookup");
-            if dependency_scc != head_scc && edges.insert((dependency_scc, head_scc)) {
-                outgoing.entry(dependency_scc).or_default().push(head_scc);
-                *indegree.entry(head_scc).or_default() += 1;
-            }
-        }
-    }
-
-    let scc_strata = program
-        .sccs
-        .iter()
-        .map(|scc| {
-            let stratum = scc
-                .predicates
-                .first()
-                .and_then(|predicate| program.predicate_strata.get(predicate))
-                .copied()
-                .unwrap_or_default();
-            (scc.id, stratum)
-        })
-        .collect::<IndexMap<_, _>>();
-    let mut ready = indegree
-        .iter()
-        .filter_map(|(scc_id, degree)| (*degree == 0).then_some(*scc_id))
-        .collect::<Vec<_>>();
-    ready.sort_by_key(|scc_id| (scc_strata.get(scc_id).copied().unwrap_or_default(), *scc_id));
-
-    let mut order = Vec::new();
-    while let Some(scc_id) = ready.first().copied() {
-        ready.remove(0);
-        order.push(scc_id);
-        if let Some(neighbors) = outgoing.get(&scc_id) {
-            for neighbor in neighbors {
-                let degree = indegree
-                    .get_mut(neighbor)
-                    .expect("neighbor scc should have indegree");
-                *degree -= 1;
-                if *degree == 0 {
-                    ready.push(*neighbor);
-                    ready.sort_by_key(|candidate| {
-                        (
-                            scc_strata.get(candidate).copied().unwrap_or_default(),
-                            *candidate,
-                        )
-                    });
-                }
-            }
-        }
-    }
-
-    order
-}
-
-fn current_scc_positive_indices(
-    rule: &RuleAst,
-    current_scc_predicates: &IndexSet<PredicateId>,
-) -> Vec<usize> {
-    rule.body
-        .iter()
-        .enumerate()
-        .filter_map(|(index, literal)| match literal {
-            Literal::Positive(atom) if current_scc_predicates.contains(&atom.predicate.id) => {
-                Some(index)
-            }
-            _ => None,
-        })
-        .collect()
-}
-
 fn evaluate_rule_body_variant(
     rule: &RuleAst,
     delta_anchor_index: Option<usize>,
@@ -1016,18 +954,6 @@ fn materialize_group_values(
         .collect()
 }
 
-fn head_aggregates(rule: &RuleAst) -> Vec<(usize, &AggregateTerm)> {
-    rule.head
-        .terms
-        .iter()
-        .enumerate()
-        .filter_map(|(index, term)| match term {
-            Term::Aggregate(aggregate) => Some((index, aggregate)),
-            _ => None,
-        })
-        .collect()
-}
-
 fn bindings_key(bindings: &IndexMap<Variable, Value>) -> String {
     let mut entries = bindings
         .iter()
@@ -1260,6 +1186,22 @@ fn runtime_value_type(value: &Value) -> String {
 
 #[derive(Debug, Error)]
 pub enum RuntimeError {
+    #[error("unsupported executable plan format {actual}; expected {expected}")]
+    UnsupportedPlanFormat {
+        expected: &'static str,
+        actual: String,
+    },
+    #[error("executable plan is missing SCC schedule entry {scc_id}")]
+    MissingSccPlan { scc_id: usize },
+    #[error("executable plan is missing rule {rule_id}")]
+    MissingRulePlan { rule_id: RuleId },
+    #[error("rule {rule_id} executable plan disagrees with the SCC schedule")]
+    RulePlanScheduleMismatch { rule_id: RuleId },
+    #[error("rule {rule_id} has an invalid aggregate plan node at head index {output_index}")]
+    MalformedAggregatePlan {
+        rule_id: RuleId,
+        output_index: usize,
+    },
     #[error("resolved snapshot and compiled program policy scopes differ")]
     PolicyScopeMismatch,
     #[error("runtime iteration limit {limit} exceeded before convergence")]
@@ -1473,6 +1415,15 @@ mod tests {
                 },
             ),
             Err(RuntimeError::DerivedTupleLimitExceeded { limit: 2 })
+        ));
+        let mut incompatible = compiled.clone();
+        incompatible.plan_format_version = "future-plan".into();
+        assert!(matches!(
+            SemiNaiveRuntime.evaluate(&state, &incompatible),
+            Err(RuntimeError::UnsupportedPlanFormat {
+                actual,
+                expected: aether_plan::EXECUTABLE_PLAN_FORMAT_VERSION,
+            }) if actual == "future-plan"
         ));
     }
 
