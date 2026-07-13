@@ -497,3 +497,48 @@ jobs:
       - name: Run blocking exec hardening pack
         shell: pwsh
         run: ./scripts/run-hardening-sweep.ps1 -Packs exec
+
+  required-ci-gate:
+    name: Required CI gate
+    if: always()
+    runs-on: ubuntu-latest
+    needs:
+      - hardening-promotion-state
+      - rust
+      - go-shell
+      - postgres-journal
+      - container-smoke
+      - python-sdk
+      - pilot-launch-gate
+      - pilot-package
+      - hardening-admin
+      - hardening-operator
+      - hardening-user
+      - hardening-exec
+
+    steps:
+      - name: Verify required and conditional job conclusions
+        env:
+          NEEDS_CONTEXT: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          jobs = json.loads(os.environ["NEEDS_CONTEXT"])
+          conditional = {
+              "hardening-admin",
+              "hardening-operator",
+              "hardening-user",
+              "hardening-exec",
+          }
+          failures = []
+          for job, payload in sorted(jobs.items()):
+              result = payload["result"]
+              allowed = {"success", "skipped"} if job in conditional else {"success"}
+              if result not in allowed:
+                  failures.append(f"{job}={result}")
+          if failures:
+              raise SystemExit("required CI jobs did not pass: " + ", ".join(failures))
+          print("all required CI jobs passed; inactive conditional packs were explicitly skipped")
+          PY

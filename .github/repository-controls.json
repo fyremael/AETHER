@@ -1,0 +1,44 @@
+{
+  "schema_version": "aether.repository-controls.v1",
+  "repository": "fyremael/AETHER",
+  "protected_branch": {
+    "name": "main",
+    "required_status_checks": [
+      "Required CI gate",
+      "Required Supply Chain gate"
+    ],
+    "strict": true,
+    "minimum_approvals": 1,
+    "dismiss_stale_reviews": true,
+    "enforce_admins": true,
+    "allow_force_pushes": false,
+    "allow_deletions": false
+  },
+  "actions": {
+    "allowed_actions": "selected",
+    "sha_pinning_required": true,
+    "github_owned_allowed": true,
+    "verified_allowed": false,
+    "patterns_allowed": [
+      "aquasecurity/setup-trivy@e6c2c5e321ed9123bda567646e2f96565e34abe1",
+      "aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8",
+      "dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88",
+      "zricethezav/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc"
+    ]
+  },
+  "security": {
+    "dependabot_security_updates": "enabled",
+    "secret_scanning": "enabled",
+    "secret_scanning_push_protection": "enabled"
+  },
+  "environments": {
+    "github-pages": {
+      "minimum_reviewers": 0,
+      "allowed_branches": ["main"]
+    },
+    "release": {
+      "minimum_reviewers": 1,
+      "allowed_branches": ["main"]
+    }
+  }
+}

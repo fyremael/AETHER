@@ -77,9 +77,9 @@ workflow/run/job, exact commands, inputs, attempts, outputs, and expiry; the
 offline verifier re-hashes every byte and recomputes a deterministic verdict.
 The commercial ledger is policy-only and rejects authored outcomes. A reusable
 exact-candidate workflow builds one package and emits a SHA/run/attempt-named
-bundle. Official workflow evidence and hosted R5 supply-chain, transport, and
-operations outcomes remain pending, so this does not widen the controlled-alpha
-claim.
+bundle. Official promotion still requires one protected exact-candidate run
+whose complete bundle verifies independently, so this does not widen the
+controlled-alpha claim.
 
 R5.1-R5.6 are now implemented locally. The service has strict dependency and
 package gates, verified transport modes, independent namespace admission,
@@ -98,6 +98,14 @@ packs now live in dedicated crates; `aether_api` is a compatibility facade.
 `aether_plan` owns a versioned executable schedule with delta, aggregate, and
 provenance nodes, and runtime consumes it fail-closed. The ownership contract,
 measurements, and dependency gate are in `docs/ARCHITECTURE_BOUNDARIES.md`.
+
+R7 hosting controls are now explicit rather than assumed. CI and Supply Chain
+publish stable aggregate check names, Actions is constrained to full-SHA
+GitHub/allowlisted actions (including nested composite dependencies), and a
+read-only verifier compares the live branch, Actions, security, and environment
+settings with `.github/repository-controls.json`. Commercial beta remains
+blocked until protected `main`, protected release approval, every required
+bundle subject, exact-SHA Pages, and independent bundle verification all pass.
 
 Completed:
 
@@ -249,7 +257,7 @@ Still open:
 
 ## Immediate focus
 
-The immediate work is the ordered R4-R5 sequence in
+The immediate work is R7 exact-candidate qualification from
 `docs/REMEDIATION_PROGRAMME.md`. Feature broadening across policy, service
 execution, append, proof identity, or release claims stays frozen until the
 relevant repaired contract is green:

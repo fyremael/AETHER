@@ -80,7 +80,12 @@ ordinary feature backlog:
   statuses, source-path existence, and `latest` inputs are rejected. An official
   GitHub run and independently downloaded bundle are still required before this
   local implementation satisfies the evidence-integrity release gate.
-- The commercial release readiness ledger targets controlled design-partner alpha. Commercial beta is blocked by six non-waivable gates: policy correctness, execution-scoped trace identity, transactional schema-valid append, immutable evidence, dependency SBOM/vulnerability/license evidence, and a supported transport-security boundary. GA remains separately blocked.
+- The commercial release readiness ledger targets controlled design-partner
+  alpha. Commercial beta is governed by the non-waivable R1-R6 gate policy and
+  additionally requires protected exact-candidate hosting controls, every named
+  immutable bundle subject, exact-SHA Pages deployment, protected release
+  approval, and independent verification. Local or pull-request checks do not
+  satisfy that promotion boundary. GA remains separately blocked.
 - Existing Service v2 operability, backup/restore, performance, package, and
   customer-workflow artifacts remain useful partial evidence only until they
   are emitted as verified subjects in the immutable candidate bundle. They do

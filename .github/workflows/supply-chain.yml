@@ -207,3 +207,32 @@ jobs:
         uses: github/codeql-action/analyze@1ad29ea4a422cce9a242a9fae469541dcd08addc # v4
         with:
           category: /language:${{ matrix.language }}
+
+  required-supply-chain-gate:
+    name: Required Supply Chain gate
+    if: always()
+    runs-on: ubuntu-latest
+    needs:
+      - package
+      - dependency-and-package
+      - codeql
+
+    steps:
+      - name: Verify all supply-chain jobs passed
+        env:
+          NEEDS_CONTEXT: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          jobs = json.loads(os.environ["NEEDS_CONTEXT"])
+          failures = [
+              f"{job}={payload['result']}"
+              for job, payload in sorted(jobs.items())
+              if payload["result"] != "success"
+          ]
+          if failures:
+              raise SystemExit("supply-chain jobs did not pass: " + ", ".join(failures))
+          print("all required supply-chain jobs passed")
+          PY

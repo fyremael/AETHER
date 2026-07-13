@@ -53,6 +53,10 @@ actions policy and SBOM summary. All third-party actions use immutable commit
 SHAs; service and Docker base images use immutable digests. Dependabot covers
 Cargo, Go modules, release Python dependencies, and GitHub Actions.
 
+The allowlist includes the Trivy composite action's own SHA-pinned
+`setup-trivy` dependency. Nested third-party actions are part of the same
+delivery boundary as actions named directly by a workflow.
+
 The security baseline requires Rust 1.86 or newer and Go 1.26.5 or newer. The
 July 2026 gate upgrade deliberately raised the Rust MSRV and Go workflow patch
 level so patched Postgres/Tokio/Rustls and Go standard-library versions could
@@ -81,3 +85,15 @@ tracked workflow policy:
 These hosted controls cannot be proven by a repository file. Until a current
 repository-settings evidence record verifies them, `service.beta_boundary`
 remains blocked even when local generation passes.
+
+The desired hosted boundary is machine-readable in
+`.github/repository-controls.json`. Capture and verify the live settings with:
+
+```powershell
+python scripts/verify_repository_controls.py `
+  --out artifacts/release/repository-controls.json
+```
+
+The command is read-only, binds the evidence to the checked-out commit, and
+fails closed when branch protection, aggregate required checks, Actions
+restrictions, security analysis, or deployment-environment policy drifts.
