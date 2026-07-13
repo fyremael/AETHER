@@ -136,6 +136,27 @@ class SupplyChainTests(unittest.TestCase):
         self.assertIn("ca-certificates", dockerfile)
         self.assertIn("libssl3", dockerfile)
 
+    def test_supply_chain_uses_head_identity_and_checksum_pinned_scanner(self) -> None:
+        workflow = (
+            REPO_ROOT / ".github" / "workflows" / "supply-chain.yml"
+        ).read_text(encoding="utf-8")
+        policy = json.loads(
+            (REPO_ROOT / "fixtures" / "release" / "allowed-actions.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        self.assertIn(
+            "CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}",
+            workflow,
+        )
+        self.assertIn("ref: ${{ env.CANDIDATE_SHA }}", workflow)
+        self.assertIn('--candidate-sha "$CANDIDATE_SHA"', workflow)
+        self.assertIn(policy["scanners"]["trivy-linux-amd64-sha256"], workflow)
+        self.assertIn("sha256sum --check --strict", workflow)
+        self.assertNotIn("aquasecurity/trivy-action", workflow)
+        self.assertNotIn("aquasecurity/setup-trivy", workflow)
+
     def test_mutable_action_image_and_write_all_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

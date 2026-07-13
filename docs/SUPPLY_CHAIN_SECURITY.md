@@ -53,9 +53,10 @@ actions policy and SBOM summary. All third-party actions use immutable commit
 SHAs; service and Docker base images use immutable digests. Dependabot covers
 Cargo, Go modules, release Python dependencies, and GitHub Actions.
 
-The allowlist includes the Trivy composite action's own SHA-pinned
-`setup-trivy` dependency. Nested third-party actions are part of the same
-delivery boundary as actions named directly by a workflow.
+Trivy is installed directly from its versioned release archive after verifying
+the tracked SHA-256 digest. This avoids the action's mutable nested checkout of
+the scanner repository and makes scanner installation part of the recorded
+delivery input boundary.
 
 The security baseline requires Rust 1.86 or newer and Go 1.26.5 or newer. The
 July 2026 gate upgrade deliberately raised the Rust MSRV and Go workflow patch

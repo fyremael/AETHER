@@ -14,6 +14,9 @@ permissions:
 env:
   CARGO_AUDIT_VERSION: "0.22.2"
   GOVULNCHECK_VERSION: "v1.6.0"
+  TRIVY_VERSION: "0.72.0"
+  TRIVY_LINUX_AMD64_SHA256: "bbb64b9695866ce4a7a8f5c9592002c5961cab378577fa3f8a040df362b9b2ea"
+  CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   package:
@@ -29,6 +32,7 @@ jobs:
       - name: Checkout exact source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          ref: ${{ env.CANDIDATE_SHA }}
           persist-credentials: false
 
       - name: Set up Go
@@ -75,6 +79,7 @@ jobs:
       - name: Checkout exact source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          ref: ${{ env.CANDIDATE_SHA }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -108,7 +113,7 @@ jobs:
       - name: Generate strict CycloneDX SBOMs and license verdict
         run: |
           python scripts/supply_chain.py generate \
-            --candidate-sha "$GITHUB_SHA" \
+            --candidate-sha "$CANDIDATE_SHA" \
             --package-zip artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip \
             --out-dir artifacts/release/supply-chain
 
@@ -128,16 +133,29 @@ jobs:
           mkdir -p artifacts/release/package-scan-root
           unzip -q artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip -d artifacts/release/package-scan-root
 
+      - name: Install checksum-pinned Trivy
+        run: |
+          set -euo pipefail
+          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          url="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${archive}"
+          curl --proto '=https' --tlsv1.2 --fail --location --output "$archive" "$url"
+          echo "${TRIVY_LINUX_AMD64_SHA256}  ${archive}" | sha256sum --check --strict
+          tar --extract --gzip --file "$archive" trivy
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 trivy "$HOME/.local/bin/trivy"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/trivy" --version
+
       - name: Package and filesystem vulnerability gate
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
-        with:
-          scan-type: fs
-          scan-ref: artifacts/release/package-scan-root
-          format: json
-          output: artifacts/release/supply-chain/trivy-package.json
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
+        run: |
+          set -euo pipefail
+          trivy filesystem \
+            --format json \
+            --output artifacts/release/supply-chain/trivy-package.json \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            artifacts/release/package-scan-root
 
       - name: Secret scanning gate
         uses: zricethezav/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
@@ -157,7 +175,7 @@ jobs:
               "secret-scan.json": ["gitleaks"],
           }.items():
               (root / name).write_text(
-                  json.dumps({"candidate_commit_sha": "${{ github.sha }}", "status": "passed", "tools": tools}, sort_keys=True) + "\n",
+                  json.dumps({"candidate_commit_sha": "${{ env.CANDIDATE_SHA }}", "status": "passed", "tools": tools}, sort_keys=True) + "\n",
                   encoding="utf-8",
               )
           PY
@@ -173,7 +191,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: supply-chain-evidence-${{ github.sha }}
+          # Pull-request runs use the immutable head SHA rather than GitHub's
+          # synthetic merge commit.
+          name: supply-chain-evidence-${{ env.CANDIDATE_SHA }}
           path: artifacts/release/supply-chain
           if-no-files-found: error
 
@@ -192,6 +212,7 @@ jobs:
       - name: Checkout exact source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          ref: ${{ env.CANDIDATE_SHA }}
           persist-credentials: false
 
       - name: Initialize CodeQL

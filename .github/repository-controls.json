@@ -20,8 +20,6 @@
     "github_owned_allowed": true,
     "verified_allowed": false,
     "patterns_allowed": [
-      "aquasecurity/setup-trivy@e6c2c5e321ed9123bda567646e2f96565e34abe1",
-      "aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8",
       "dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88",
       "zricethezav/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc"
     ]
