@@ -14,9 +14,9 @@ use aether_api::{
     RegisterVectorRecordRequest, ReplicaConfig, ReplicaRole, ReplicatedAuthorityPartitionService,
     ResolveTraceHandleRequest, RunDocumentRequest, RunDocumentResponse, SchemaCatalogResponse,
     SchemaCompatibility, SearchVectorsRequest, SearchVectorsResponse, ServiceMode,
-    ServiceStatusResponse, SqliteKernelService, VectorFactProjection, VectorMetric,
-    AETHER_NAMESPACE_HEADER, COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
-    COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
+    ServiceStatusResponse, SqliteKernelService, StructuredErrorResponse, VectorFactProjection,
+    VectorMetric, AETHER_NAMESPACE_HEADER, AETHER_REQUEST_ID_HEADER,
+    COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
 use aether_ast::{
     AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PartitionCut,
@@ -44,6 +44,13 @@ async fn http_service_exposes_health_and_history() {
         .await
         .expect("health request");
     assert!(health.status().is_success());
+    let request_id = health
+        .headers()
+        .get(AETHER_REQUEST_ID_HEADER)
+        .expect("health request id")
+        .to_str()
+        .expect("request id header");
+    assert_request_id(request_id);
     assert_eq!(
         health
             .json::<HealthResponse>()
@@ -79,6 +86,46 @@ async fn http_service_exposes_health_and_history() {
             .len(),
         25
     );
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn http_framework_failures_use_the_structured_error_contract() {
+    let (base_url, server) = spawn_server(InMemoryKernelService::new()).await;
+    let client = Client::new();
+
+    for response in [
+        client
+            .post(format!("{base_url}/v1/append"))
+            .header("content-type", "application/json")
+            .body("{")
+            .send()
+            .await
+            .expect("invalid JSON response"),
+        client
+            .get(format!("{base_url}/v1/not-a-route"))
+            .send()
+            .await
+            .expect("missing route response"),
+    ] {
+        assert!(response.status().is_client_error());
+        let request_id = response
+            .headers()
+            .get(AETHER_REQUEST_ID_HEADER)
+            .expect("framework error request id")
+            .to_str()
+            .expect("request id header")
+            .to_owned();
+        let body = response
+            .json::<StructuredErrorResponse>()
+            .await
+            .expect("framework structured error");
+        assert_eq!(body.request_id, request_id);
+        assert!(!body.code.is_empty());
+        assert!(!body.error.is_empty());
+        assert_eq!(body.details, serde_json::json!({}));
+    }
 
     server.abort();
 }
@@ -206,11 +253,26 @@ async fn http_schema_admission_contract_is_structured_and_idempotent() {
         .await
         .expect("wrong schema response");
     assert_eq!(response.status(), reqwest::StatusCode::CONFLICT);
+    let request_id = response
+        .headers()
+        .get(AETHER_REQUEST_ID_HEADER)
+        .expect("error request id")
+        .to_str()
+        .expect("request id header")
+        .to_string();
+    assert_request_id(&request_id);
     let body = response
-        .json::<serde_json::Value>()
+        .json::<StructuredErrorResponse>()
         .await
         .expect("structured error");
-    assert_eq!(body["code"], "schema_mismatch");
+    assert_eq!(body.code, "schema_mismatch");
+    assert_eq!(body.request_id, request_id);
+    assert!(!body.error.is_empty());
+    assert_eq!(
+        body.details["expected_schema_ref"],
+        serde_json::to_value(&active.schema_ref).expect("expected schema ref JSON")
+    );
+    assert_eq!(body.details["provided_schema_ref"]["digest"], "wrong");
 
     let receipts = client
         .get(format!("{base_url}/v1/append/receipts"))
@@ -374,14 +436,20 @@ async fn http_service_runs_documents_and_explains_tuples() {
         .await
         .expect("legacy tuple explain request");
     assert_eq!(ambiguous.status(), reqwest::StatusCode::CONFLICT);
+    let request_id = ambiguous
+        .headers()
+        .get(AETHER_REQUEST_ID_HEADER)
+        .expect("legacy error request id")
+        .to_str()
+        .expect("request id header")
+        .to_string();
     let ambiguous = ambiguous
-        .json::<serde_json::Value>()
+        .json::<StructuredErrorResponse>()
         .await
         .expect("legacy tuple error body");
-    assert_eq!(
-        ambiguous["code"],
-        serde_json::Value::String("ambiguous_tuple_reference".into())
-    );
+    assert_eq!(ambiguous.code, "ambiguous_tuple_reference");
+    assert_eq!(ambiguous.request_id, request_id);
+    assert_eq!(ambiguous.details, serde_json::json!({}));
 
     let stale = run_document(
         &client,
@@ -706,6 +774,18 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
         .expect("authorized explain request");
     assert!(explain.status().is_success());
 
+    let legacy_explain = client
+        .post(format!("{base_url}/v1/explain/tuple"))
+        .bearer_auth("pilot-operator-token")
+        .json(&ExplainTupleRequest {
+            tuple_id,
+            policy_context: None,
+        })
+        .send()
+        .await
+        .expect("legacy explain telemetry request");
+    assert_eq!(legacy_explain.status(), reqwest::StatusCode::CONFLICT);
+
     let audit_response = client
         .get(format!("{base_url}/v1/audit"))
         .bearer_auth("pilot-operator-token")
@@ -730,6 +810,7 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
             && entry.status == reqwest::StatusCode::FORBIDDEN.as_u16()
             && entry.context.datom_count == Some(25)
             && entry.context.last_element == Some(25)
+            && entry.context.schema_ref_omitted
     }));
     assert!(audit_entries.iter().any(|entry| {
         entry.principal == "pilot-operator"
@@ -753,6 +834,12 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
             && entry.status == reqwest::StatusCode::OK.as_u16()
             && entry.context.tuple_id == Some(current_rows[0].tuple_id.expect("tuple id").0)
             && entry.context.trace_tuple_count.is_some()
+    }));
+    assert!(audit_entries.iter().any(|entry| {
+        entry.principal == "pilot-operator"
+            && entry.path == "/v1/explain/tuple"
+            && entry.status == reqwest::StatusCode::CONFLICT.as_u16()
+            && entry.context.legacy_endpoint
     }));
 
     let audit_contents =
@@ -980,6 +1067,8 @@ async fn http_service_exposes_status_and_supports_auth_reload() {
     assert_eq!(status.service_mode, ServiceMode::SingleNode);
     assert_eq!(status.config_version, "test-config-v1");
     assert_eq!(status.schema_version, "test-schema-v1");
+    assert!(status.supports_required_client_contract());
+    assert!(status.supports("capability_negotiation_v1"));
     assert_eq!(status.principals.len(), 2);
     assert!(status
         .principals
@@ -3084,6 +3173,11 @@ fn postgres_test_url() -> Option<String> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn assert_request_id(request_id: &str) {
+    assert_eq!(request_id.len(), 32);
+    assert!(request_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
 }
 
 fn unique_namespace_id(prefix: &str) -> NamespaceId {

@@ -21,11 +21,21 @@ type Client struct {
 type Error struct {
 	StatusCode int
 	Message    string
+	Code       string
+	RequestID  string
+	Details    map[string]any
 	Payload    any
 }
 
 func (e *Error) Error() string {
-	return fmt.Sprintf("AETHER API error (%d): %s", e.StatusCode, e.Message)
+	context := ""
+	if e.Code != "" {
+		context += " code=" + e.Code
+	}
+	if e.RequestID != "" {
+		context += " request_id=" + e.RequestID
+	}
+	return fmt.Sprintf("AETHER API error (%d%s): %s", e.StatusCode, context, e.Message)
 }
 
 func New(baseURL string, token string) *Client {
@@ -58,6 +68,31 @@ func (c *Client) Status(ctx context.Context) (*ServiceStatusResponse, error) {
 		return nil, err
 	}
 	return &response, nil
+}
+
+func (c *Client) RequireCapabilities(ctx context.Context, required ...string) error {
+	status, err := c.Status(ctx)
+	if err != nil {
+		return err
+	}
+	missing := make([]string, 0)
+	for _, capability := range required {
+		if !status.Supports(capability) {
+			missing = append(missing, capability)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return &Error{
+		StatusCode: http.StatusUpgradeRequired,
+		Message:    "server is missing required capabilities: " + strings.Join(missing, ", "),
+		Code:       "capability_required",
+		Details: map[string]any{
+			"available": status.Capabilities,
+			"missing":   missing,
+		},
+	}
 }
 
 func (c *Client) ReloadAuth(ctx context.Context) (*AuthReloadResponse, error) {
@@ -106,6 +141,23 @@ func (c *Client) SchemaCatalog(ctx context.Context) (*SchemaCatalogResponse, err
 		return nil, err
 	}
 	return &response, nil
+}
+
+func (c *Client) ActiveSchemaRef(ctx context.Context) (*SchemaRef, error) {
+	catalog, err := c.SchemaCatalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if catalog.Active == nil {
+		return nil, &Error{
+			StatusCode: http.StatusPreconditionFailed,
+			Message:    "namespace has no active schema",
+			Code:       "active_schema_required",
+			Details:    map[string]any{},
+		}
+	}
+	active := catalog.Active.SchemaRef
+	return &active, nil
 }
 
 func (c *Client) RegisterSchema(ctx context.Context, request RegisterSchemaRequest) (*NamespaceSchemaRevision, error) {
@@ -233,9 +285,21 @@ func (c *Client) doJSON(ctx context.Context, method string, path string, payload
 			_ = json.Unmarshal(rawBody, &payloadBody)
 		}
 		message := strings.TrimSpace(string(rawBody))
+		code := ""
+		requestID := response.Header.Get("X-Aether-Request-Id")
+		var details map[string]any
 		if structured, ok := payloadBody.(map[string]any); ok {
 			if value, ok := structured["error"].(string); ok && value != "" {
 				message = value
+			}
+			if value, ok := structured["code"].(string); ok {
+				code = value
+			}
+			if value, ok := structured["request_id"].(string); ok && value != "" {
+				requestID = value
+			}
+			if value, ok := structured["details"].(map[string]any); ok {
+				details = value
 			}
 		}
 		if message == "" {
@@ -244,6 +308,9 @@ func (c *Client) doJSON(ctx context.Context, method string, path string, payload
 		return &Error{
 			StatusCode: response.StatusCode,
 			Message:    message,
+			Code:       code,
+			RequestID:  requestID,
+			Details:    details,
 			Payload:    payloadBody,
 		}
 	}

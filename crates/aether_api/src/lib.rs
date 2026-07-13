@@ -71,7 +71,7 @@ pub use http::{
     http_router_with_postgres_namespaces, http_router_with_postgres_namespaces_and_tls,
     http_router_with_sqlite_namespaces, AuditContext, AuditEntry, AuditLogResponse, AuthScope,
     HealthResponse, HttpAccessToken, HttpAuthConfig, HttpKernelOptions, HttpKernelState,
-    AETHER_NAMESPACE_HEADER,
+    StructuredErrorResponse, AETHER_NAMESPACE_HEADER, AETHER_REQUEST_ID_HEADER,
 };
 pub use namespace::NamespaceId;
 pub use partitioned::{

@@ -368,6 +368,7 @@ func baseStatus() *client.ServiceStatusResponse {
 		SchemaVersion:      "v1",
 		EffectiveNamespace: ptrString("default"),
 		ServiceMode:        "single_node",
+		Capabilities:       client.RequiredServiceCapabilities(),
 		Principals: []client.PrincipalStatusSummary{
 			{
 				Principal:   "pilot-operator",

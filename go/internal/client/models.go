@@ -7,6 +7,15 @@ import (
 	"strings"
 )
 
+func RequiredServiceCapabilities() []string {
+	return []string{
+		"trace_handles_v1",
+		"namespace_schema_ref_v1",
+		"append_receipts_v1",
+		"structured_errors_v1",
+	}
+}
+
 type ElementID = uint64
 type TupleID = uint64
 
@@ -333,6 +342,15 @@ type ServiceStatusResponse struct {
 	Replicas             []ReplicaStatusSummary   `json:"replicas"`
 }
 
+func (s ServiceStatusResponse) Supports(capability string) bool {
+	for _, candidate := range s.Capabilities {
+		if candidate == capability {
+			return true
+		}
+	}
+	return false
+}
+
 type NamespaceStatusSummary struct {
 	Namespace  string   `json:"namespace"`
 	Principals []string `json:"principals"`
@@ -366,6 +384,8 @@ type AuditContext struct {
 	EffectiveCapabilities []string `json:"effective_capabilities"`
 	EffectiveVisibilities []string `json:"effective_visibilities"`
 	PolicyDecision        *string  `json:"policy_decision"`
+	LegacyEndpoint        bool     `json:"legacy_endpoint,omitempty"`
+	SchemaRefOmitted      bool     `json:"schema_ref_omitted,omitempty"`
 }
 
 type AuditEntry struct {

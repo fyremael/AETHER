@@ -66,6 +66,12 @@ class AetherHttpClientIntegrationTest(unittest.TestCase):
         client = AetherClient(self._base_url)
 
         self.assertEqual(client.health()["status"], "ok")
+        client.require_capabilities(
+            "trace_handles_v1",
+            "namespace_schema_ref_v1",
+            "append_receipts_v1",
+            "structured_errors_v1",
+        )
 
         document = """
 schema v1 {
@@ -301,6 +307,33 @@ query current_cut {
         self.assertEqual(error_context.exception.status_code, 400)
         self.assertIn("invalid section header", error_context.exception.message.lower())
         self.assertIsNotNone(error_context.exception.payload)
+        self.assertEqual(error_context.exception.code, "parse_error")
+        self.assertRegex(error_context.exception.request_id or "", r"^[0-9a-f]{32}$")
+        self.assertEqual(error_context.exception.details, {})
+
+    def test_client_capability_and_active_schema_helpers_fail_closed(self) -> None:
+        class OldServerClient(AetherClient):
+            def status(self) -> dict[str, object]:
+                return {"capabilities": ["trace_handles_v1"]}
+
+            def schema_catalog(self) -> dict[str, object]:
+                return {"revisions": [], "baselines": []}
+
+        client = OldServerClient("http://127.0.0.1:1")
+        with self.assertRaises(AetherApiError) as capability_error:
+            client.require_capabilities("trace_handles_v1", "structured_errors_v1")
+        self.assertEqual(capability_error.exception.code, "capability_required")
+        self.assertEqual(
+            capability_error.exception.details,
+            {
+                "available": ["trace_handles_v1"],
+                "missing": ["structured_errors_v1"],
+            },
+        )
+
+        with self.assertRaises(AetherApiError) as schema_error:
+            client.active_schema_ref()
+        self.assertEqual(schema_error.exception.code, "active_schema_required")
 
     @staticmethod
     def _free_port() -> int:

@@ -56,6 +56,10 @@ ordinary feature backlog:
 - Coordination semantics now cover heartbeats and execution outcomes in the pilot slice, but expiry still relies on explicit semantic state rather than clock-driven timeout windows or distributed failure detection.
 - HTTP authorization still uses coarse endpoint scopes. Tokens now bind policy before scoped snapshot construction, but the external noninterference claim remains pending exact-candidate evidence and scheduled Postgres parity.
 - Audit entries now capture effective policy decisions plus requested, granted, and effective semantic visibility, but they still do not capture full operator intent or semantic diffs between cuts.
+- Omitted append schema references and the legacy tuple explanation endpoint are
+  compatibility-only paths with explicit audit telemetry. They remain callable
+  until the evidence-gated sunset in `docs/API_CLIENT_MIGRATION.md`; first-party
+  clients do not automatically fall back to either path.
 - Operator reports carry policy context in fixed-format markdown and JSON, compute from policy-projected semantic snapshots, and carry execution-scoped trace handles; their fixed report shape remains narrower than arbitrary investigative views.
 - Coordination delta reports now compare explicit cuts and carry trace handles where visible, but they still summarize fixed pilot sections rather than arbitrary user-defined investigative views.
 - The Go operator TUI is now implemented as the primary live pilot cockpit, but it is intentionally pilot-focused and read-only in v1 rather than a general workflow IDE or mutation surface.
@@ -104,7 +108,8 @@ ordinary feature backlog:
 - The governed incident blackboard demo pack is a product-facing packaging layer over current proof, not a claim that AETHER is already a general multi-agent control plane.
 - The AI support resolution desk app pack is a flagship ML-facing reference application over current proof, not a claim that AETHER is already a finished ML orchestration platform, autonomous support SaaS, or authoritative vector-truth layer.
 - The blackboard / TupleSpace language remains a reference pattern and explanation aid. It is not yet a stable top-level product API, facade contract, or replacement public identity for AETHER.
-- The Go shell and Python SDK are now real, but both remain early boundary clients rather than mature ecosystem surfaces with richer async/notebook/admin layers.
+- The Go shell and Python SDK are now capability-negotiated real boundary clients,
+  but both remain early surfaces without richer async and administration layers.
 - The notebook hardening checks validate structure, bootstrap assumptions, path integrity, and Python code-cell syntax, but they do not yet execute full Colab notebook runs as a release blocker.
 - Artifact and vector sidecar federation is now journal-subordinated and temporally exact on the SQLite-backed pilot path, but it is still a single-node backend and does not yet replicate or fail over independently of the kernel process.
 - Vector search can now project provenance-bearing semantic facts back into the rule layer, but the current projection is deliberately narrow: a three-field `(query_entity, matched_entity, score)` extensional fact shape.

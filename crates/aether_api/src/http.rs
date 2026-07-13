@@ -14,11 +14,13 @@ use crate::{
 use aether_ast::PolicyContext;
 use aether_storage::PostgresTlsConfig;
 use axum::{
+    body::{to_bytes, Body},
     extract::State,
     http::{
-        header::{AUTHORIZATION, RETRY_AFTER},
+        header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, RETRY_AFTER},
         HeaderMap, HeaderValue, StatusCode,
     },
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -35,6 +37,99 @@ use std::{
 use tokio::sync::Semaphore;
 
 pub const AETHER_NAMESPACE_HEADER: &str = "x-aether-namespace";
+pub const AETHER_REQUEST_ID_HEADER: &str = "x-aether-request-id";
+
+tokio::task_local! {
+    static REQUEST_ID: String;
+}
+
+fn new_request_id() -> String {
+    format!("{:032x}", rand::random::<u128>())
+}
+
+fn current_request_id() -> String {
+    REQUEST_ID
+        .try_with(Clone::clone)
+        .unwrap_or_else(|_| new_request_id())
+}
+
+async fn request_id_middleware(request: axum::extract::Request, next: Next) -> Response {
+    let request_id = new_request_id();
+    let response_request_id = request_id.clone();
+    REQUEST_ID
+        .scope(request_id, async move {
+            let response = next.run(request).await;
+            let mut response = ensure_structured_http_error(response, &response_request_id).await;
+            if let Ok(value) = HeaderValue::from_str(&response_request_id) {
+                response.headers_mut().insert(
+                    axum::http::HeaderName::from_static(AETHER_REQUEST_ID_HEADER),
+                    value,
+                );
+            }
+            response
+        })
+        .await
+}
+
+async fn ensure_structured_http_error(response: Response, request_id: &str) -> Response {
+    if !response.status().is_client_error() && !response.status().is_server_error() {
+        return response;
+    }
+
+    let status = response.status();
+    let (parts, body) = response.into_parts();
+    let bytes = to_bytes(body, 64 * 1024).await.unwrap_or_default();
+    if serde_json::from_slice::<StructuredErrorResponse>(&bytes)
+        .is_ok_and(|body| body.request_id == request_id)
+    {
+        return Response::from_parts(parts, Body::from(bytes));
+    }
+
+    let message = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .or_else(|| value.get("message"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .or_else(|| {
+            String::from_utf8(bytes.to_vec())
+                .ok()
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or_else(|| {
+            status
+                .canonical_reason()
+                .unwrap_or("HTTP request failed")
+                .to_owned()
+        });
+    let code = match status {
+        StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY => "bad_request",
+        StatusCode::PAYLOAD_TOO_LARGE => "request_body_too_large",
+        StatusCode::NOT_FOUND => "route_not_found",
+        StatusCode::METHOD_NOT_ALLOWED => "method_not_allowed",
+        _ => "http_error",
+    };
+    let mut structured = (
+        status,
+        Json(StructuredErrorResponse {
+            error: message,
+            code: code.into(),
+            request_id: request_id.into(),
+            details: serde_json::json!({}),
+        }),
+    )
+        .into_response();
+    for (name, value) in &parts.headers {
+        if name != CONTENT_LENGTH && name != CONTENT_TYPE {
+            structured.headers_mut().insert(name.clone(), value.clone());
+        }
+    }
+    structured
+}
 
 #[derive(Clone)]
 struct BoundedBlockingExecutor {
@@ -774,6 +869,10 @@ pub struct AuditContext {
     pub effective_capabilities: Vec<String>,
     pub effective_visibilities: Vec<String>,
     pub policy_decision: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub legacy_endpoint: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub schema_ref_omitted: bool,
 }
 
 impl AuditEntry {
@@ -928,6 +1027,7 @@ pub fn http_router_with_partitioned_options(
             partitioned,
             options,
         ))
+        .layer(middleware::from_fn(request_id_middleware))
 }
 
 pub fn http_router_with_options(
@@ -971,6 +1071,7 @@ pub fn http_router_with_options(
         )
         .route("/v1/sidecars/vectors/search", post(search_vectors))
         .with_state(HttpKernelState::with_options(service, options))
+        .layer(middleware::from_fn(request_id_middleware))
 }
 
 pub fn http_router_with_sqlite_namespaces(
@@ -1014,6 +1115,7 @@ pub fn http_router_with_sqlite_namespaces(
         )
         .route("/v1/sidecars/vectors/search", post(search_vectors))
         .with_state(HttpKernelState::with_sqlite_namespaces(data_root, options))
+        .layer(middleware::from_fn(request_id_middleware))
 }
 
 pub fn http_router_with_postgres_namespaces(
@@ -1081,6 +1183,7 @@ pub fn http_router_with_postgres_namespaces_and_tls(
             tls,
             options,
         ))
+        .layer(middleware::from_fn(request_id_middleware))
 }
 
 #[derive(Clone)]
@@ -1790,15 +1893,19 @@ fn is_unknown_trace_error(error: &HttpError) -> bool {
     )
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-struct ErrorBody {
-    error: String,
-    code: &'static str,
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct StructuredErrorResponse {
+    pub error: String,
+    pub code: String,
+    pub request_id: String,
+    pub details: serde_json::Value,
 }
 
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         let status = self.status_code();
+        let request_id = current_request_id();
+        let details = http_error_details(&self);
         let retry_after = match &self {
             Self::NamespaceBusy {
                 retry_after_seconds,
@@ -1829,13 +1936,51 @@ impl IntoResponse for HttpError {
             ),
         };
 
-        let mut response = (status, Json(ErrorBody { error, code })).into_response();
+        let mut response = (
+            status,
+            Json(StructuredErrorResponse {
+                error,
+                code: code.into(),
+                request_id,
+                details,
+            }),
+        )
+            .into_response();
         if let Some(seconds) = retry_after {
             if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
                 response.headers_mut().insert(RETRY_AFTER, value);
             }
         }
         response
+    }
+}
+
+fn http_error_details(error: &HttpError) -> serde_json::Value {
+    match error {
+        HttpError::Api(ApiError::Admission(crate::admission::AdmissionError::SchemaMismatch {
+            expected,
+            provided,
+        })) => serde_json::json!({
+            "expected_schema_ref": expected,
+            "provided_schema_ref": provided,
+        }),
+        HttpError::Api(ApiError::Admission(crate::admission::AdmissionError::UnknownSchema(
+            schema_ref,
+        ))) => serde_json::json!({ "schema_ref": schema_ref }),
+        HttpError::Api(ApiError::Admission(crate::admission::AdmissionError::Storage(
+            aether_storage::JournalError::StaleCut { expected, actual },
+        )))
+        | HttpError::Api(ApiError::Journal(aether_storage::JournalError::StaleCut {
+            expected,
+            actual,
+        })) => serde_json::json!({
+            "expected_cut": expected,
+            "actual_cut": actual,
+        }),
+        HttpError::NamespaceBusy {
+            retry_after_seconds,
+        } => serde_json::json!({ "retry_after_seconds": retry_after_seconds }),
+        _ => serde_json::json!({}),
     }
 }
 
@@ -2700,6 +2845,7 @@ async fn explain_tuple(
         tuple_id: Some(request.tuple_id.0),
         command_source: Some("http".into()),
         selected_report: Some("tuple_explain".into()),
+        legacy_endpoint: true,
         ..Default::default()
     };
     let response = state
@@ -2859,6 +3005,7 @@ fn audit_context_for_append(request: &AppendAdmissionRequest) -> AuditContext {
         command_source: Some("http".into()),
         datom_count: Some(request.datoms.len()),
         last_element: request.datoms.last().map(|datom| datom.element.0),
+        schema_ref_omitted: request.schema_ref.is_none(),
         ..Default::default()
     }
 }

@@ -36,10 +36,15 @@ func TestStructuredErrorsPreserveMessageAndPayload(t *testing.T) {
 	t.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Aether-Request-Id", "header-request-id")
 		w.WriteHeader(http.StatusForbidden)
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error":  "policy denied for explain",
-			"reason": "visibility mismatch",
+			"error":      "policy denied for explain",
+			"code":       "insufficient_policy",
+			"request_id": "body-request-id",
+			"details": map[string]any{
+				"reason": "visibility mismatch",
+			},
 		})
 	}))
 	defer server.Close()
@@ -64,8 +69,56 @@ func TestStructuredErrorsPreserveMessageAndPayload(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected structured payload, got %#v", apiErr.Payload)
 	}
-	if payload["reason"] != "visibility mismatch" {
+	if apiErr.Code != "insufficient_policy" || apiErr.RequestID != "body-request-id" {
+		t.Fatalf("structured identity was not preserved: %#v", apiErr)
+	}
+	if apiErr.Details["reason"] != "visibility mismatch" {
+		t.Fatalf("unexpected details %#v", apiErr.Details)
+	}
+	if payload["code"] != "insufficient_policy" {
 		t.Fatalf("unexpected structured payload %#v", payload)
+	}
+}
+
+func TestStatusCapabilityNegotiation(t *testing.T) {
+	status := ServiceStatusResponse{Capabilities: []string{"trace_handles_v1", "structured_errors_v1"}}
+	if !status.Supports("trace_handles_v1") {
+		t.Fatal("expected trace handle capability")
+	}
+	if status.Supports("unknown") {
+		t.Fatal("unexpected unknown capability")
+	}
+}
+
+func TestRequireCapabilitiesFailsClosed(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(ServiceStatusResponse{
+			Capabilities: []string{"trace_handles_v1"},
+		})
+	}))
+	defer server.Close()
+
+	err := New(server.URL, "").RequireCapabilities(
+		context.Background(),
+		"trace_handles_v1",
+		"structured_errors_v1",
+	)
+	apiErr, ok := err.(*Error)
+	if !ok || apiErr.Code != "capability_required" || apiErr.StatusCode != http.StatusUpgradeRequired {
+		t.Fatalf("expected typed capability failure, got %#v", err)
+	}
+}
+
+func TestActiveSchemaRefRequiresAnActiveRevision(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(SchemaCatalogResponse{})
+	}))
+	defer server.Close()
+
+	_, err := New(server.URL, "").ActiveSchemaRef(context.Background())
+	apiErr, ok := err.(*Error)
+	if !ok || apiErr.Code != "active_schema_required" {
+		t.Fatalf("expected active schema failure, got %#v", err)
 	}
 }
 

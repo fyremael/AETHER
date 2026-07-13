@@ -361,6 +361,12 @@ Use the launch validation pack when someone asks, “Is this exact pilot candida
 Use the operations playbook when someone asks, “How do we deploy, rotate, upgrade, or roll back this pilot safely?”
 Use the trend index when someone asks, “What changed across recent benchmark runs without manually opening every bundle?”
 
+Before running any semantic client or report operation, read `/v1/status` and
+require `trace_handles_v1`, `namespace_schema_ref_v1`, `append_receipts_v1`, and
+`structured_errors_v1`. Do not fall back to tuple-ID explanation. During the
+transition, monitor `/v1/audit` for `legacy_endpoint` and `schema_ref_omitted`;
+the removal gates are in `docs/API_CLIENT_MIGRATION.md`.
+
 ## Replicated Prototype
 
 The replicated authority-partition prototype is now exposed as an example
@@ -435,4 +441,5 @@ Run Demo 03 and keep the report from that run. It is the best current summary of
 - `docs/PILOT_LAUNCH.md` for the launch-readiness contract and full validation pack
 - `docs/PERFORMANCE.md` for the benchmark harness and interpretation guidance
 - `docs/SUPPLY_CHAIN_SECURITY.md` for SBOM, scanner, attestation, and repository-control gates
+- `docs/API_CLIENT_MIGRATION.md` for capability negotiation and legacy-contract sunset gates
 - `examples/demo-03-coordination-situation-room.md` for the flagship narrative

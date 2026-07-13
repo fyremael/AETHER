@@ -17,6 +17,12 @@ from urllib import error, request
 DEFAULT_REPO_URL = "https://github.com/fyremael/AETHER"
 DEFAULT_COLAB_ROOT = Path("/content/AETHER")
 PILOT_EXAMPLE_NAME = "pilot_http_kernel_service"
+REQUIRED_SERVICE_CAPABILITIES = (
+    "trace_handles_v1",
+    "namespace_schema_ref_v1",
+    "append_receipts_v1",
+    "structured_errors_v1",
+)
 
 _PILOT_SERVICE_CACHE: dict[tuple[str, str, int | None, str, str], "NotebookService"] = {}
 
@@ -30,6 +36,11 @@ class NotebookService:
     namespace: str | None = None
     scratch_dir: Path | None = None
     config_path: Path | None = None
+
+
+def require_service_capabilities(client: Any) -> None:
+    """Fail before a tutorial uses a server with an incompatible API contract."""
+    client.require_capabilities(*REQUIRED_SERVICE_CAPABILITIES)
 
 
 def bootstrap_repo(

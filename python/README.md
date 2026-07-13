@@ -12,6 +12,11 @@ Scope for Python in v1:
 Implemented today:
 
 - `aether_sdk.AetherClient`, a broader HTTP client for the stable Rust service boundary
+
+Call `client.require_capabilities(...)` before semantic operations. The notebook
+helper does this automatically for the current trace-handle, schema-ref,
+append-receipt, and structured-error contracts. Explanation never falls back to
+a tuple ID; use the execution receipt's trace handle.
 - typed request and data models in `aether_sdk.models`
 - fixture builders for datoms, policy contexts, artifacts, and vectors in `aether_sdk.fixtures`
 - Colab-friendly onboarding notebooks in `python/notebooks/` over the authenticated pilot boundary

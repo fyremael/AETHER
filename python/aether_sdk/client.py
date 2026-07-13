@@ -27,9 +27,17 @@ class AetherApiError(Exception):
     status_code: int
     message: str
     payload: JsonValue | None = None
+    code: str | None = None
+    request_id: str | None = None
+    details: dict[str, Any] | None = None
 
     def __str__(self) -> str:
-        return f"AETHER API error ({self.status_code}): {self.message}"
+        context = ""
+        if self.code:
+            context += f" code={self.code}"
+        if self.request_id:
+            context += f" request_id={self.request_id}"
+        return f"AETHER API error ({self.status_code}{context}): {self.message}"
 
 
 class AetherClient:
@@ -51,6 +59,24 @@ class AetherClient:
 
     def status(self) -> dict[str, Any]:
         return self._request_json("GET", "/v1/status")
+
+    def capabilities(self) -> frozenset[str]:
+        return frozenset(str(value) for value in self.status().get("capabilities", []))
+
+    def supports(self, capability: str) -> bool:
+        return capability in self.capabilities()
+
+    def require_capabilities(self, *capabilities: str) -> None:
+        available = self.capabilities()
+        missing = sorted(set(capabilities) - available)
+        if missing:
+            raise AetherApiError(
+                426,
+                f"server is missing required capabilities: {', '.join(missing)}",
+                {"available": sorted(available), "missing": missing},
+                code="capability_required",
+                details={"available": sorted(available), "missing": missing},
+            )
 
     def audit_log(self) -> dict[str, Any]:
         return self._request_json("GET", "/v1/audit")
@@ -101,6 +127,18 @@ class AetherClient:
 
     def schema_catalog(self) -> dict[str, Any]:
         return self._request_json("GET", "/v1/schema")
+
+    def active_schema_ref(self) -> dict[str, Any]:
+        active = self.schema_catalog().get("active")
+        if not isinstance(active, dict) or not isinstance(active.get("schema_ref"), dict):
+            raise AetherApiError(
+                412,
+                "namespace has no active schema",
+                {},
+                code="active_schema_required",
+                details={},
+            )
+        return active["schema_ref"]
 
     def register_schema(
         self,
@@ -356,7 +394,26 @@ class AetherClient:
                 if isinstance(payload_json, dict)
                 else payload_text or exc.reason
             )
-            raise AetherApiError(exc.code, str(message), payload_json) from exc
+            code = payload_json.get("code") if isinstance(payload_json, dict) else None
+            request_id = (
+                payload_json.get("request_id")
+                if isinstance(payload_json, dict)
+                else None
+            ) or exc.headers.get("X-Aether-Request-Id")
+            details = (
+                payload_json.get("details")
+                if isinstance(payload_json, dict)
+                and isinstance(payload_json.get("details"), dict)
+                else None
+            )
+            raise AetherApiError(
+                exc.code,
+                str(message),
+                payload_json,
+                code=str(code) if code else None,
+                request_id=str(request_id) if request_id else None,
+                details=details,
+            ) from exc
 
 
 def _jsonable(value: Any) -> Any:

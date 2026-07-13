@@ -33,6 +33,11 @@ go run ./cmd/aetherctl --base-url http://127.0.0.1:3000 explain --trace-handle <
 go run ./cmd/aetherctl --base-url http://127.0.0.1:3000 --token-file ./pilot-operator.token tui --refresh 2s
 ```
 
+Semantic CLI and TUI commands preflight the service capability set from
+`/v1/status`. They fail closed when trace handles, namespace schema refs, append
+receipts, or structured errors are unavailable, and never retry explanation by
+tuple ID.
+
 `aetherctl tui` is the live pilot operations entrance. It is intentionally narrow:
 
 - read-only in v1

@@ -67,12 +67,18 @@ func runWithArgs(
 		}
 		return printJSON(response)
 	case "reload-auth":
+		if err := api.RequireCapabilities(ctx, client.RequiredServiceCapabilities()...); err != nil {
+			return err
+		}
 		response, err := api.ReloadAuth(ctx)
 		if err != nil {
 			return err
 		}
 		return printJSON(response)
 	case "history":
+		if err := api.RequireCapabilities(ctx, client.RequiredServiceCapabilities()...); err != nil {
+			return err
+		}
 		response, err := api.History(ctx)
 		if err != nil {
 			return err
@@ -92,6 +98,9 @@ func runWithArgs(
 		}
 		dsl, err := os.ReadFile(*dslFile)
 		if err != nil {
+			return err
+		}
+		if err := api.RequireCapabilities(ctx, client.RequiredServiceCapabilities()...); err != nil {
 			return err
 		}
 		request := client.RunDocumentRequest{DSL: string(dsl)}
@@ -116,6 +125,9 @@ func runWithArgs(
 		if *traceHandle == "" {
 			return usageError("explain requires --trace-handle")
 		}
+		if err := api.RequireCapabilities(ctx, client.RequiredServiceCapabilities()...); err != nil {
+			return err
+		}
 		response, err := api.ResolveTraceHandleWithPolicy(
 			ctx,
 			*traceHandle,
@@ -132,6 +144,9 @@ func runWithArgs(
 		capabilities := command.String("capabilities", "", "Comma-separated capabilities")
 		visibilities := command.String("visibilities", "", "Comma-separated visibilities")
 		if err := command.Parse(commandArgs); err != nil {
+			return err
+		}
+		if err := api.RequireCapabilities(ctx, client.RequiredServiceCapabilities()...); err != nil {
 			return err
 		}
 		response, err := api.CoordinationPilotReport(ctx, buildPolicyContext(*capabilities, *visibilities))
@@ -157,6 +172,9 @@ func runWithArgs(
 		if err != nil {
 			return err
 		}
+		if err := api.RequireCapabilities(ctx, client.RequiredServiceCapabilities()...); err != nil {
+			return err
+		}
 		response, err := api.CoordinationDeltaReport(ctx, left, right, buildPolicyContext(*capabilities, *visibilities))
 		if err != nil {
 			return err
@@ -173,6 +191,9 @@ func runWithArgs(
 		}
 		if strings.TrimSpace(token) == "" {
 			return usageError("tui requires --token, --token-file, or AETHER_TOKEN")
+		}
+		if err := api.RequireCapabilities(ctx, client.RequiredServiceCapabilities()...); err != nil {
+			return err
 		}
 		return opstui.Run(api, *baseURL, buildPolicyContext(*capabilities, *visibilities), *refresh)
 	default:

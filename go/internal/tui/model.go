@@ -772,6 +772,12 @@ func (m Model) renderOverview() string {
 		if m.status.ActiveNamespaceCount > 0 {
 			lines = append(lines, fmt.Sprintf("Active namespaces: %d", m.status.ActiveNamespaceCount))
 		}
+		lines = append(lines, fmt.Sprintf("Capabilities: %s", strings.Join(m.status.Capabilities, ", ")))
+		for _, required := range []string{"trace_handles_v1", "namespace_schema_ref_v1", "append_receipts_v1", "structured_errors_v1"} {
+			if !m.status.Supports(required) {
+				lines = append(lines, muted.Render(fmt.Sprintf("Migration warning: server lacks %s", required)))
+			}
+		}
 	}
 	lines = append(lines, fmt.Sprintf("Journal entries: %d", historyCount))
 	lines = append(lines, fmt.Sprintf("Latest element: %s", latestElement))

@@ -45,6 +45,16 @@ The current scope is still a single-node pilot service. The goal is disciplined 
    powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1
    ```
 
+Before semantic traffic or report collection, confirm `/v1/status` advertises
+`trace_handles_v1`, `namespace_schema_ref_v1`, `append_receipts_v1`, and
+`structured_errors_v1`. A missing flag is client/server skew and must fail the
+operation; do not retry explanation with a tuple ID.
+
+During the compatibility transition, inspect `/v1/audit` for
+`context.legacy_endpoint` and `context.schema_ref_omitted`. Those fields are the
+removal evidence for the sunset gates in `API_CLIENT_MIGRATION.md`, not optional
+diagnostics.
+
 ## Token Rotation Playbook
 
 Default file-backed rotation path:

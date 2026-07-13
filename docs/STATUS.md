@@ -187,6 +187,11 @@ Completed:
 - replicated authority partitions now lock independently, while the audit file
   path uses a bounded single-writer queue with visible backpressure instead of
   holding the in-memory audit lock across slow I/O
+- the HTTP boundary now publishes capability-negotiated trace-handle, schema-ref,
+  append-receipt, and structured-error contracts; typed Rust helpers plus Go,
+  Python, TUI, CLI report commands, and notebook preflights prevent silent
+  fallback, while audit telemetry makes legacy tuple endpoints and omitted
+  schema refs visible
 - the existing beta-candidate runner remains available for diagnostics, but it does not qualify a commercial beta until R4 replaces authored/path-based readiness with exact-candidate immutable evidence
 - the commercial readiness ledger now targets controlled design-partner alpha; commercial beta is blocked by six non-waivable remediation gates, and GA remains blocked by its separate release, support/security, distribution, and distributed-truth gates
 - a repeatable perturbation sweep now exists to run the persona pass, full-stack benchmark snapshot, host-aware drift checks, deeper ignored stress workloads, and single-node capacity projections in one artifact pack
@@ -195,8 +200,8 @@ Completed:
 
 Still open:
 
-- policy-scoped semantic correctness before replay, negation, aggregation, and fixed-point execution
-- execution-scoped, durable, non-aliasing trace identity
+- official exact-candidate qualification of the locally green policy-scoped semantics
+- official exact-candidate qualification of durable, non-aliasing trace identity
 - a successful official exact-candidate workflow bundle and independently
   downloaded verification; local tooling no longer trusts authored status or path existence
 - hosted confirmation that the new dependency/package supply-chain workflow,

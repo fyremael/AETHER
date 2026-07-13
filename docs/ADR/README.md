@@ -43,3 +43,4 @@ The current numbered ADR set is:
 - `docs/ADR/0013-immutable-release-evidence-and-claim-computation.md`
 - `docs/ADR/0014-beta-transport-security.md`
 - `docs/ADR/0015-namespace-and-partition-concurrency-isolation.md`
+- `docs/ADR/0016-capability-negotiated-api-migration.md`

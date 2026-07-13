@@ -47,6 +47,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let transport = config.service_status().transport;
     println!("  backend listener: http://{}", config.bind_addr);
     println!("  HTTP transport: {}", transport.http_mode);
+    println!(
+        "  API capabilities: {}",
+        aether_api::status::capability_flags().join(", ")
+    );
     if let Some(origin) = transport.external_https_origin {
         println!("  external HTTPS origin: {origin}");
     }

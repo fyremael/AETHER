@@ -144,6 +144,18 @@ impl ServiceStatusResponse {
             replicas: Vec::new(),
         }
     }
+
+    pub fn supports(&self, capability: &str) -> bool {
+        self.capabilities
+            .iter()
+            .any(|candidate| candidate == capability)
+    }
+
+    pub fn supports_required_client_contract(&self) -> bool {
+        required_client_capabilities()
+            .iter()
+            .all(|capability| self.supports(capability))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -175,6 +187,16 @@ pub fn capability_flags() -> Vec<String> {
         "namespace_schema_ref_v1".into(),
         "append_receipts_v1".into(),
         "structured_errors_v1".into(),
+        "capability_negotiation_v1".into(),
+    ]
+}
+
+pub fn required_client_capabilities() -> Vec<&'static str> {
+    vec![
+        "trace_handles_v1",
+        "namespace_schema_ref_v1",
+        "append_receipts_v1",
+        "structured_errors_v1",
     ]
 }
 
@@ -191,4 +213,22 @@ pub struct AuthReloadResponse {
     pub reloaded_at_ms: u64,
     pub principal_count: usize,
     pub revoked_count: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_node_status_negotiates_the_required_client_contract() {
+        let status = ServiceStatusResponse::single_node("build", "config", "schema");
+        assert!(status.supports("trace_handles_v1"));
+        assert!(status.supports_required_client_contract());
+
+        let mut old_status = status;
+        old_status
+            .capabilities
+            .retain(|capability| capability != "structured_errors_v1");
+        assert!(!old_status.supports_required_client_contract());
+    }
 }
