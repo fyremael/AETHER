@@ -2,6 +2,12 @@
 
 This document describes the hardened deployment path for the current AETHER pilot service.
 
+The packaged pilot enforces the fixed defaults documented in
+[`RESOURCE_CONTROL_CONTRACT.md`](RESOURCE_CONTROL_CONTRACT.md). Confirm those
+values through `GET /v1/status` after startup. Non-loopback deployments must
+apply an equal or stricter body/rate policy at the trusted HTTPS ingress and
+must prevent direct access to the plaintext backend listener.
+
 The goal is not full platform ops maturity. The goal is a repeatable, packageable, single-node service deployment with durable storage, policy-bound auth, secret-backed token handling, and CI-built artifacts.
 
 ## What Changed

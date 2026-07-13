@@ -2,6 +2,12 @@
 
 This playbook is the operator-facing companion to [PILOT_DEPLOYMENT.md](./PILOT_DEPLOYMENT.md).
 
+Resource saturation is fail-closed. Use
+[`RESOURCE_CONTROL_CONTRACT.md`](RESOURCE_CONTROL_CONTRACT.md) for the exact
+limits and cancellation contract. Do not blindly retry `429`, `503`, or `504`:
+honor `Retry-After`, inspect the namespace-scoped audit entries, and determine
+whether the workload needs pagination or should be rejected.
+
 It describes the safe, repeatable motions for:
 
 - first deployment

@@ -2,6 +2,11 @@
 
 This directory now contains the first real Go operator shell for AETHER.
 
+The Go client negotiates `resource_limits_v1` and `pagination_v1` and exposes
+`HistoryPage`, `RunDocumentPage`, and `ResolveTraceHandlePage`. Typed limit or
+rate failures are terminal for that request; callers must not bypass them with
+legacy endpoints.
+
 Scope for Go in v1:
 
 - CLI and admin commands

@@ -8,14 +8,14 @@ use crate::{
     PartitionStatusResponse, PostgresKernelService, PromoteReplicaRequest,
     RegisterArtifactReferenceRequest, RegisterSchemaRequest, RegisterVectorRecordRequest,
     ReplicatedAuthorityPartitionService, ResolveTraceHandleRequest, RunDocumentRequest,
-    SearchVectorsRequest, ServiceMode, ServiceStatusResponse, ServiceStatusStorage,
-    SqliteKernelService,
+    SearchVectorsRequest, ServiceMode, ServiceResourceControlStatus, ServiceStatusResponse,
+    ServiceStatusStorage, SqliteKernelService,
 };
 use aether_ast::PolicyContext;
 use aether_storage::PostgresTlsConfig;
 use axum::{
     body::{to_bytes, Body},
-    extract::State,
+    extract::{DefaultBodyLimit, Extension, Query, State},
     http::{
         header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, RETRY_AFTER},
         HeaderMap, HeaderValue, StatusCode,
@@ -39,6 +39,66 @@ use tokio::sync::Semaphore;
 pub const AETHER_NAMESPACE_HEADER: &str = "x-aether-namespace";
 pub const AETHER_REQUEST_ID_HEADER: &str = "x-aether-request-id";
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PageRequest {
+    #[serde(default)]
+    pub offset: usize,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PageInfo {
+    pub offset: usize,
+    pub limit: usize,
+    pub total: usize,
+    pub next_offset: Option<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PagedHistoryResponse {
+    pub page: PageInfo,
+    pub datoms: Vec<aether_ast::Datom>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PagedTraceResponse {
+    pub page: PageInfo,
+    pub execution_id: crate::ExecutionId,
+    pub root: aether_ast::TupleId,
+    pub tuples: Vec<aether_ast::DerivedTuple>,
+    pub digests_verified: bool,
+    pub replay_verified: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PagedRunDocumentResponse {
+    pub page: PageInfo,
+    pub response: crate::RunDocumentResponse,
+}
+
+fn page_info(
+    request: PageRequest,
+    total: usize,
+    max_page_size: usize,
+) -> Result<PageInfo, HttpError> {
+    let limit = request.limit.unwrap_or(max_page_size);
+    if limit == 0 || limit > max_page_size {
+        return Err(HttpError::Api(ApiError::ResourceLimit {
+            resource: "page_size",
+            limit: max_page_size,
+            observed: limit,
+        }));
+    }
+    let end = request.offset.saturating_add(limit).min(total);
+    Ok(PageInfo {
+        offset: request.offset.min(total),
+        limit,
+        total,
+        next_offset: (end < total).then_some(end),
+    })
+}
+
 tokio::task_local! {
     static REQUEST_ID: String;
 }
@@ -56,10 +116,49 @@ fn current_request_id() -> String {
 async fn request_id_middleware(request: axum::extract::Request, next: Next) -> Response {
     let request_id = new_request_id();
     let response_request_id = request_id.clone();
+    let body_audit = request.extensions().get::<BodyAuditConfig>().cloned();
+    let method = request.method().to_string();
+    let path = request.uri().path().to_string();
+    let namespace = request
+        .headers()
+        .get(AETHER_NAMESPACE_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("default")
+        .to_owned();
+    let declared_length = request
+        .headers()
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok());
     REQUEST_ID
         .scope(request_id, async move {
             let response = next.run(request).await;
             let mut response = ensure_structured_http_error(response, &response_request_id).await;
+            if let (Some(config), Some(observed)) = (body_audit, declared_length) {
+                if observed > config.max_body_bytes
+                    && response.status() == StatusCode::PAYLOAD_TOO_LARGE
+                {
+                    config.audit.record(AuditEntry {
+                        timestamp_ms: now_millis(),
+                        principal: "unresolved".into(),
+                        principal_id: None,
+                        token_id: None,
+                        method,
+                        path,
+                        status: StatusCode::PAYLOAD_TOO_LARGE.as_u16(),
+                        scope: AuthScope::Query,
+                        outcome: "resource_limit_exceeded".into(),
+                        detail: Some(format!(
+                            "request body declared {observed} bytes; limit {}",
+                            config.max_body_bytes
+                        )),
+                        context: AuditContext {
+                            namespace: Some(namespace),
+                            ..Default::default()
+                        },
+                    });
+                }
+            }
             if let Ok(value) = HeaderValue::from_str(&response_request_id) {
                 response.headers_mut().insert(
                     axum::http::HeaderName::from_static(AETHER_REQUEST_ID_HEADER),
@@ -69,6 +168,12 @@ async fn request_id_middleware(request: axum::extract::Request, next: Next) -> R
             response
         })
         .await
+}
+
+#[derive(Clone)]
+struct BodyAuditConfig {
+    audit: AuditLog,
+    max_body_bytes: usize,
 }
 
 async fn ensure_structured_http_error(response: Response, request_id: &str) -> Response {
@@ -135,14 +240,63 @@ async fn ensure_structured_http_error(response: Response, request_id: &str) -> R
 struct BoundedBlockingExecutor {
     admitted: Arc<Semaphore>,
     workers: Arc<Semaphore>,
+    queue_timeout: std::time::Duration,
+}
+
+#[derive(Clone)]
+struct RateLimiter {
+    requests_per_minute: usize,
+    buckets: Arc<Mutex<HashMap<(NamespaceId, String), RateBucket>>>,
+}
+
+#[derive(Clone, Copy)]
+struct RateBucket {
+    window_started_ms: u64,
+    requests: usize,
+}
+
+impl RateLimiter {
+    fn new(requests_per_minute: usize) -> Self {
+        Self {
+            requests_per_minute: requests_per_minute.max(1),
+            buckets: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    fn admit(&self, namespace: &NamespaceId, principal_id: &str) -> Result<(), HttpError> {
+        let now = now_millis();
+        let mut buckets = self.buckets.lock().map_err(|_| HttpError::LockPoisoned)?;
+        let bucket = buckets
+            .entry((namespace.clone(), principal_id.to_owned()))
+            .or_insert(RateBucket {
+                window_started_ms: now,
+                requests: 0,
+            });
+        let elapsed = now.saturating_sub(bucket.window_started_ms);
+        if elapsed >= 60_000 {
+            *bucket = RateBucket {
+                window_started_ms: now,
+                requests: 0,
+            };
+        }
+        if bucket.requests >= self.requests_per_minute {
+            let retry_after_seconds = 60_000u64.saturating_sub(elapsed).div_ceil(1_000).max(1);
+            return Err(HttpError::RateLimited {
+                retry_after_seconds,
+            });
+        }
+        bucket.requests += 1;
+        Ok(())
+    }
 }
 
 impl BoundedBlockingExecutor {
-    fn new(concurrency: usize, queue: usize) -> Self {
+    fn new(concurrency: usize, queue: usize, queue_timeout_ms: u64) -> Self {
         let concurrency = concurrency.max(1);
         Self {
             admitted: Arc::new(Semaphore::new(concurrency.saturating_add(queue))),
             workers: Arc::new(Semaphore::new(concurrency)),
+            queue_timeout: std::time::Duration::from_millis(queue_timeout_ms.max(1)),
         }
     }
 
@@ -156,10 +310,13 @@ impl BoundedBlockingExecutor {
             .map_err(|_| HttpError::NamespaceBusy {
                 retry_after_seconds: 1,
             })?;
-        let worker = Arc::clone(&self.workers)
-            .acquire_owned()
-            .await
-            .map_err(|_| HttpError::WorkerUnavailable)?;
+        let worker = tokio::time::timeout(
+            self.queue_timeout,
+            Arc::clone(&self.workers).acquire_owned(),
+        )
+        .await
+        .map_err(|_| HttpError::OperationTimedOut { phase: "queue" })?
+        .map_err(|_| HttpError::WorkerUnavailable)?;
         tokio::task::spawn_blocking(move || {
             let _admitted = admitted;
             let _worker = worker;
@@ -180,6 +337,9 @@ pub struct HttpKernelState {
     status: Arc<Mutex<ServiceStatusResponse>>,
     auth_reload_config_path: Option<PathBuf>,
     configured_work_limits: (usize, usize, usize),
+    resource_limits: HttpResourceLimits,
+    namespace_admission: Arc<Mutex<HashMap<NamespaceId, Arc<Semaphore>>>>,
+    rate_limiter: RateLimiter,
 }
 
 impl HttpKernelState {
@@ -263,6 +423,7 @@ impl HttpKernelState {
             namespace_concurrency_limit,
             namespace_queue_limit,
             audit_queue_limit,
+            resource_limits,
         } = options;
         let status =
             service_status.unwrap_or_else(|| services.default_status(audit_log_path.clone()));
@@ -272,6 +433,7 @@ impl HttpKernelState {
             blocking: BoundedBlockingExecutor::new(
                 namespace_concurrency_limit,
                 namespace_queue_limit,
+                resource_limits.operation_timeout_ms,
             ),
             auth: Arc::new(Mutex::new(HttpAuth::from_config(auth))),
             audit: AuditLog::new(audit_log_path, audit_queue_limit),
@@ -282,6 +444,9 @@ impl HttpKernelState {
                 namespace_queue_limit,
                 audit_queue_limit,
             ),
+            resource_limits,
+            namespace_admission: Arc::new(Mutex::new(HashMap::new())),
+            rate_limiter: RateLimiter::new(resource_limits.requests_per_minute),
         }
     }
 
@@ -295,6 +460,28 @@ impl HttpKernelState {
             .lock()
             .map_err(|_| HttpError::LockPoisoned)?
             .authorize(headers, required_scope, namespace)
+    }
+
+    fn admit_namespace(
+        &self,
+        namespace: &NamespaceId,
+    ) -> Result<tokio::sync::OwnedSemaphorePermit, HttpError> {
+        let semaphore = self
+            .namespace_admission
+            .lock()
+            .map_err(|_| HttpError::LockPoisoned)?
+            .entry(namespace.clone())
+            .or_insert_with(|| {
+                Arc::new(Semaphore::new(
+                    1usize.saturating_add(self.configured_work_limits.1),
+                ))
+            })
+            .clone();
+        semaphore
+            .try_acquire_owned()
+            .map_err(|_| HttpError::NamespaceBusy {
+                retry_after_seconds: 1,
+            })
     }
 
     fn status_snapshot(&self) -> Result<ServiceStatusResponse, HttpError> {
@@ -315,6 +502,22 @@ impl HttpKernelState {
             .lock()
             .map_err(|_| HttpError::LockPoisoned)?
             .namespace_status(&active_namespaces);
+        status.resource_controls = ServiceResourceControlStatus {
+            max_request_body_bytes: self.resource_limits.max_request_body_bytes,
+            max_document_bytes: self.resource_limits.max_document_bytes,
+            max_document_rules: self.resource_limits.max_document_rules,
+            max_runtime_iterations: self.resource_limits.max_runtime_iterations,
+            max_derived_tuples: self.resource_limits.max_derived_tuples,
+            operation_timeout_ms: self.resource_limits.operation_timeout_ms,
+            max_page_size: self.resource_limits.max_page_size,
+            requests_per_minute: self.resource_limits.requests_per_minute,
+            global_worker_limit: self.configured_work_limits.0,
+            per_namespace_concurrency_limit: 1,
+            per_namespace_queue_limit: self.configured_work_limits.1,
+            audit_queue_limit: self.configured_work_limits.2,
+            execution_retention: crate::DEFAULT_EXECUTION_RETENTION,
+            cancellation_semantics: "cancel_before_start_complete_after_start".into(),
+        };
         Ok(status)
     }
 
@@ -401,19 +604,64 @@ impl HttpKernelState {
             }
         };
 
+        if let Err(error) = self.rate_limiter.admit(
+            &namespace,
+            principal.principal_id.as_deref().unwrap_or(&principal.id),
+        ) {
+            self.audit.record(AuditEntry::for_request(
+                method,
+                path,
+                error.status_code(),
+                &principal,
+                required_scope,
+                context,
+            ));
+            return Err(error);
+        }
+
         let principal_for_operation = principal.clone();
+        let overload_context = context.clone();
+        let namespace_permit = match self.admit_namespace(&namespace) {
+            Ok(permit) => permit,
+            Err(error) => {
+                self.audit.record(AuditEntry::for_request(
+                    method,
+                    path,
+                    error.status_code(),
+                    &principal,
+                    required_scope,
+                    overload_context.clone(),
+                ));
+                return Err(error);
+            }
+        };
         let services = Arc::clone(&self.services);
         let namespace_for_operation = namespace.clone();
-        let (result, context) = self
+        let execution = self
             .blocking
             .run(move || {
+                let _namespace_permit = namespace_permit;
                 let mut context = context;
                 let result = services.execute(&namespace_for_operation, |service| {
                     operation(service, &principal_for_operation, &mut context)
                 });
                 Ok((result, context))
             })
-            .await?;
+            .await;
+        let (result, context) = match execution {
+            Ok(value) => value,
+            Err(error) => {
+                self.audit.record(AuditEntry::for_request(
+                    method,
+                    path,
+                    error.status_code(),
+                    &principal,
+                    required_scope,
+                    overload_context,
+                ));
+                return Err(error);
+            }
+        };
 
         let status = match &result {
             Ok(_) => StatusCode::OK,
@@ -471,20 +719,66 @@ impl HttpKernelState {
             }
         };
 
+        if let Err(error) = self.rate_limiter.admit(
+            &namespace,
+            principal.principal_id.as_deref().unwrap_or(&principal.id),
+        ) {
+            self.audit.record(AuditEntry::for_request(
+                method,
+                path,
+                error.status_code(),
+                &principal,
+                required_scope,
+                context,
+            ));
+            return Err(error);
+        }
+
+        let overload_context = context.clone();
+        let namespace_permit = match self.admit_namespace(&namespace) {
+            Ok(permit) => permit,
+            Err(error) => {
+                self.audit.record(AuditEntry::for_request(
+                    method,
+                    path,
+                    error.status_code(),
+                    &principal,
+                    required_scope,
+                    overload_context.clone(),
+                ));
+                return Err(error);
+            }
+        };
+
         let partitioned = self.partitioned.clone().ok_or_else(|| {
             HttpError::Api(ApiError::Validation(
                 "partitioned prototype is not configured for this service".into(),
             ))
         })?;
         let principal_for_operation = principal.clone();
-        let (result, context) = self
+        let execution = self
             .blocking
             .run(move || {
+                let _namespace_permit = namespace_permit;
                 let mut context = context;
                 let result = operation(&partitioned, &principal, &mut context);
                 Ok((result, context))
             })
-            .await?;
+            .await;
+        let (result, context) = match execution {
+            Ok(value) => value,
+            Err(error) => {
+                self.audit.record(AuditEntry::for_request(
+                    method,
+                    path,
+                    error.status_code(),
+                    &principal_for_operation,
+                    required_scope,
+                    overload_context,
+                ));
+                return Err(error);
+            }
+        };
         let status = match &result {
             Ok(_) => StatusCode::OK,
             Err(error) => error.status_code(),
@@ -502,8 +796,10 @@ impl HttpKernelState {
 
     async fn resolve_execution_trace(
         &self,
+        path: &'static str,
         headers: &HeaderMap,
         mut request: ResolveTraceHandleRequest,
+        requested_page: Option<PageRequest>,
         mut context: AuditContext,
     ) -> Result<crate::ResolveTraceHandleResponse, HttpError> {
         let namespace = namespace_from_headers(headers)?;
@@ -513,7 +809,7 @@ impl HttpKernelState {
             Err(error) => {
                 self.audit.record(AuditEntry::for_denied(
                     "POST",
-                    "/v1/explanations/resolve",
+                    path,
                     error.status_code(),
                     error.audit_principal(),
                     None,
@@ -531,7 +827,7 @@ impl HttpKernelState {
                 Err(error) => {
                     self.audit.record(AuditEntry::for_denied(
                         "POST",
-                        "/v1/explanations/resolve",
+                        path,
                         error.status_code(),
                         error.audit_principal(),
                         principal.principal_id.clone(),
@@ -544,12 +840,58 @@ impl HttpKernelState {
                 }
             };
 
+        if let Some(requested_page) = requested_page {
+            if let Err(error) = page_info(requested_page, 0, self.resource_limits.max_page_size) {
+                self.audit.record(AuditEntry::for_request(
+                    "POST",
+                    path,
+                    error.status_code(),
+                    &principal,
+                    AuthScope::Explain,
+                    context,
+                ));
+                return Err(error);
+            }
+        }
+
+        if let Err(error) = self.rate_limiter.admit(
+            &namespace,
+            principal.principal_id.as_deref().unwrap_or(&principal.id),
+        ) {
+            self.audit.record(AuditEntry::for_request(
+                "POST",
+                path,
+                error.status_code(),
+                &principal,
+                AuthScope::Explain,
+                context,
+            ));
+            return Err(error);
+        }
+
+        let overload_context = context.clone();
+        let namespace_permit = match self.admit_namespace(&namespace) {
+            Ok(permit) => permit,
+            Err(error) => {
+                self.audit.record(AuditEntry::for_request(
+                    "POST",
+                    path,
+                    error.status_code(),
+                    &principal,
+                    AuthScope::Explain,
+                    overload_context.clone(),
+                ));
+                return Err(error);
+            }
+        };
+
         let services = Arc::clone(&self.services);
         let partitioned = self.partitioned.clone();
         let namespace_for_operation = namespace.clone();
-        let result = self
+        let execution = self
             .blocking
             .run(move || {
+                let _namespace_permit = namespace_permit;
                 let central = services.execute(&namespace_for_operation, |service| {
                     service
                         .resolve_trace_handle(request.clone())
@@ -588,7 +930,21 @@ impl HttpKernelState {
                     }
                 })
             })
-            .await?;
+            .await;
+        let result = match execution {
+            Ok(result) => result,
+            Err(error) => {
+                self.audit.record(AuditEntry::for_request(
+                    "POST",
+                    path,
+                    error.status_code(),
+                    &principal,
+                    AuthScope::Explain,
+                    overload_context,
+                ));
+                return Err(error);
+            }
+        };
 
         if let Ok(response) = &result {
             context.tuple_id = Some(response.record.local_tuple_id.0);
@@ -600,7 +956,7 @@ impl HttpKernelState {
             .unwrap_or_else(|error| error.status_code());
         self.audit.record(AuditEntry::for_request(
             "POST",
-            "/v1/explanations/resolve",
+            path,
             status,
             &principal,
             AuthScope::Explain,
@@ -760,6 +1116,35 @@ pub struct HttpKernelOptions {
     pub namespace_queue_limit: usize,
     #[serde(default = "default_audit_queue_limit")]
     pub audit_queue_limit: usize,
+    #[serde(default)]
+    pub resource_limits: HttpResourceLimits,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct HttpResourceLimits {
+    pub max_request_body_bytes: usize,
+    pub max_document_bytes: usize,
+    pub max_document_rules: usize,
+    pub max_runtime_iterations: usize,
+    pub max_derived_tuples: usize,
+    pub operation_timeout_ms: u64,
+    pub max_page_size: usize,
+    pub requests_per_minute: usize,
+}
+
+impl Default for HttpResourceLimits {
+    fn default() -> Self {
+        Self {
+            max_request_body_bytes: 1_048_576,
+            max_document_bytes: 262_144,
+            max_document_rules: 512,
+            max_runtime_iterations: 4_096,
+            max_derived_tuples: 1_000_000,
+            operation_timeout_ms: 30_000,
+            max_page_size: 500,
+            requests_per_minute: 600,
+        }
+    }
 }
 
 impl Default for HttpKernelOptions {
@@ -772,6 +1157,7 @@ impl Default for HttpKernelOptions {
             namespace_concurrency_limit: default_namespace_concurrency_limit(),
             namespace_queue_limit: default_namespace_queue_limit(),
             audit_queue_limit: default_audit_queue_limit(),
+            resource_limits: HttpResourceLimits::default(),
         }
     }
 }
@@ -809,6 +1195,11 @@ impl HttpKernelOptions {
 
     pub fn with_audit_queue_limit(mut self, limit: usize) -> Self {
         self.audit_queue_limit = limit.max(1);
+        self
+    }
+
+    pub fn with_resource_limits(mut self, limits: HttpResourceLimits) -> Self {
+        self.resource_limits = limits;
         self
     }
 }
@@ -978,10 +1369,17 @@ pub fn http_router_with_partitioned_options(
     partitioned: ReplicatedAuthorityPartitionService,
     options: HttpKernelOptions,
 ) -> Router {
+    let max_body_bytes = options.resource_limits.max_request_body_bytes;
+    let state = HttpKernelState::with_partitioned_options(service, partitioned, options);
+    let body_audit = BodyAuditConfig {
+        audit: state.audit.clone(),
+        max_body_bytes,
+    };
     Router::new()
         .route("/health", get(health))
         .route("/v1/status", get(service_status))
         .route("/v1/history", get(history))
+        .route("/v1/history/page", get(history_page))
         .route("/v1/audit", get(audit_log))
         .route("/v1/admin/auth/reload", post(reload_auth))
         .route("/v1/append", post(append))
@@ -994,6 +1392,7 @@ pub fn http_router_with_partitioned_options(
         .route("/v1/state/as-of", post(as_of))
         .route("/v1/documents/parse", post(parse_document))
         .route("/v1/documents/run", post(run_document))
+        .route("/v1/documents/run/page", post(run_document_page))
         .route(
             "/v1/reports/pilot/coordination",
             post(coordination_pilot_report),
@@ -1004,6 +1403,10 @@ pub fn http_router_with_partitioned_options(
         )
         .route("/v1/explain/tuple", post(explain_tuple))
         .route("/v1/explanations/resolve", post(resolve_trace_handle))
+        .route(
+            "/v1/explanations/resolve/page",
+            post(resolve_trace_handle_page),
+        )
         .route("/v1/partitions/status", get(partition_status))
         .route("/v1/partitions/promote", post(promote_replica))
         .route("/v1/partitions/append", post(partition_append))
@@ -1022,22 +1425,27 @@ pub fn http_router_with_partitioned_options(
             post(register_vector_record),
         )
         .route("/v1/sidecars/vectors/search", post(search_vectors))
-        .with_state(HttpKernelState::with_partitioned_options(
-            service,
-            partitioned,
-            options,
-        ))
+        .with_state(state)
+        .layer(DefaultBodyLimit::max(max_body_bytes))
         .layer(middleware::from_fn(request_id_middleware))
+        .layer(Extension(body_audit))
 }
 
 pub fn http_router_with_options(
     service: impl KernelService + Send + 'static,
     options: HttpKernelOptions,
 ) -> Router {
+    let max_body_bytes = options.resource_limits.max_request_body_bytes;
+    let state = HttpKernelState::with_options(service, options);
+    let body_audit = BodyAuditConfig {
+        audit: state.audit.clone(),
+        max_body_bytes,
+    };
     Router::new()
         .route("/health", get(health))
         .route("/v1/status", get(service_status))
         .route("/v1/history", get(history))
+        .route("/v1/history/page", get(history_page))
         .route("/v1/audit", get(audit_log))
         .route("/v1/admin/auth/reload", post(reload_auth))
         .route("/v1/append", post(append))
@@ -1050,6 +1458,7 @@ pub fn http_router_with_options(
         .route("/v1/state/as-of", post(as_of))
         .route("/v1/documents/parse", post(parse_document))
         .route("/v1/documents/run", post(run_document))
+        .route("/v1/documents/run/page", post(run_document_page))
         .route(
             "/v1/reports/pilot/coordination",
             post(coordination_pilot_report),
@@ -1061,6 +1470,10 @@ pub fn http_router_with_options(
         .route("/v1/explain/tuple", post(explain_tuple))
         .route("/v1/explanations/resolve", post(resolve_trace_handle))
         .route(
+            "/v1/explanations/resolve/page",
+            post(resolve_trace_handle_page),
+        )
+        .route(
             "/v1/sidecars/artifacts/register",
             post(register_artifact_reference),
         )
@@ -1070,18 +1483,27 @@ pub fn http_router_with_options(
             post(register_vector_record),
         )
         .route("/v1/sidecars/vectors/search", post(search_vectors))
-        .with_state(HttpKernelState::with_options(service, options))
+        .with_state(state)
+        .layer(DefaultBodyLimit::max(max_body_bytes))
         .layer(middleware::from_fn(request_id_middleware))
+        .layer(Extension(body_audit))
 }
 
 pub fn http_router_with_sqlite_namespaces(
     data_root: impl Into<PathBuf>,
     options: HttpKernelOptions,
 ) -> Router {
+    let max_body_bytes = options.resource_limits.max_request_body_bytes;
+    let state = HttpKernelState::with_sqlite_namespaces(data_root, options);
+    let body_audit = BodyAuditConfig {
+        audit: state.audit.clone(),
+        max_body_bytes,
+    };
     Router::new()
         .route("/health", get(health))
         .route("/v1/status", get(service_status))
         .route("/v1/history", get(history))
+        .route("/v1/history/page", get(history_page))
         .route("/v1/audit", get(audit_log))
         .route("/v1/admin/auth/reload", post(reload_auth))
         .route("/v1/append", post(append))
@@ -1094,6 +1516,7 @@ pub fn http_router_with_sqlite_namespaces(
         .route("/v1/state/as-of", post(as_of))
         .route("/v1/documents/parse", post(parse_document))
         .route("/v1/documents/run", post(run_document))
+        .route("/v1/documents/run/page", post(run_document_page))
         .route(
             "/v1/reports/pilot/coordination",
             post(coordination_pilot_report),
@@ -1105,6 +1528,10 @@ pub fn http_router_with_sqlite_namespaces(
         .route("/v1/explain/tuple", post(explain_tuple))
         .route("/v1/explanations/resolve", post(resolve_trace_handle))
         .route(
+            "/v1/explanations/resolve/page",
+            post(resolve_trace_handle_page),
+        )
+        .route(
             "/v1/sidecars/artifacts/register",
             post(register_artifact_reference),
         )
@@ -1114,8 +1541,10 @@ pub fn http_router_with_sqlite_namespaces(
             post(register_vector_record),
         )
         .route("/v1/sidecars/vectors/search", post(search_vectors))
-        .with_state(HttpKernelState::with_sqlite_namespaces(data_root, options))
+        .with_state(state)
+        .layer(DefaultBodyLimit::max(max_body_bytes))
         .layer(middleware::from_fn(request_id_middleware))
+        .layer(Extension(body_audit))
 }
 
 pub fn http_router_with_postgres_namespaces(
@@ -1140,10 +1569,23 @@ pub fn http_router_with_postgres_namespaces_and_tls(
     tls: PostgresTlsConfig,
     options: HttpKernelOptions,
 ) -> Router {
+    let max_body_bytes = options.resource_limits.max_request_body_bytes;
+    let state = HttpKernelState::with_postgres_namespaces_and_tls(
+        database_url,
+        schema,
+        sidecar_path,
+        tls,
+        options,
+    );
+    let body_audit = BodyAuditConfig {
+        audit: state.audit.clone(),
+        max_body_bytes,
+    };
     Router::new()
         .route("/health", get(health))
         .route("/v1/status", get(service_status))
         .route("/v1/history", get(history))
+        .route("/v1/history/page", get(history_page))
         .route("/v1/audit", get(audit_log))
         .route("/v1/admin/auth/reload", post(reload_auth))
         .route("/v1/append", post(append))
@@ -1156,6 +1598,7 @@ pub fn http_router_with_postgres_namespaces_and_tls(
         .route("/v1/state/as-of", post(as_of))
         .route("/v1/documents/parse", post(parse_document))
         .route("/v1/documents/run", post(run_document))
+        .route("/v1/documents/run/page", post(run_document_page))
         .route(
             "/v1/reports/pilot/coordination",
             post(coordination_pilot_report),
@@ -1167,6 +1610,10 @@ pub fn http_router_with_postgres_namespaces_and_tls(
         .route("/v1/explain/tuple", post(explain_tuple))
         .route("/v1/explanations/resolve", post(resolve_trace_handle))
         .route(
+            "/v1/explanations/resolve/page",
+            post(resolve_trace_handle_page),
+        )
+        .route(
             "/v1/sidecars/artifacts/register",
             post(register_artifact_reference),
         )
@@ -1176,14 +1623,10 @@ pub fn http_router_with_postgres_namespaces_and_tls(
             post(register_vector_record),
         )
         .route("/v1/sidecars/vectors/search", post(search_vectors))
-        .with_state(HttpKernelState::with_postgres_namespaces_and_tls(
-            database_url,
-            schema,
-            sidecar_path,
-            tls,
-            options,
-        ))
+        .with_state(state)
+        .layer(DefaultBodyLimit::max(max_body_bytes))
         .layer(middleware::from_fn(request_id_middleware))
+        .layer(Extension(body_audit))
 }
 
 #[derive(Clone)]
@@ -1831,6 +2274,8 @@ enum HttpError {
     Unauthorized { principal: String, message: String },
     Forbidden { principal: String, message: String },
     NamespaceBusy { retry_after_seconds: u64 },
+    RateLimited { retry_after_seconds: u64 },
+    OperationTimedOut { phase: &'static str },
     NamespaceInitializationFailed(String),
     WorkerUnavailable,
     WorkerFailed,
@@ -1844,6 +2289,8 @@ impl HttpError {
             Self::Unauthorized { .. } => StatusCode::UNAUTHORIZED,
             Self::Forbidden { .. } => StatusCode::FORBIDDEN,
             Self::NamespaceBusy { .. } | Self::WorkerUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            Self::RateLimited { .. } => StatusCode::TOO_MANY_REQUESTS,
+            Self::OperationTimedOut { .. } => StatusCode::GATEWAY_TIMEOUT,
             Self::NamespaceInitializationFailed(_) | Self::WorkerFailed => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -1858,6 +2305,8 @@ impl HttpError {
             }
             Self::Api(_)
             | Self::NamespaceBusy { .. }
+            | Self::RateLimited { .. }
+            | Self::OperationTimedOut { .. }
             | Self::NamespaceInitializationFailed(_)
             | Self::WorkerUnavailable
             | Self::WorkerFailed
@@ -1870,6 +2319,10 @@ impl HttpError {
             Self::Api(error) => error.to_string(),
             Self::Unauthorized { message, .. } | Self::Forbidden { message, .. } => message.clone(),
             Self::NamespaceBusy { .. } => "namespace work queue is saturated".into(),
+            Self::RateLimited { .. } => "request rate limit exceeded".into(),
+            Self::OperationTimedOut { phase } => {
+                format!("operation timed out during {phase}")
+            }
             Self::NamespaceInitializationFailed(message) => message.clone(),
             Self::WorkerUnavailable => "namespace worker executor is unavailable".into(),
             Self::WorkerFailed => "namespace worker failed".into(),
@@ -1909,6 +2362,9 @@ impl IntoResponse for HttpError {
         let retry_after = match &self {
             Self::NamespaceBusy {
                 retry_after_seconds,
+            }
+            | Self::RateLimited {
+                retry_after_seconds,
             } => Some(*retry_after_seconds),
             _ => None,
         };
@@ -1922,6 +2378,13 @@ impl IntoResponse for HttpError {
             Self::NamespaceBusy { .. } => {
                 ("namespace work queue is saturated".into(), "namespace_busy")
             }
+            Self::RateLimited { .. } => {
+                ("request rate limit exceeded".into(), "rate_limit_exceeded")
+            }
+            Self::OperationTimedOut { phase } => (
+                format!("operation timed out during {phase}"),
+                "operation_timed_out",
+            ),
             Self::NamespaceInitializationFailed(message) => {
                 (message, "namespace_initialization_failed")
             }
@@ -1980,6 +2443,25 @@ fn http_error_details(error: &HttpError) -> serde_json::Value {
         HttpError::NamespaceBusy {
             retry_after_seconds,
         } => serde_json::json!({ "retry_after_seconds": retry_after_seconds }),
+        HttpError::RateLimited {
+            retry_after_seconds,
+        } => serde_json::json!({ "retry_after_seconds": retry_after_seconds }),
+        HttpError::OperationTimedOut { phase } => serde_json::json!({ "phase": phase }),
+        HttpError::Api(ApiError::ResourceLimit {
+            resource,
+            limit,
+            observed,
+        }) => serde_json::json!({
+            "resource": resource,
+            "limit": limit,
+            "observed": observed,
+        }),
+        HttpError::Api(ApiError::Runtime(
+            aether_runtime::RuntimeError::IterationLimitExceeded { limit },
+        )) => serde_json::json!({ "resource": "runtime_iterations", "limit": limit }),
+        HttpError::Api(ApiError::Runtime(
+            aether_runtime::RuntimeError::DerivedTupleLimitExceeded { limit },
+        )) => serde_json::json!({ "resource": "derived_tuples", "limit": limit }),
         _ => serde_json::json!({}),
     }
 }
@@ -2022,6 +2504,11 @@ fn api_error_code(error: &ApiError) -> &'static str {
             _ => "append_validation_failed",
         },
         ApiError::Journal(_) => "journal_conflict",
+        ApiError::ResourceLimit { .. }
+        | ApiError::Runtime(
+            aether_runtime::RuntimeError::IterationLimitExceeded { .. }
+            | aether_runtime::RuntimeError::DerivedTupleLimitExceeded { .. },
+        ) => "resource_limit_exceeded",
         ApiError::Validation(_) => "validation_error",
         ApiError::Sidecar(_) => "sidecar_error",
         ApiError::Resolve(_) => "resolve_error",
@@ -2035,6 +2522,11 @@ fn api_error_code(error: &ApiError) -> &'static str {
 fn status_for_api_error(error: &ApiError) -> StatusCode {
     match error {
         ApiError::AmbiguousTupleReference => StatusCode::CONFLICT,
+        ApiError::ResourceLimit { .. } => StatusCode::PAYLOAD_TOO_LARGE,
+        ApiError::Runtime(
+            aether_runtime::RuntimeError::IterationLimitExceeded { .. }
+            | aether_runtime::RuntimeError::DerivedTupleLimitExceeded { .. },
+        ) => StatusCode::UNPROCESSABLE_ENTITY,
         ApiError::Validation(_)
         | ApiError::Sidecar(_)
         | ApiError::Resolve(_)
@@ -2153,6 +2645,42 @@ async fn history(
                 context.datom_count = Some(response.datoms.len());
                 context.last_element = response.datoms.last().map(|datom| datom.element.0);
                 Ok(response)
+            },
+        )
+        .await?;
+    Ok(Json(response))
+}
+
+async fn history_page(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Query(requested_page): Query<PageRequest>,
+) -> Result<Json<PagedHistoryResponse>, HttpError> {
+    let request_context = AuditContext {
+        command_source: Some("http".into()),
+        selected_report: Some("history_page".into()),
+        temporal_view: Some("history".into()),
+        ..Default::default()
+    };
+    let max_page_size = state.resource_limits.max_page_size;
+    let response = state
+        .execute(
+            &headers,
+            "GET",
+            "/v1/history/page",
+            AuthScope::Ops,
+            request_context,
+            move |service, principal, context| {
+                let policy_context = apply_policy_binding(principal, None, context)?;
+                let history = service
+                    .history(HistoryRequest { policy_context })
+                    .map_err(HttpError::Api)?;
+                let page = page_info(requested_page, history.datoms.len(), max_page_size)?;
+                let end = page.offset.saturating_add(page.limit).min(page.total);
+                let datoms = history.datoms[page.offset..end].to_vec();
+                context.datom_count = Some(datoms.len());
+                context.last_element = datoms.last().map(|datom| datom.element.0);
+                Ok(PagedHistoryResponse { page, datoms })
             },
         )
         .await?;
@@ -2411,6 +2939,7 @@ async fn parse_document(
     Json(request): Json<ParseDocumentRequest>,
 ) -> Result<Json<crate::ParseDocumentResponse>, HttpError> {
     let request_context = audit_context_for_document(&request.dsl);
+    let limits = state.resource_limits;
     let response = state
         .execute(
             &headers,
@@ -2419,7 +2948,21 @@ async fn parse_document(
             AuthScope::Query,
             request_context.clone(),
             move |service, _principal, _context| {
+                if request.dsl.len() > limits.max_document_bytes {
+                    return Err(HttpError::Api(ApiError::ResourceLimit {
+                        resource: "document_bytes",
+                        limit: limits.max_document_bytes,
+                        observed: request.dsl.len(),
+                    }));
+                }
                 let response = service.parse_document(request).map_err(HttpError::Api)?;
+                if response.program.rules.len() > limits.max_document_rules {
+                    return Err(HttpError::Api(ApiError::ResourceLimit {
+                        resource: "document_rules",
+                        limit: limits.max_document_rules,
+                        observed: response.program.rules.len(),
+                    }));
+                }
                 Ok(response)
             },
         )
@@ -2433,6 +2976,7 @@ async fn run_document(
     Json(request): Json<RunDocumentRequest>,
 ) -> Result<Json<crate::RunDocumentResponse>, HttpError> {
     let request_context = audit_context_for_document(&request.dsl);
+    let limits = state.resource_limits;
     let response = state
         .execute(
             &headers,
@@ -2444,12 +2988,74 @@ async fn run_document(
                 let mut request = request;
                 request.policy_context =
                     apply_policy_binding(principal, request.policy_context, context)?;
-                let response = service.run_document(request).map_err(HttpError::Api)?;
+                let response = service
+                    .run_document_with_limits(
+                        request,
+                        crate::DocumentExecutionLimits {
+                            max_document_bytes: limits.max_document_bytes,
+                            max_rules: limits.max_document_rules,
+                            max_iterations: limits.max_runtime_iterations,
+                            max_derived_tuples: limits.max_derived_tuples,
+                        },
+                    )
+                    .map_err(HttpError::Api)?;
                 context.entity_count = Some(response.state.entities.len());
                 context.last_element = response.state.as_of.map(|element| element.0);
                 context.derived_tuple_count = Some(response.derived.tuples.len());
                 context.row_count = response.query.as_ref().map(|query| query.rows.len());
                 Ok(response)
+            },
+        )
+        .await?;
+    Ok(Json(response))
+}
+
+async fn run_document_page(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Query(requested_page): Query<PageRequest>,
+    Json(request): Json<RunDocumentRequest>,
+) -> Result<Json<PagedRunDocumentResponse>, HttpError> {
+    let request_context = audit_context_for_document(&request.dsl);
+    let limits = state.resource_limits;
+    let response = state
+        .execute(
+            &headers,
+            "POST",
+            "/v1/documents/run/page",
+            AuthScope::Query,
+            request_context,
+            move |service, principal, context| {
+                page_info(requested_page, 0, limits.max_page_size)?;
+                let mut request = request;
+                request.policy_context =
+                    apply_policy_binding(principal, request.policy_context, context)?;
+                let mut response = service
+                    .run_document_with_limits(
+                        request,
+                        crate::DocumentExecutionLimits {
+                            max_document_bytes: limits.max_document_bytes,
+                            max_rules: limits.max_document_rules,
+                            max_iterations: limits.max_runtime_iterations,
+                            max_derived_tuples: limits.max_derived_tuples,
+                        },
+                    )
+                    .map_err(HttpError::Api)?;
+                let total = response
+                    .query
+                    .as_ref()
+                    .map(|query| query.rows.len())
+                    .unwrap_or(0);
+                let page = page_info(requested_page, total, limits.max_page_size)?;
+                if let Some(query) = &mut response.query {
+                    let end = page.offset.saturating_add(page.limit).min(page.total);
+                    query.rows = query.rows[page.offset..end].to_vec();
+                }
+                context.entity_count = Some(response.state.entities.len());
+                context.last_element = response.state.as_of.map(|element| element.0);
+                context.derived_tuple_count = Some(response.derived.tuples.len());
+                context.row_count = response.query.as_ref().map(|query| query.rows.len());
+                Ok(PagedRunDocumentResponse { page, response })
             },
         )
         .await?;
@@ -2879,9 +3485,49 @@ async fn resolve_trace_handle(
         ..Default::default()
     };
     let response = state
-        .resolve_execution_trace(&headers, request, request_context)
+        .resolve_execution_trace(
+            "/v1/explanations/resolve",
+            &headers,
+            request,
+            None,
+            request_context,
+        )
         .await?;
     Ok(Json(response))
+}
+
+async fn resolve_trace_handle_page(
+    State(state): State<HttpKernelState>,
+    headers: HeaderMap,
+    Query(requested_page): Query<PageRequest>,
+    Json(request): Json<ResolveTraceHandleRequest>,
+) -> Result<Json<PagedTraceResponse>, HttpError> {
+    let request_context = AuditContext {
+        command_source: Some("http".into()),
+        selected_report: Some("trace_handle_page".into()),
+        ..Default::default()
+    };
+    let max_page_size = state.resource_limits.max_page_size;
+    let response = state
+        .resolve_execution_trace(
+            "/v1/explanations/resolve/page",
+            &headers,
+            request,
+            Some(requested_page),
+            request_context,
+        )
+        .await?;
+    let total = response.record.trace.tuples.len();
+    let page = page_info(requested_page, total, max_page_size)?;
+    let end = page.offset.saturating_add(page.limit).min(page.total);
+    Ok(Json(PagedTraceResponse {
+        page,
+        execution_id: response.record.execution_id,
+        root: response.record.trace.root,
+        tuples: response.record.trace.tuples[page.offset..end].to_vec(),
+        digests_verified: response.digests_verified,
+        replay_verified: response.replay_verified,
+    }))
 }
 
 async fn register_artifact_reference(
@@ -3174,7 +3820,7 @@ mod concurrency_tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn blocked_namespace_does_not_delay_another_namespace_or_directory_status() {
-        let executor = BoundedBlockingExecutor::new(2, 2);
+        let executor = BoundedBlockingExecutor::new(2, 2, 30_000);
         let services = directory("independent");
         let blocked_namespace = NamespaceId::new("blocked").expect("namespace");
         let free_namespace = NamespaceId::new("free").expect("namespace");
@@ -3316,7 +3962,7 @@ mod concurrency_tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn same_namespace_is_ordered_and_initializes_once() {
-        let executor = BoundedBlockingExecutor::new(2, 2);
+        let executor = BoundedBlockingExecutor::new(2, 2, 30_000);
         let services = directory("ordered");
         let namespace = NamespaceId::new("ordered").expect("namespace");
         let order = Arc::new(Mutex::new(Vec::new()));
@@ -3380,7 +4026,7 @@ mod concurrency_tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn executor_saturation_and_panics_fail_boundedly() {
-        let saturated = BoundedBlockingExecutor::new(1, 0);
+        let saturated = BoundedBlockingExecutor::new(1, 0, 30_000);
         let (started_tx, started_rx) = mpsc::sync_channel(1);
         let (release_tx, release_rx) = mpsc::sync_channel(1);
         let running = {
@@ -3414,7 +4060,7 @@ mod concurrency_tests {
             .expect("running join")
             .expect("running result");
 
-        let executor = BoundedBlockingExecutor::new(1, 0);
+        let executor = BoundedBlockingExecutor::new(1, 0, 30_000);
         assert!(matches!(
             executor
                 .run(|| -> Result<(), HttpError> { panic!("worker panic") })
@@ -3425,5 +4071,68 @@ mod concurrency_tests {
             .run(|| Ok(()))
             .await
             .expect("permit must be released after panic");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn queued_operations_time_out_before_start_while_started_work_completes() {
+        let executor = BoundedBlockingExecutor::new(1, 1, 20);
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        let running = {
+            let executor = executor.clone();
+            tokio::spawn(async move {
+                executor
+                    .run(move || {
+                        started_tx.send(()).expect("worker started");
+                        release_rx.recv().expect("release worker");
+                        Ok(41_u8)
+                    })
+                    .await
+            })
+        };
+        started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("first operation started");
+
+        let second_started = Arc::new(Mutex::new(false));
+        let marker = Arc::clone(&second_started);
+        assert!(matches!(
+            executor
+                .run(move || {
+                    *marker.lock().expect("marker lock") = true;
+                    Ok(())
+                })
+                .await,
+            Err(HttpError::OperationTimedOut { phase: "queue" })
+        ));
+        assert!(!*second_started.lock().expect("marker lock"));
+
+        release_tx.send(()).expect("release first operation");
+        assert_eq!(
+            running
+                .await
+                .expect("first operation join")
+                .expect("started operation completes"),
+            41
+        );
+    }
+
+    #[test]
+    fn namespace_admission_is_bounded_without_cross_namespace_interference() {
+        let state = HttpKernelState::with_options(
+            crate::InMemoryKernelService::new(),
+            HttpKernelOptions::new().with_namespace_work_limits(4, 1),
+        );
+        let first = NamespaceId::new("first").expect("namespace");
+        let second = NamespaceId::new("second").expect("namespace");
+        let _active = state.admit_namespace(&first).expect("active permit");
+        let _queued = state.admit_namespace(&first).expect("queued permit");
+        assert!(matches!(
+            state.admit_namespace(&first),
+            Err(HttpError::NamespaceBusy { .. })
+        ));
+        let _independent = state
+            .admit_namespace(&second)
+            .expect("independent namespace permit");
     }
 }

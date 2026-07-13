@@ -113,6 +113,47 @@ pub struct ServiceStatusResponse {
     pub namespaces: Vec<NamespaceStatusSummary>,
     pub principals: Vec<PrincipalStatusSummary>,
     pub replicas: Vec<ReplicaStatusSummary>,
+    #[serde(default)]
+    pub resource_controls: ServiceResourceControlStatus,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ServiceResourceControlStatus {
+    pub max_request_body_bytes: usize,
+    pub max_document_bytes: usize,
+    pub max_document_rules: usize,
+    pub max_runtime_iterations: usize,
+    pub max_derived_tuples: usize,
+    pub operation_timeout_ms: u64,
+    pub max_page_size: usize,
+    pub requests_per_minute: usize,
+    pub global_worker_limit: usize,
+    pub per_namespace_concurrency_limit: usize,
+    pub per_namespace_queue_limit: usize,
+    pub audit_queue_limit: usize,
+    pub execution_retention: usize,
+    pub cancellation_semantics: String,
+}
+
+impl Default for ServiceResourceControlStatus {
+    fn default() -> Self {
+        Self {
+            max_request_body_bytes: 1_048_576,
+            max_document_bytes: 262_144,
+            max_document_rules: 512,
+            max_runtime_iterations: 4_096,
+            max_derived_tuples: 1_000_000,
+            operation_timeout_ms: 30_000,
+            max_page_size: 500,
+            requests_per_minute: 600,
+            global_worker_limit: 8,
+            per_namespace_concurrency_limit: 1,
+            per_namespace_queue_limit: 64,
+            audit_queue_limit: 1_024,
+            execution_retention: crate::execution::DEFAULT_EXECUTION_RETENTION,
+            cancellation_semantics: "cancel_before_start_complete_after_start".into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -142,6 +183,7 @@ impl ServiceStatusResponse {
             namespaces: Vec::new(),
             principals: Vec::new(),
             replicas: Vec::new(),
+            resource_controls: ServiceResourceControlStatus::default(),
         }
     }
 
@@ -188,6 +230,8 @@ pub fn capability_flags() -> Vec<String> {
         "append_receipts_v1".into(),
         "structured_errors_v1".into(),
         "capability_negotiation_v1".into(),
+        "resource_limits_v1".into(),
+        "pagination_v1".into(),
     ]
 }
 
@@ -197,6 +241,8 @@ pub fn required_client_capabilities() -> Vec<&'static str> {
         "namespace_schema_ref_v1",
         "append_receipts_v1",
         "structured_errors_v1",
+        "resource_limits_v1",
+        "pagination_v1",
     ]
 }
 

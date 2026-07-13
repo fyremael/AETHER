@@ -8,7 +8,8 @@ use aether_plan::CompiledProgram;
 use aether_resolver::{ResolveError, ResolvedState};
 use aether_rules::{DefaultDslParser, DefaultRuleCompiler, DslParser, ParseError, RuleCompiler};
 use aether_runtime::{
-    execute_scoped_query, DerivedSet, EvaluationBundle, RuleRuntime, RuntimeError, SemiNaiveRuntime,
+    execute_scoped_query, DerivedSet, EvaluationBundle, RuleRuntime, RuntimeError, RuntimeLimits,
+    SemiNaiveRuntime,
 };
 use aether_schema::Schema;
 use aether_storage::{InMemoryJournal, Journal, JournalError, PostgresJournal, SqliteJournal};
@@ -64,14 +65,15 @@ pub use deployment::{
 pub use execution::{
     ContentDigest, ExecutionId, ExecutionManifest, ExecutionReceipt, FederatedExecutionSource,
     FederationManifest, JournalCut, ResolveTraceHandleRequest, ResolveTraceHandleResponse,
-    SchemaRef, TraceHandle, TraceHandleBinding, TraceRecord,
+    SchemaRef, TraceHandle, TraceHandleBinding, TraceRecord, DEFAULT_EXECUTION_RETENTION,
 };
 pub use http::{
     http_router, http_router_with_options, http_router_with_partitioned_options,
     http_router_with_postgres_namespaces, http_router_with_postgres_namespaces_and_tls,
     http_router_with_sqlite_namespaces, AuditContext, AuditEntry, AuditLogResponse, AuthScope,
     HealthResponse, HttpAccessToken, HttpAuthConfig, HttpKernelOptions, HttpKernelState,
-    StructuredErrorResponse, AETHER_NAMESPACE_HEADER, AETHER_REQUEST_ID_HEADER,
+    HttpResourceLimits, PageInfo, PageRequest, PagedHistoryResponse, PagedRunDocumentResponse,
+    PagedTraceResponse, StructuredErrorResponse, AETHER_NAMESPACE_HEADER, AETHER_REQUEST_ID_HEADER,
 };
 pub use namespace::NamespaceId;
 pub use partitioned::{
@@ -107,8 +109,26 @@ pub use sidecar::{
 };
 pub use status::{
     AuthReloadResponse, NamespaceStatusSummary, PrincipalStatusSummary, ReplicaStatusSummary,
-    ServiceMode, ServiceStatusResponse, ServiceStatusStorage, ServiceTransportStatus,
+    ServiceMode, ServiceResourceControlStatus, ServiceStatusResponse, ServiceStatusStorage,
+    ServiceTransportStatus,
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DocumentExecutionLimits {
+    pub max_document_bytes: usize,
+    pub max_rules: usize,
+    pub max_iterations: usize,
+    pub max_derived_tuples: usize,
+}
+
+impl DocumentExecutionLimits {
+    pub const UNBOUNDED: Self = Self {
+        max_document_bytes: usize::MAX,
+        max_rules: usize::MAX,
+        max_iterations: usize::MAX,
+        max_derived_tuples: usize::MAX,
+    };
+}
 
 pub trait KernelService {
     fn append(&mut self, request: AppendRequest) -> Result<AppendResponse, ApiError>;
@@ -154,6 +174,28 @@ pub trait KernelService {
         &mut self,
         request: RunDocumentRequest,
     ) -> Result<RunDocumentResponse, ApiError>;
+    fn run_document_with_limits(
+        &mut self,
+        request: RunDocumentRequest,
+        limits: DocumentExecutionLimits,
+    ) -> Result<RunDocumentResponse, ApiError> {
+        if request.dsl.len() > limits.max_document_bytes {
+            return Err(ApiError::ResourceLimit {
+                resource: "document_bytes",
+                limit: limits.max_document_bytes,
+                observed: request.dsl.len(),
+            });
+        }
+        let response = self.run_document(request)?;
+        if response.program.rules.len() > limits.max_rules {
+            return Err(ApiError::ResourceLimit {
+                resource: "document_rules",
+                limit: limits.max_rules,
+                observed: response.program.rules.len(),
+            });
+        }
+        Ok(response)
+    }
     fn coordination_pilot_report(
         &mut self,
         request: CoordinationPilotReportRequest,
@@ -344,12 +386,19 @@ impl<J: Journal, S: SidecarFederation> KernelServiceCore<J, S> {
         cache: &'a mut Vec<DocumentEvaluation>,
         builder: &ScopedEvaluationBuilder<'_>,
         view: &TemporalView,
+        limits: DocumentExecutionLimits,
     ) -> Result<&'a DocumentEvaluation, ApiError> {
         if let Some(index) = cache.iter().position(|evaluation| &evaluation.view == view) {
             return Ok(&cache[index]);
         }
 
-        let (key, evaluation) = builder.evaluate_with_key(view.clone())?;
+        let (key, evaluation) = builder.evaluate_with_key_and_limits(
+            view.clone(),
+            RuntimeLimits {
+                max_iterations: limits.max_iterations,
+                max_derived_tuples: limits.max_derived_tuples,
+            },
+        )?;
         cache.push(DocumentEvaluation {
             view: view.clone(),
             key,
@@ -645,11 +694,33 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         &mut self,
         request: RunDocumentRequest,
     ) -> Result<RunDocumentResponse, ApiError> {
+        self.run_document_with_limits(request, DocumentExecutionLimits::UNBOUNDED)
+    }
+
+    fn run_document_with_limits(
+        &mut self,
+        request: RunDocumentRequest,
+        limits: DocumentExecutionLimits,
+    ) -> Result<RunDocumentResponse, ApiError> {
         let RunDocumentRequest {
             dsl,
             policy_context,
         } = request;
+        if dsl.len() > limits.max_document_bytes {
+            return Err(ApiError::ResourceLimit {
+                resource: "document_bytes",
+                limit: limits.max_document_bytes,
+                observed: dsl.len(),
+            });
+        }
         let document = DefaultDslParser.parse_document(&dsl)?;
+        if document.program.rules.len() > limits.max_rules {
+            return Err(ApiError::ResourceLimit {
+                resource: "document_rules",
+                limit: limits.max_rules,
+                observed: document.program.rules.len(),
+            });
+        }
         if let Some(active) = schema_catalog(&self.journal)?.active {
             document_schema_compatible(&active, &document.schema)?;
         }
@@ -680,7 +751,8 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
                     .map(|explain| explain.spec.view.clone())
             })
             .unwrap_or(TemporalView::Current);
-        let primary = self.document_evaluation(&mut evaluations, &builder, &primary_view)?;
+        let primary =
+            self.document_evaluation(&mut evaluations, &builder, &primary_view, limits)?;
         let primary_key = primary.key.clone();
         let primary_state = primary.evaluation.snapshot().state().clone();
         let primary_derived = primary.evaluation.derived().clone();
@@ -692,8 +764,12 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
             .queries
             .iter()
             .map(|named_query| {
-                let evaluation =
-                    self.document_evaluation(&mut evaluations, &builder, &named_query.spec.view)?;
+                let evaluation = self.document_evaluation(
+                    &mut evaluations,
+                    &builder,
+                    &named_query.spec.view,
+                    limits,
+                )?;
                 Ok(NamedQueryResult {
                     name: named_query.name.clone(),
                     spec: named_query.spec.clone(),
@@ -706,8 +782,12 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
             .explains
             .iter()
             .map(|named_explain| {
-                let evaluation =
-                    self.document_evaluation(&mut evaluations, &builder, &named_explain.spec.view)?;
+                let evaluation = self.document_evaluation(
+                    &mut evaluations,
+                    &builder,
+                    &named_explain.spec.view,
+                    limits,
+                )?;
                 Ok(NamedExplainResult {
                     name: named_explain.name.clone(),
                     spec: named_explain.spec.clone(),
@@ -1021,6 +1101,12 @@ pub enum ApiError {
     Admission(#[from] AdmissionError),
     #[error("validation error: {0}")]
     Validation(String),
+    #[error("resource limit exceeded for {resource}: observed {observed}, limit {limit}")]
+    ResourceLimit {
+        resource: &'static str,
+        limit: usize,
+        observed: usize,
+    },
     #[error(transparent)]
     Journal(#[from] JournalError),
     #[error(transparent)]

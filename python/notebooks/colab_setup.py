@@ -22,6 +22,8 @@ REQUIRED_SERVICE_CAPABILITIES = (
     "namespace_schema_ref_v1",
     "append_receipts_v1",
     "structured_errors_v1",
+    "resource_limits_v1",
+    "pagination_v1",
 )
 
 _PILOT_SERVICE_CACHE: dict[tuple[str, str, int | None, str, str], "NotebookService"] = {}

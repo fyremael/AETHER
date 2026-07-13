@@ -33,6 +33,19 @@ pub trait ScopedRuleRuntime {
     ) -> Result<EvaluationBundle, RuntimeError>;
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeLimits {
+    pub max_iterations: usize,
+    pub max_derived_tuples: usize,
+}
+
+impl RuntimeLimits {
+    pub const UNBOUNDED: Self = Self {
+        max_iterations: usize::MAX,
+        max_derived_tuples: usize::MAX,
+    };
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeIteration {
     pub iteration: usize,
@@ -140,6 +153,17 @@ impl RuleRuntime for SemiNaiveRuntime {
         state: &ResolvedState,
         program: &CompiledProgram,
     ) -> Result<DerivedSet, RuntimeError> {
+        self.evaluate_with_limits(state, program, RuntimeLimits::UNBOUNDED)
+    }
+}
+
+impl SemiNaiveRuntime {
+    pub fn evaluate_with_limits(
+        &self,
+        state: &ResolvedState,
+        program: &CompiledProgram,
+        limits: RuntimeLimits,
+    ) -> Result<DerivedSet, RuntimeError> {
         let extensional_rows = build_extensional_rows(state, program);
         let intensional_predicates: IndexSet<PredicateId> = program
             .rules
@@ -171,6 +195,11 @@ impl RuleRuntime for SemiNaiveRuntime {
 
             let mut delta_rows: IndexMap<PredicateId, Vec<RelationRow>> = IndexMap::new();
             loop {
+                if iteration > limits.max_iterations {
+                    return Err(RuntimeError::IterationLimitExceeded {
+                        limit: limits.max_iterations,
+                    });
+                }
                 let mut batch_rows: IndexMap<PredicateId, Vec<RelationRow>> = IndexMap::new();
                 let mut batch_tuples = Vec::new();
 
@@ -221,6 +250,13 @@ impl RuleRuntime for SemiNaiveRuntime {
                             if tuple_keys.contains(&key) {
                                 continue;
                             }
+                            if tuples.len().saturating_add(batch_tuples.len())
+                                >= limits.max_derived_tuples
+                            {
+                                return Err(RuntimeError::DerivedTupleLimitExceeded {
+                                    limit: limits.max_derived_tuples,
+                                });
+                            }
 
                             let tuple_id = TupleId::new(next_tuple_id);
                             next_tuple_id += 1;
@@ -267,6 +303,13 @@ impl RuleRuntime for SemiNaiveRuntime {
                             let key = tuple_key(rule.head.predicate.id, &matched.values);
                             if tuple_keys.contains(&key) {
                                 continue;
+                            }
+                            if tuples.len().saturating_add(batch_tuples.len())
+                                >= limits.max_derived_tuples
+                            {
+                                return Err(RuntimeError::DerivedTupleLimitExceeded {
+                                    limit: limits.max_derived_tuples,
+                                });
                             }
 
                             let tuple_id = TupleId::new(next_tuple_id);
@@ -357,11 +400,22 @@ impl ScopedRuleRuntime for SemiNaiveRuntime {
         snapshot: ResolvedSnapshot,
         program: ScopedProgram,
     ) -> Result<EvaluationBundle, RuntimeError> {
+        self.evaluate_scoped_with_limits(snapshot, program, RuntimeLimits::UNBOUNDED)
+    }
+}
+
+impl SemiNaiveRuntime {
+    pub fn evaluate_scoped_with_limits(
+        &self,
+        snapshot: ResolvedSnapshot,
+        program: ScopedProgram,
+        limits: RuntimeLimits,
+    ) -> Result<EvaluationBundle, RuntimeError> {
         if snapshot.scope() != program.scope() {
             return Err(RuntimeError::PolicyScopeMismatch);
         }
 
-        let derived = self.evaluate(snapshot.state(), program.compiled())?;
+        let derived = self.evaluate_with_limits(snapshot.state(), program.compiled(), limits)?;
         Ok(EvaluationBundle {
             snapshot,
             program,
@@ -1208,6 +1262,10 @@ fn runtime_value_type(value: &Value) -> String {
 pub enum RuntimeError {
     #[error("resolved snapshot and compiled program policy scopes differ")]
     PolicyScopeMismatch,
+    #[error("runtime iteration limit {limit} exceeded before convergence")]
+    IterationLimitExceeded { limit: usize },
+    #[error("runtime derived tuple limit {limit} exceeded")]
+    DerivedTupleLimitExceeded { limit: usize },
     #[error("predicate {0} has no extensional binding or fact rows in the compiled program")]
     MissingExtensionalBinding(PredicateId),
     #[error("rule {0} uses same-stratum negation, which is not supported")]
@@ -1241,7 +1299,7 @@ pub enum RuntimeError {
 
 #[cfg(test)]
 mod tests {
-    use super::{execute_query, RuleRuntime, RuntimeError, SemiNaiveRuntime};
+    use super::{execute_query, RuleRuntime, RuntimeError, RuntimeLimits, SemiNaiveRuntime};
     use aether_ast::{
         AggregateFunction, AggregateTerm, Atom, AttributeId, Datom, DatomProvenance, ElementId,
         EntityId, ExtensionalFact, Literal, PredicateId, PredicateRef, QueryAst, QueryRow, RuleAst,
@@ -1394,6 +1452,28 @@ mod tests {
             longest_path.metadata.source_datom_ids,
             vec![ElementId::new(1), ElementId::new(2), ElementId::new(3)]
         );
+        assert!(matches!(
+            SemiNaiveRuntime.evaluate_with_limits(
+                &state,
+                &compiled,
+                RuntimeLimits {
+                    max_iterations: 2,
+                    max_derived_tuples: usize::MAX,
+                },
+            ),
+            Err(RuntimeError::IterationLimitExceeded { limit: 2 })
+        ));
+        assert!(matches!(
+            SemiNaiveRuntime.evaluate_with_limits(
+                &state,
+                &compiled,
+                RuntimeLimits {
+                    max_iterations: usize::MAX,
+                    max_derived_tuples: 2,
+                },
+            ),
+            Err(RuntimeError::DerivedTupleLimitExceeded { limit: 2 })
+        ));
     }
 
     #[test]

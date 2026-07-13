@@ -7,16 +7,17 @@ use aether_api::{
     CoordinationDeltaReportRequest, CoordinationPilotReport, CoordinationPilotReportRequest,
     ExplainTupleRequest, FederatedExplainReport, FederatedRunDocumentRequest,
     GetArtifactReferenceRequest, HealthResponse, HistoryResponse, HttpAccessToken, HttpAuthConfig,
-    HttpKernelOptions, ImportedFactQueryRequest, InMemoryKernelService, KernelService, NamespaceId,
-    NamespaceSchemaRevision, ParseDocumentRequest, ParseDocumentResponse, PartitionAppendRequest,
-    PartitionStatusResponse, PilotAuthConfig, PilotServiceConfig, PilotTokenConfig,
-    PromoteReplicaRequest, RegisterArtifactReferenceRequest, RegisterSchemaRequest,
-    RegisterVectorRecordRequest, ReplicaConfig, ReplicaRole, ReplicatedAuthorityPartitionService,
-    ResolveTraceHandleRequest, RunDocumentRequest, RunDocumentResponse, SchemaCatalogResponse,
-    SchemaCompatibility, SearchVectorsRequest, SearchVectorsResponse, ServiceMode,
-    ServiceStatusResponse, SqliteKernelService, StructuredErrorResponse, VectorFactProjection,
-    VectorMetric, AETHER_NAMESPACE_HEADER, AETHER_REQUEST_ID_HEADER,
-    COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
+    HttpKernelOptions, HttpResourceLimits, ImportedFactQueryRequest, InMemoryKernelService,
+    KernelService, NamespaceId, NamespaceSchemaRevision, PagedHistoryResponse, PagedTraceResponse,
+    ParseDocumentRequest, ParseDocumentResponse, PartitionAppendRequest, PartitionStatusResponse,
+    PilotAuthConfig, PilotServiceConfig, PilotTokenConfig, PromoteReplicaRequest,
+    RegisterArtifactReferenceRequest, RegisterSchemaRequest, RegisterVectorRecordRequest,
+    ReplicaConfig, ReplicaRole, ReplicatedAuthorityPartitionService, ResolveTraceHandleRequest,
+    RunDocumentRequest, RunDocumentResponse, SchemaCatalogResponse, SchemaCompatibility,
+    SearchVectorsRequest, SearchVectorsResponse, ServiceMode, ServiceStatusResponse,
+    SqliteKernelService, StructuredErrorResponse, VectorFactProjection, VectorMetric,
+    AETHER_NAMESPACE_HEADER, AETHER_REQUEST_ID_HEADER, COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
+    COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
 use aether_ast::{
     AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PartitionCut,
@@ -128,6 +129,165 @@ async fn http_framework_failures_use_the_structured_error_contract() {
     }
 
     server.abort();
+}
+
+#[tokio::test]
+async fn resource_limits_are_typed_audited_and_leave_authority_unchanged() {
+    let audit = TestAuditPath::new("resource-limits");
+    let limits = HttpResourceLimits {
+        max_request_body_bytes: 256,
+        max_document_bytes: 8_192,
+        max_document_rules: 0,
+        max_page_size: 2,
+        requests_per_minute: 100,
+        ..HttpResourceLimits::default()
+    };
+    let options = HttpKernelOptions::new()
+        .with_audit_log_path(audit.path().to_path_buf())
+        .with_resource_limits(limits);
+    let (base_url, server) = spawn_server_with_options(InMemoryKernelService::new(), options).await;
+    let client = Client::new();
+
+    let status = client
+        .get(format!("{base_url}/v1/status"))
+        .send()
+        .await
+        .expect("resource status")
+        .json::<ServiceStatusResponse>()
+        .await
+        .expect("resource status body");
+    assert_eq!(status.resource_controls.max_request_body_bytes, 256);
+    assert_eq!(status.resource_controls.max_document_rules, 0);
+    assert_eq!(
+        status.resource_controls.cancellation_semantics,
+        "cancel_before_start_complete_after_start"
+    );
+
+    let oversized = client
+        .post(format!("{base_url}/v1/documents/run"))
+        .json(&serde_json::json!({ "dsl": "x".repeat(1_024) }))
+        .send()
+        .await
+        .expect("oversized request");
+    assert_eq!(oversized.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(
+        oversized
+            .json::<StructuredErrorResponse>()
+            .await
+            .expect("oversized structured error")
+            .code,
+        "request_body_too_large"
+    );
+
+    let limited_document = r#"
+schema v1 {
+}
+predicates {
+  seed(Entity)
+  ready(Entity)
+}
+rules {
+  ready(x) <- seed(x)
+}
+facts {
+  seed(entity(1))
+}
+query current {
+  current
+  goal ready(x)
+  keep x
+}
+"#;
+    let rule_limited = client
+        .post(format!("{base_url}/v1/documents/run"))
+        .json(&RunDocumentRequest {
+            dsl: limited_document.into(),
+            policy_context: None,
+        })
+        .send()
+        .await
+        .expect("rule-limited request");
+    assert_eq!(
+        rule_limited.status(),
+        reqwest::StatusCode::PAYLOAD_TOO_LARGE
+    );
+    let error = rule_limited
+        .json::<StructuredErrorResponse>()
+        .await
+        .expect("rule limit error");
+    assert_eq!(error.code, "resource_limit_exceeded");
+    assert_eq!(error.details["resource"], "document_rules");
+
+    let history = client
+        .get(format!("{base_url}/v1/history"))
+        .send()
+        .await
+        .expect("history after rejected documents")
+        .json::<HistoryResponse>()
+        .await
+        .expect("history response");
+    assert!(history.datoms.is_empty());
+    let persisted = read_audit_entries(audit.path());
+    assert!(persisted.iter().any(|entry| {
+        entry.path == "/v1/documents/run"
+            && entry.status == reqwest::StatusCode::PAYLOAD_TOO_LARGE.as_u16()
+    }));
+    assert!(persisted.iter().any(|entry| {
+        entry.path == "/v1/documents/run"
+            && entry
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("request body declared"))
+    }));
+
+    stop_server(server).await;
+}
+
+#[tokio::test]
+async fn pagination_and_rate_limits_are_namespace_scoped() {
+    let audit = TestAuditPath::new("rate-limit");
+    let limits = HttpResourceLimits {
+        max_page_size: 2,
+        requests_per_minute: 1,
+        ..HttpResourceLimits::default()
+    };
+    let options = HttpKernelOptions::new()
+        .with_audit_log_path(audit.path().to_path_buf())
+        .with_resource_limits(limits);
+    let (base_url, server) = spawn_server_with_options(InMemoryKernelService::new(), options).await;
+    let client = Client::new();
+
+    let first = client
+        .get(format!("{base_url}/v1/history/page?offset=0&limit=2"))
+        .send()
+        .await
+        .expect("first paged request");
+    assert!(first.status().is_success());
+    let page = first
+        .json::<PagedHistoryResponse>()
+        .await
+        .expect("paged history");
+    assert_eq!(page.page.total, 0);
+
+    let limited = client
+        .get(format!("{base_url}/v1/history"))
+        .send()
+        .await
+        .expect("rate-limited request");
+    assert_eq!(limited.status(), reqwest::StatusCode::TOO_MANY_REQUESTS);
+    assert!(limited.headers().contains_key("retry-after"));
+    let error = limited
+        .json::<StructuredErrorResponse>()
+        .await
+        .expect("rate limit error");
+    assert_eq!(error.code, "rate_limit_exceeded");
+
+    let persisted = read_audit_entries(audit.path());
+    assert!(persisted.iter().any(|entry| {
+        entry.path == "/v1/history"
+            && entry.status == reqwest::StatusCode::TOO_MANY_REQUESTS.as_u16()
+    }));
+    stop_server(server).await;
 }
 
 #[tokio::test]
@@ -410,7 +570,7 @@ async fn http_service_runs_documents_and_explains_tuples() {
     let explain = client
         .post(format!("{base_url}/v1/explanations/resolve"))
         .json(&ResolveTraceHandleRequest {
-            handle,
+            handle: handle.clone(),
             policy_context: None,
             verify_replay: true,
         })
@@ -425,6 +585,28 @@ async fn http_service_runs_documents_and_explains_tuples() {
         .record
         .trace;
     assert!(!trace.tuples.is_empty());
+
+    let trace_page = client
+        .post(format!(
+            "{base_url}/v1/explanations/resolve/page?offset=0&limit=1"
+        ))
+        .json(&ResolveTraceHandleRequest {
+            handle,
+            policy_context: None,
+            verify_replay: true,
+        })
+        .send()
+        .await
+        .expect("paged explain request");
+    assert!(trace_page.status().is_success());
+    let trace_page = trace_page
+        .json::<PagedTraceResponse>()
+        .await
+        .expect("paged explain response");
+    assert_eq!(trace_page.tuples.len(), 1);
+    assert_eq!(trace_page.page.limit, 1);
+    assert!(trace_page.digests_verified);
+    assert!(trace_page.replay_verified);
 
     let ambiguous = client
         .post(format!("{base_url}/v1/explain/tuple"))
@@ -1859,6 +2041,7 @@ async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
             namespaces: Vec::new(),
             principals: Vec::new(),
             replicas: Vec::new(),
+            resource_controls: Default::default(),
         });
     let (base_url, server) =
         spawn_partitioned_server_with_options(InMemoryKernelService::new(), partitioned, options)

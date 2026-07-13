@@ -96,10 +96,12 @@ ordinary feature backlog:
   contract and negative tests pass, but remote Postgres/non-loopback HTTP remain
   outside the controlled-alpha claim until the hosted real-TLS matrix and ingress
   isolation evidence pass for the exact candidate.
-- Namespace and replicated-partition work is now independently lockable and
-  bounded at the process executor. The current defaults are process-wide rather
-  than adaptive per-tenant quotas; operation deadlines, cancellation, and
-  per-namespace resource budgets remain R5.6 work.
+- Namespace and replicated-partition work is independently lockable and bounded
+  by global workers plus per-namespace admission. Request, DSL, runtime, page,
+  rate, audit, and execution-retention limits now fail closed. The packaged
+  pilot uses fixed process-lifetime defaults rather than dynamic/adaptive tenant
+  quotas. Timeout cancels only queued work; started synchronous semantic work
+  completes atomically and is not cooperatively interrupted.
 - The new QA hardening workflow is intentionally non-blocking in phase one. It is a diagnostic program for surfacing admin, operator, user, and exec defects before stable subchecks are promoted into `CI` or release-readiness.
 - The repository now has a responsible-disclosure policy, but it is not yet advertising a paid public bug bounty.
 - Memory figures in the performance report are structural lower-bound estimates rather than allocator-exact telemetry.

@@ -4,6 +4,13 @@ Release-candidate capture and offline verification are documented in
 [`RELEASE_EVIDENCE.md`](RELEASE_EVIDENCE.md). Commercial claim policy is not an
 operational evidence source.
 
+Service exhaustion and cancellation behavior is specified in
+[`RESOURCE_CONTROL_CONTRACT.md`](RESOURCE_CONTROL_CONTRACT.md). Before a pilot,
+inspect `/v1/status.resource_controls`, configure the trusted HTTPS ingress with
+an equal or stricter request/rate policy, and verify direct backend access is
+blocked. Treat `audit_write_failed`, repeated `namespace_busy`, and
+`operation_timed_out` outcomes as operational incidents, not successful retries.
+
 This guide is for people running AETHER demonstrations, capturing reports, or presenting the project to others.
 
 ## Transport and certificate rotation

@@ -1647,6 +1647,7 @@ fn build_http_fixture() -> Result<HttpFixture, ApiError> {
             namespaces: Vec::new(),
             principals: Vec::new(),
             replicas: Vec::new(),
+            resource_controls: Default::default(),
         });
     let runtime = RuntimeBuilder::new_current_thread()
         .enable_all()

@@ -2,6 +2,11 @@
 
 This directory now contains the first real AETHER Python SDK surface.
 
+Client preflight requires `resource_limits_v1` and `pagination_v1`. Use
+`history_page`, `run_document_page`, and `resolve_trace_handle_page` for bounded
+results; do not fall back to an unbounded or tuple-ID endpoint after a typed
+limit failure.
+
 Scope for Python in v1:
 
 - fixture builders

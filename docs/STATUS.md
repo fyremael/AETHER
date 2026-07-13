@@ -77,8 +77,20 @@ workflow/run/job, exact commands, inputs, attempts, outputs, and expiry; the
 offline verifier re-hashes every byte and recomputes a deterministic verdict.
 The commercial ledger is policy-only and rejects authored outcomes. A reusable
 exact-candidate workflow builds one package and emits a SHA/run/attempt-named
-bundle. Official workflow evidence and the R5 supply-chain/transport/operations
-subjects remain pending, so this does not widen the controlled-alpha claim.
+bundle. Official workflow evidence and hosted R5 supply-chain, transport, and
+operations outcomes remain pending, so this does not widen the controlled-alpha
+claim.
+
+R5.1-R5.6 are now implemented locally. The service has strict dependency and
+package gates, verified transport modes, independent namespace admission,
+capability-negotiated clients, exact operational verdict automation, and
+fail-closed resource controls. Request/document/rule/runtime/result/rate limits,
+queue timeout semantics, finite execution retention, audit backpressure, and
+typed no-partial-mutation failures are published in
+`docs/RESOURCE_CONTROL_CONTRACT.md`. Hosted exact-candidate runs, ingress
+isolation evidence, real TLS-Postgres evidence, and independent bundle
+verification remain required; the public claim therefore remains controlled
+alpha.
 
 Completed:
 
@@ -97,6 +109,10 @@ Completed:
 - immutable candidate evidence schemas, deterministic gate capture/bundling,
   fail-closed offline verification, negative tamper/drift coverage, a policy-only
   commercial ledger, and reusable exact-candidate workflow implemented locally
+- bounded request bodies, documents, rules, runtime iterations, derived tuples,
+  pages, rates, global workers, per-namespace queues, audit writes, and execution
+  retention implemented with structured audited failures and explicit
+  cancel-before-start/complete-after-start semantics
 - whole-document DSL parser implemented for the current canonical v1 surface: schema, attribute classes, facts, repeated queries, explain directives, temporal views, and policy annotations
 - `Current` and `AsOf` query execution implemented
 - policy annotations wired through state, document, explanation, report, federation, and sidecar paths as pre-replay/pre-compilation semantic scope; immutable release qualification remains pending

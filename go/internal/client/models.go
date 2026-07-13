@@ -13,6 +13,8 @@ func RequiredServiceCapabilities() []string {
 		"namespace_schema_ref_v1",
 		"append_receipts_v1",
 		"structured_errors_v1",
+		"resource_limits_v1",
+		"pagination_v1",
 	}
 }
 
@@ -289,6 +291,18 @@ type ResolveTraceHandleRequest struct {
 
 type HealthResponse struct {
 	Status string `json:"status"`
+}
+
+type PageInfo struct {
+	Offset     int  `json:"offset"`
+	Limit      int  `json:"limit"`
+	Total      int  `json:"total"`
+	NextOffset *int `json:"next_offset,omitempty"`
+}
+
+type PagedHistoryResponse struct {
+	Page   PageInfo `json:"page"`
+	Datoms []Datom  `json:"datoms"`
 }
 
 type ServiceStatusStorage struct {

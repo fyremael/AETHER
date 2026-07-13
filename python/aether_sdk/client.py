@@ -84,6 +84,11 @@ class AetherClient:
     def history(self) -> dict[str, Any]:
         return self._request_json("GET", "/v1/history")
 
+    def history_page(self, *, offset: int = 0, limit: int = 500) -> dict[str, Any]:
+        return self._request_json(
+            "GET", f"/v1/history/page?offset={offset}&limit={limit}"
+        )
+
     def append(
         self,
         datoms: list[dict[str, Any] | Datom],
@@ -222,6 +227,20 @@ class AetherClient:
             RunDocumentRequest(dsl=dsl, policy_context=policy_context),
         )
 
+    def run_document_page(
+        self,
+        dsl: str,
+        *,
+        offset: int = 0,
+        limit: int = 500,
+        policy_context: PolicyContext | dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            f"/v1/documents/run/page?offset={offset}&limit={limit}",
+            RunDocumentRequest(dsl=dsl, policy_context=policy_context),
+        )
+
     def run_named_query(
         self,
         dsl: str,
@@ -272,6 +291,27 @@ class AetherClient:
         if policy_context is not None:
             payload["policy_context"] = policy_context
         return self._request_json("POST", "/v1/explanations/resolve", payload)
+
+    def resolve_trace_handle_page(
+        self,
+        handle: str,
+        *,
+        offset: int = 0,
+        limit: int = 500,
+        policy_context: PolicyContext | dict[str, Any] | None = None,
+        verify_replay: bool = False,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "handle": handle,
+            "verify_replay": verify_replay,
+        }
+        if policy_context is not None:
+            payload["policy_context"] = policy_context
+        return self._request_json(
+            "POST",
+            f"/v1/explanations/resolve/page?offset={offset}&limit={limit}",
+            payload,
+        )
 
     def coordination_report(
         self,

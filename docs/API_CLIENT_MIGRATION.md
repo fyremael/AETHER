@@ -15,6 +15,8 @@ not understand. Capability absence never authorizes a semantic fallback.
 | `namespace_schema_ref_v1` | Schema catalog and append requests use namespace-scoped content-addressed schema references. |
 | `append_receipts_v1` | Successful admitted appends return durable receipts and receipt lookup is available. |
 | `structured_errors_v1` | Failures include `error`, `code`, `request_id`, and `details`. |
+| `resource_limits_v1` | The service publishes and enforces fail-closed resource bounds. |
+| `pagination_v1` | History, document query rows, and trace tuples have bounded page endpoints. |
 
 Rust exposes typed status/error negotiation helpers and service demos print the
 capability set. The Go client and TUI, Python SDK, CLI report commands, and
@@ -22,6 +24,11 @@ notebooks consume it. Human-readable error text remains for one transition, but
 automation must branch on `code`. The
 `X-Aether-Request-Id` response header equals the structured error body
 `request_id` and is also present on successful responses.
+
+The Python and Go clients expose bounded history, document-run, and trace
+resolution page helpers. They require both new flags during preflight. Resource
+errors branch on `code`; clients must not retry a limit failure with an
+unbounded legacy endpoint.
 
 ## Schema transition
 

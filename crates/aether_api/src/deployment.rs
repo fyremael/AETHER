@@ -514,6 +514,7 @@ impl ResolvedPilotServiceConfig {
             namespaces: namespace_status_from_principals(&principals),
             principals,
             replicas: Vec::new(),
+            resource_controls: Default::default(),
         }
     }
 }

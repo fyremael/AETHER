@@ -5,7 +5,7 @@ use aether_resolver::{
     MaterializedResolver, ResolveError, ResolvedSnapshot, Resolver, ScopedReplay,
 };
 use aether_rules::{DefaultRuleCompiler, ScopedRuleCompiler};
-use aether_runtime::{EvaluationBundle, ScopedRuleRuntime, SemiNaiveRuntime};
+use aether_runtime::{EvaluationBundle, RuntimeLimits, SemiNaiveRuntime};
 use aether_schema::Schema;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -111,6 +111,14 @@ impl<'a> ScopedEvaluationBuilder<'a> {
         &self,
         view: TemporalView,
     ) -> Result<(EvaluationKey, EvaluationBundle), ApiError> {
+        self.evaluate_with_key_and_limits(view, RuntimeLimits::UNBOUNDED)
+    }
+
+    pub(crate) fn evaluate_with_key_and_limits(
+        &self,
+        view: TemporalView,
+        limits: RuntimeLimits,
+    ) -> Result<(EvaluationKey, EvaluationBundle), ApiError> {
         let replay = ScopedReplay::new(self.history, view, self.program.scope().clone())
             .map_err(public_resolve_error)?;
         let key = build_evaluation_key(
@@ -123,7 +131,8 @@ impl<'a> ScopedEvaluationBuilder<'a> {
         let snapshot = MaterializedResolver
             .resolve_scoped(self.schema, &replay)
             .map_err(public_resolve_error)?;
-        let evaluation = SemiNaiveRuntime.evaluate_scoped(snapshot, self.program.clone())?;
+        let evaluation =
+            SemiNaiveRuntime.evaluate_scoped_with_limits(snapshot, self.program.clone(), limits)?;
         Ok((key, evaluation))
     }
 }

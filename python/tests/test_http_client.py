@@ -71,6 +71,8 @@ class AetherHttpClientIntegrationTest(unittest.TestCase):
             "namespace_schema_ref_v1",
             "append_receipts_v1",
             "structured_errors_v1",
+            "resource_limits_v1",
+            "pagination_v1",
         )
 
         document = """
@@ -112,6 +114,15 @@ query current_cut {
         )
         self.assertTrue(resolved_trace["digests_verified"])
         self.assertTrue(resolved_trace["replay_verified"])
+        trace_page = client.resolve_trace_handle_page(
+            trace_handle,
+            limit=1,
+            verify_replay=True,
+        )
+        self.assertEqual(len(trace_page["tuples"]), 1)
+        self.assertEqual(trace_page["page"]["limit"], 1)
+        query_page = client.run_document_page(document, limit=1)
+        self.assertEqual(len(query_page["response"]["query"]["rows"]), 1)
         named_query = client.run_named_query(document, query_name="current_cut")
         self.assertEqual(
             [row["values"] for row in named_query["rows"]],
@@ -170,6 +181,9 @@ query current_cut {
         self.assertFalse(first_append["idempotent_replay"])
         self.assertTrue(first_append["schema_ref_was_implicit"])
         schema_ref = first_append["schema_ref"]
+        history_page = client.history_page(limit=1)
+        self.assertEqual(len(history_page["datoms"]), 1)
+        self.assertEqual(history_page["page"]["total"], 1)
         strict_provenance = make_provenance(
             author_principal="python-client",
             agent_id="integration-test",

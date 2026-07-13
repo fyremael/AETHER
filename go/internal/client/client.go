@@ -111,6 +111,15 @@ func (c *Client) History(ctx context.Context) (*HistoryResponse, error) {
 	return &response, nil
 }
 
+func (c *Client) HistoryPage(ctx context.Context, offset int, limit int) (*PagedHistoryResponse, error) {
+	var response PagedHistoryResponse
+	path := fmt.Sprintf("/v1/history/page?offset=%d&limit=%d", offset, limit)
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
 func (c *Client) Append(ctx context.Context, request AppendAdmissionRequest) (*AppendReceipt, error) {
 	var response AppendReceipt
 	if err := c.doJSON(ctx, http.MethodPost, "/v1/append", request, &response); err != nil {
@@ -222,8 +231,27 @@ func (c *Client) RunDocument(ctx context.Context, request RunDocumentRequest) (m
 	return response, nil
 }
 
+func (c *Client) RunDocumentPage(ctx context.Context, request RunDocumentRequest, offset int, limit int) (map[string]any, error) {
+	var response map[string]any
+	path := fmt.Sprintf("/v1/documents/run/page?offset=%d&limit=%d", offset, limit)
+	if err := c.doJSON(ctx, http.MethodPost, path, request, &response); err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
 func (c *Client) ResolveTraceHandle(ctx context.Context, handle string) (*ResolveTraceHandleResponse, error) {
 	return c.ResolveTraceHandleWithPolicy(ctx, handle, nil, false)
+}
+
+func (c *Client) ResolveTraceHandlePage(ctx context.Context, handle string, offset int, limit int) (map[string]any, error) {
+	var response map[string]any
+	path := fmt.Sprintf("/v1/explanations/resolve/page?offset=%d&limit=%d", offset, limit)
+	request := ResolveTraceHandleRequest{Handle: handle, VerifyReplay: true}
+	if err := c.doJSON(ctx, http.MethodPost, path, request, &response); err != nil {
+		return nil, err
+	}
+	return response, nil
 }
 
 func (c *Client) ResolveTraceHandleWithPolicy(

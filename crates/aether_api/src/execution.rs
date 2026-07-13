@@ -20,7 +20,7 @@ use std::{
 };
 use thiserror::Error;
 
-const DEFAULT_MAX_EXECUTIONS: usize = 1_024;
+pub const DEFAULT_EXECUTION_RETENTION: usize = 1_024;
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -205,7 +205,7 @@ impl Default for InMemoryExecutionStore {
             executions: BTreeMap::new(),
             traces: BTreeMap::new(),
             expired_handles: BTreeSet::new(),
-            max_executions: DEFAULT_MAX_EXECUTIONS,
+            max_executions: DEFAULT_EXECUTION_RETENTION,
         }
     }
 }
@@ -322,7 +322,7 @@ impl SqliteExecutionStore {
         Ok(Self {
             connection,
             path,
-            max_executions: DEFAULT_MAX_EXECUTIONS,
+            max_executions: DEFAULT_EXECUTION_RETENTION,
         })
     }
 
@@ -783,6 +783,51 @@ mod tests {
             }),
             Err(ExecutionStoreError::DuplicateTraceHandle)
         ));
+    }
+
+    #[test]
+    fn retention_quota_evicts_oldest_execution_and_tombstones_its_handles() {
+        let mut memory = InMemoryExecutionStore {
+            max_executions: 2,
+            ..Default::default()
+        };
+        let memory_trace = trace_record("execution-a");
+        let memory_handle = memory_trace.handle.clone();
+        memory
+            .put_execution(stored_execution("execution-a", ENGINE_SEMANTICS_VERSION))
+            .expect("put first memory execution");
+        memory.put_trace(memory_trace).expect("put memory trace");
+        for id in ["execution-b", "execution-c"] {
+            memory
+                .put_execution(stored_execution(id, ENGINE_SEMANTICS_VERSION))
+                .expect("put memory execution");
+        }
+        assert!(matches!(
+            memory.trace(&memory_handle),
+            Err(ExecutionStoreError::ExpiredTraceHandle)
+        ));
+
+        let nonce = NEXT_TEST_PATH.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("aether-retention-{nonce}.sqlite"));
+        let mut sqlite = SqliteExecutionStore::open(&path).expect("open sqlite store");
+        sqlite.max_executions = 2;
+        let sqlite_trace = trace_record("execution-a");
+        let sqlite_handle = sqlite_trace.handle.clone();
+        sqlite
+            .put_execution(stored_execution("execution-a", ENGINE_SEMANTICS_VERSION))
+            .expect("put first sqlite execution");
+        sqlite.put_trace(sqlite_trace).expect("put sqlite trace");
+        for id in ["execution-b", "execution-c"] {
+            sqlite
+                .put_execution(stored_execution(id, ENGINE_SEMANTICS_VERSION))
+                .expect("put sqlite execution");
+        }
+        assert!(matches!(
+            sqlite.trace(&sqlite_handle),
+            Err(ExecutionStoreError::ExpiredTraceHandle)
+        ));
+        drop(sqlite);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

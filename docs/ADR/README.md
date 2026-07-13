@@ -45,3 +45,4 @@ The current numbered ADR set is:
 - `docs/ADR/0015-namespace-and-partition-concurrency-isolation.md`
 - `docs/ADR/0016-capability-negotiated-api-migration.md`
 - `docs/ADR/0017-exact-operational-evidence-verdicts.md`
+- `docs/ADR/0018-fail-closed-service-resource-controls.md`
