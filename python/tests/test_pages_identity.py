@@ -49,6 +49,7 @@ class PagesIdentityTests(unittest.TestCase):
         )
         self.assertIn("--candidate-sha \"${{ github.sha }}\"", workflow)
         self.assertIn("source-version.json", workflow)
+        self.assertIn("toolchain: 1.86.0", workflow)
         self.assertIn("verify_pages_deployment.py", workflow)
         self.assertIn("pages-deployment-verification", workflow)
 
