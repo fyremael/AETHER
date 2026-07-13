@@ -41,6 +41,7 @@ The config defines:
 - service mode
 - bind address
 - HTTP transport boundary (`loopback_plaintext` or `trusted_tls_ingress`)
+- bounded namespace worker, queue, and audit-writer capacities
 - either the legacy SQLite `database_path` or the Service v2 tagged `storage` object
 - audit log path
 - one or more auth principals
@@ -102,6 +103,23 @@ declare the boundary explicitly:
 
 The ingress must block direct client access to the backend HTTP listener.
 Native TLS is not claimed by the current Rust HTTP binary.
+
+Synchronous kernel and storage operations run on a bounded executor. The
+package defaults are:
+
+```json
+{
+  "namespace_workers": 8,
+  "namespace_queue": 64,
+  "audit_queue": 1024
+}
+```
+
+These values live under `concurrency`. When worker plus queue capacity is
+exhausted, AETHER returns `503 namespace_busy` with `Retry-After`. Operations
+remain serialized inside one namespace but can proceed concurrently across
+namespaces. Audit disk writes use the bounded single-writer queue; an overload
+is recorded as `audit_write_failed` in the in-memory audit surface.
 
 For Postgres deployments, restore discipline belongs to the database operator:
 export and restore the configured journal schema with normal Postgres tooling,

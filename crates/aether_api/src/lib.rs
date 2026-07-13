@@ -57,8 +57,8 @@ pub use aether_storage::JournalCutRef;
 pub use aether_storage::{PostgresTlsConfig, PostgresTlsMode};
 pub use deployment::{
     default_audit_log_path, serve_pilot_http_service, DeploymentError, PilotAuthConfig,
-    PilotHttpTransportConfig, PilotServiceConfig, PilotStorageConfig, PilotTokenConfig,
-    ResolvedPilotHttpTransport, ResolvedPilotServiceConfig, ResolvedPilotStorage,
+    PilotConcurrencyConfig, PilotHttpTransportConfig, PilotServiceConfig, PilotStorageConfig,
+    PilotTokenConfig, ResolvedPilotHttpTransport, ResolvedPilotServiceConfig, ResolvedPilotStorage,
     ResolvedPilotTokenSummary,
 };
 pub use execution::{

@@ -15,7 +15,10 @@ use aether_ast::PolicyContext;
 use aether_storage::PostgresTlsConfig;
 use axum::{
     extract::State,
-    http::{header::AUTHORIZATION, HeaderMap, StatusCode},
+    http::{
+        header::{AUTHORIZATION, RETRY_AFTER},
+        HeaderMap, HeaderValue, StatusCode,
+    },
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -26,20 +29,62 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{mpsc, Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
+use tokio::sync::Semaphore;
 
 pub const AETHER_NAMESPACE_HEADER: &str = "x-aether-namespace";
 
 #[derive(Clone)]
+struct BoundedBlockingExecutor {
+    admitted: Arc<Semaphore>,
+    workers: Arc<Semaphore>,
+}
+
+impl BoundedBlockingExecutor {
+    fn new(concurrency: usize, queue: usize) -> Self {
+        let concurrency = concurrency.max(1);
+        Self {
+            admitted: Arc::new(Semaphore::new(concurrency.saturating_add(queue))),
+            workers: Arc::new(Semaphore::new(concurrency)),
+        }
+    }
+
+    async fn run<T, F>(&self, operation: F) -> Result<T, HttpError>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, HttpError> + Send + 'static,
+    {
+        let admitted = Arc::clone(&self.admitted)
+            .try_acquire_owned()
+            .map_err(|_| HttpError::NamespaceBusy {
+                retry_after_seconds: 1,
+            })?;
+        let worker = Arc::clone(&self.workers)
+            .acquire_owned()
+            .await
+            .map_err(|_| HttpError::WorkerUnavailable)?;
+        tokio::task::spawn_blocking(move || {
+            let _admitted = admitted;
+            let _worker = worker;
+            operation()
+        })
+        .await
+        .map_err(|_| HttpError::WorkerFailed)?
+    }
+}
+
+#[derive(Clone)]
 pub struct HttpKernelState {
-    services: Arc<Mutex<NamespaceServiceStore>>,
-    partitioned: Option<Arc<Mutex<ReplicatedAuthorityPartitionService>>>,
+    services: Arc<NamespaceServiceDirectory>,
+    partitioned: Option<Arc<ReplicatedAuthorityPartitionService>>,
+    blocking: BoundedBlockingExecutor,
     auth: Arc<Mutex<HttpAuth>>,
     audit: AuditLog,
     status: Arc<Mutex<ServiceStatusResponse>>,
     auth_reload_config_path: Option<PathBuf>,
+    configured_work_limits: (usize, usize, usize),
 }
 
 impl HttpKernelState {
@@ -67,14 +112,18 @@ impl HttpKernelState {
         partitioned: Option<ReplicatedAuthorityPartitionService>,
         options: HttpKernelOptions,
     ) -> Self {
-        Self::with_service_store(NamespaceServiceStore::single(service), partitioned, options)
+        Self::with_service_store(
+            NamespaceServiceDirectory::single(service),
+            partitioned,
+            options,
+        )
     }
 
     pub fn with_sqlite_namespaces(
         data_root: impl Into<PathBuf>,
         options: HttpKernelOptions,
     ) -> Self {
-        Self::with_service_store(NamespaceServiceStore::sqlite(data_root), None, options)
+        Self::with_service_store(NamespaceServiceDirectory::sqlite(data_root), None, options)
     }
 
     pub fn with_postgres_namespaces(
@@ -100,14 +149,14 @@ impl HttpKernelState {
         options: HttpKernelOptions,
     ) -> Self {
         Self::with_service_store(
-            NamespaceServiceStore::postgres(database_url, schema, sidecar_path, tls),
+            NamespaceServiceDirectory::postgres(database_url, schema, sidecar_path, tls),
             None,
             options,
         )
     }
 
     fn with_service_store(
-        services: NamespaceServiceStore,
+        services: NamespaceServiceDirectory,
         partitioned: Option<ReplicatedAuthorityPartitionService>,
         options: HttpKernelOptions,
     ) -> Self {
@@ -116,28 +165,29 @@ impl HttpKernelState {
             audit_log_path,
             service_status,
             auth_reload_config_path,
+            namespace_concurrency_limit,
+            namespace_queue_limit,
+            audit_queue_limit,
         } = options;
         let status =
             service_status.unwrap_or_else(|| services.default_status(audit_log_path.clone()));
         Self {
-            services: Arc::new(Mutex::new(services)),
-            partitioned: partitioned.map(|service| Arc::new(Mutex::new(service))),
+            services: Arc::new(services),
+            partitioned: partitioned.map(Arc::new),
+            blocking: BoundedBlockingExecutor::new(
+                namespace_concurrency_limit,
+                namespace_queue_limit,
+            ),
             auth: Arc::new(Mutex::new(HttpAuth::from_config(auth))),
-            audit: AuditLog::new(audit_log_path),
+            audit: AuditLog::new(audit_log_path, audit_queue_limit),
             status: Arc::new(Mutex::new(status)),
             auth_reload_config_path,
+            configured_work_limits: (
+                namespace_concurrency_limit,
+                namespace_queue_limit,
+                audit_queue_limit,
+            ),
         }
-    }
-
-    fn partitioned_service(
-        &self,
-    ) -> Result<std::sync::MutexGuard<'_, ReplicatedAuthorityPartitionService>, HttpError> {
-        let partitioned = self.partitioned.as_ref().ok_or_else(|| {
-            HttpError::Api(ApiError::Validation(
-                "partitioned prototype is not configured for this service".into(),
-            ))
-        })?;
-        partitioned.lock().map_err(|_| HttpError::LockPoisoned)
     }
 
     fn authorize(
@@ -159,19 +209,11 @@ impl HttpKernelState {
             .map(|status| status.clone())
             .map_err(|_| HttpError::LockPoisoned)?;
         if let Some(partitioned) = &self.partitioned {
-            let partition_status = partitioned
-                .lock()
-                .map_err(|_| HttpError::LockPoisoned)?
-                .partition_status()
-                .map_err(HttpError::Api)?;
+            let partition_status = partitioned.partition_status().map_err(HttpError::Api)?;
             status.service_mode = ServiceMode::Partitioned;
             status.replicas = flatten_replica_status(&partition_status);
         }
-        let active_namespaces = self
-            .services
-            .lock()
-            .map_err(|_| HttpError::LockPoisoned)?
-            .active_namespaces();
+        let active_namespaces = self.services.active_namespaces()?;
         status.active_namespace_count = active_namespaces.len();
         status.namespaces = self
             .auth
@@ -194,9 +236,17 @@ impl HttpKernelState {
         let mut status = self.status.lock().map_err(|_| HttpError::LockPoisoned)?;
         if status.bind_addr.as_deref() != Some(resolved.bind_addr.as_str())
             || status.storage != resolved_status.storage
+            || status.transport != resolved_status.transport
+            || self.configured_work_limits
+                != (
+                    resolved.concurrency.namespace_workers,
+                    resolved.concurrency.namespace_queue,
+                    resolved.concurrency.audit_queue,
+                )
         {
             return Err(HttpError::Api(ApiError::Validation(
-                "auth reload cannot change bind or storage configuration".into(),
+                "auth reload cannot change bind, transport, storage, or concurrency configuration"
+                    .into(),
             )));
         }
         {
@@ -217,7 +267,7 @@ impl HttpKernelState {
         })
     }
 
-    fn execute<T, F>(
+    async fn execute<T, F>(
         &self,
         headers: &HeaderMap,
         method: &'static str,
@@ -256,38 +306,19 @@ impl HttpKernelState {
             }
         };
 
-        let use_blocking_thread = self
-            .services
-            .lock()
-            .map_err(|_| HttpError::LockPoisoned)?
-            .requires_blocking_thread();
         let principal_for_operation = principal.clone();
-        let (result, context) = if use_blocking_thread {
-            let services = Arc::clone(&self.services);
-            let namespace_for_operation = namespace.clone();
-            std::thread::spawn(move || {
+        let services = Arc::clone(&self.services);
+        let namespace_for_operation = namespace.clone();
+        let (result, context) = self
+            .blocking
+            .run(move || {
                 let mut context = context;
-                let result = match services.lock() {
-                    Ok(mut services) => services.execute(&namespace_for_operation, |service| {
-                        operation(service, &principal_for_operation, &mut context)
-                    }),
-                    Err(_) => Err(HttpError::LockPoisoned),
-                };
-                (result, context)
+                let result = services.execute(&namespace_for_operation, |service| {
+                    operation(service, &principal_for_operation, &mut context)
+                });
+                Ok((result, context))
             })
-            .join()
-            .map_err(|_| {
-                HttpError::Api(ApiError::Validation(
-                    "namespace service worker panicked".into(),
-                ))
-            })?
-        } else {
-            let mut services = self.services.lock().map_err(|_| HttpError::LockPoisoned)?;
-            let result = services.execute(&namespace, |service| {
-                operation(service, &principal_for_operation, &mut context)
-            });
-            (result, context)
-        };
+            .await?;
 
         let status = match &result {
             Ok(_) => StatusCode::OK,
@@ -305,7 +336,7 @@ impl HttpKernelState {
         result
     }
 
-    fn execute_partitioned<T, F>(
+    async fn execute_partitioned<T, F>(
         &self,
         headers: &HeaderMap,
         method: &'static str,
@@ -315,11 +346,14 @@ impl HttpKernelState {
         operation: F,
     ) -> Result<T, HttpError>
     where
+        T: Send + 'static,
         F: FnOnce(
-            &mut ReplicatedAuthorityPartitionService,
-            &AuthenticatedPrincipal,
-            &mut AuditContext,
-        ) -> Result<T, HttpError>,
+                &ReplicatedAuthorityPartitionService,
+                &AuthenticatedPrincipal,
+                &mut AuditContext,
+            ) -> Result<T, HttpError>
+            + Send
+            + 'static,
     {
         let namespace = namespace_from_headers(headers)?;
         let mut context = context;
@@ -342,26 +376,36 @@ impl HttpKernelState {
             }
         };
 
-        {
-            let mut service = self.partitioned_service()?;
-            let result = operation(&mut service, &principal, &mut context);
-            let status = match &result {
-                Ok(_) => StatusCode::OK,
-                Err(error) => error.status_code(),
-            };
-            self.audit.record(AuditEntry::for_request(
-                method,
-                path,
-                status,
-                &principal,
-                required_scope,
-                context,
-            ));
-            result
-        }
+        let partitioned = self.partitioned.clone().ok_or_else(|| {
+            HttpError::Api(ApiError::Validation(
+                "partitioned prototype is not configured for this service".into(),
+            ))
+        })?;
+        let principal_for_operation = principal.clone();
+        let (result, context) = self
+            .blocking
+            .run(move || {
+                let mut context = context;
+                let result = operation(&partitioned, &principal, &mut context);
+                Ok((result, context))
+            })
+            .await?;
+        let status = match &result {
+            Ok(_) => StatusCode::OK,
+            Err(error) => error.status_code(),
+        };
+        self.audit.record(AuditEntry::for_request(
+            method,
+            path,
+            status,
+            &principal_for_operation,
+            required_scope,
+            context,
+        ));
+        result
     }
 
-    fn resolve_execution_trace(
+    async fn resolve_execution_trace(
         &self,
         headers: &HeaderMap,
         mut request: ResolveTraceHandleRequest,
@@ -405,43 +449,51 @@ impl HttpKernelState {
                 }
             };
 
-        let central = self
-            .services
-            .lock()
-            .map_err(|_| HttpError::LockPoisoned)?
-            .execute(&namespace, |service| {
-                service
-                    .resolve_trace_handle(request.clone())
-                    .map_err(HttpError::Api)
-            });
-        let partition = if namespace == NamespaceId::default() && self.partitioned.is_some() {
-            Some(
-                self.partitioned_service()?
-                    .resolve_trace_handle(request)
-                    .map_err(HttpError::Api),
-            )
-        } else {
-            None
-        };
-        let result = match (central, partition) {
-            (central, None) => central,
-            (Ok(_), Some(Ok(_))) => Err(HttpError::Api(ApiError::Execution(
-                crate::execution::ExecutionError::Store(
-                    "trace handle collision across execution stores".into(),
-                ),
-            ))),
-            (Ok(response), Some(Err(error))) if is_unknown_trace_error(&error) => Ok(response),
-            (Ok(_), Some(Err(error))) => Err(error),
-            (Err(error), Some(Ok(response))) if is_unknown_trace_error(&error) => Ok(response),
-            (Err(error), Some(Ok(_))) => Err(error),
-            (Err(central_error), Some(Err(partition_error))) => {
-                if is_unknown_trace_error(&central_error) {
-                    Err(partition_error)
+        let services = Arc::clone(&self.services);
+        let partitioned = self.partitioned.clone();
+        let namespace_for_operation = namespace.clone();
+        let result = self
+            .blocking
+            .run(move || {
+                let central = services.execute(&namespace_for_operation, |service| {
+                    service
+                        .resolve_trace_handle(request.clone())
+                        .map_err(HttpError::Api)
+                });
+                let partition = if namespace_for_operation == NamespaceId::default() {
+                    partitioned.map(|service| {
+                        service
+                            .resolve_trace_handle(request)
+                            .map_err(HttpError::Api)
+                    })
                 } else {
-                    Err(central_error)
-                }
-            }
-        };
+                    None
+                };
+                Ok(match (central, partition) {
+                    (central, None) => central,
+                    (Ok(_), Some(Ok(_))) => Err(HttpError::Api(ApiError::Execution(
+                        crate::execution::ExecutionError::Store(
+                            "trace handle collision across execution stores".into(),
+                        ),
+                    ))),
+                    (Ok(response), Some(Err(error))) if is_unknown_trace_error(&error) => {
+                        Ok(response)
+                    }
+                    (Ok(_), Some(Err(error))) => Err(error),
+                    (Err(error), Some(Ok(response))) if is_unknown_trace_error(&error) => {
+                        Ok(response)
+                    }
+                    (Err(error), Some(Ok(_))) => Err(error),
+                    (Err(central_error), Some(Err(partition_error))) => {
+                        if is_unknown_trace_error(&central_error) {
+                            Err(partition_error)
+                        } else {
+                            Err(central_error)
+                        }
+                    }
+                })
+            })
+            .await?;
 
         if let Ok(response) = &result {
             context.tuple_id = Some(response.record.local_tuple_id.0);
@@ -601,12 +653,32 @@ pub struct HttpAccessToken {
     pub revoked: bool,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct HttpKernelOptions {
     pub auth: HttpAuthConfig,
     pub audit_log_path: Option<PathBuf>,
     pub service_status: Option<ServiceStatusResponse>,
     pub auth_reload_config_path: Option<PathBuf>,
+    #[serde(default = "default_namespace_concurrency_limit")]
+    pub namespace_concurrency_limit: usize,
+    #[serde(default = "default_namespace_queue_limit")]
+    pub namespace_queue_limit: usize,
+    #[serde(default = "default_audit_queue_limit")]
+    pub audit_queue_limit: usize,
+}
+
+impl Default for HttpKernelOptions {
+    fn default() -> Self {
+        Self {
+            auth: HttpAuthConfig::default(),
+            audit_log_path: None,
+            service_status: None,
+            auth_reload_config_path: None,
+            namespace_concurrency_limit: default_namespace_concurrency_limit(),
+            namespace_queue_limit: default_namespace_queue_limit(),
+            audit_queue_limit: default_audit_queue_limit(),
+        }
+    }
 }
 
 impl HttpKernelOptions {
@@ -633,6 +705,29 @@ impl HttpKernelOptions {
         self.auth_reload_config_path = Some(path.into());
         self
     }
+
+    pub fn with_namespace_work_limits(mut self, concurrency: usize, queue: usize) -> Self {
+        self.namespace_concurrency_limit = concurrency.max(1);
+        self.namespace_queue_limit = queue;
+        self
+    }
+
+    pub fn with_audit_queue_limit(mut self, limit: usize) -> Self {
+        self.audit_queue_limit = limit.max(1);
+        self
+    }
+}
+
+fn default_namespace_concurrency_limit() -> usize {
+    8
+}
+
+fn default_namespace_queue_limit() -> usize {
+    64
+}
+
+fn default_audit_queue_limit() -> usize {
+    1_024
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -988,6 +1083,7 @@ pub fn http_router_with_postgres_namespaces_and_tls(
         ))
 }
 
+#[derive(Clone)]
 enum NamespaceServiceMode {
     Static,
     Sqlite {
@@ -1001,18 +1097,45 @@ enum NamespaceServiceMode {
     },
 }
 
-struct NamespaceServiceStore {
+struct NamespaceServiceDirectory {
     mode: NamespaceServiceMode,
-    services: HashMap<NamespaceId, Box<dyn KernelService + Send>>,
+    services: Mutex<HashMap<NamespaceId, Arc<NamespaceServiceHandle>>>,
 }
 
-impl NamespaceServiceStore {
+struct NamespaceServiceHandle {
+    state: Mutex<NamespaceServiceState>,
+}
+
+enum NamespaceServiceState {
+    Uninitialized,
+    Ready(Box<dyn KernelService + Send>),
+    Failed(String),
+}
+
+impl NamespaceServiceHandle {
+    fn uninitialized() -> Self {
+        Self {
+            state: Mutex::new(NamespaceServiceState::Uninitialized),
+        }
+    }
+
+    fn ready(service: impl KernelService + Send + 'static) -> Self {
+        Self {
+            state: Mutex::new(NamespaceServiceState::Ready(Box::new(service))),
+        }
+    }
+}
+
+impl NamespaceServiceDirectory {
     fn single(service: impl KernelService + Send + 'static) -> Self {
-        let mut services: HashMap<NamespaceId, Box<dyn KernelService + Send>> = HashMap::new();
-        services.insert(NamespaceId::default(), Box::new(service));
+        let mut services = HashMap::new();
+        services.insert(
+            NamespaceId::default(),
+            Arc::new(NamespaceServiceHandle::ready(service)),
+        );
         Self {
             mode: NamespaceServiceMode::Static,
-            services,
+            services: Mutex::new(services),
         }
     }
 
@@ -1021,7 +1144,7 @@ impl NamespaceServiceStore {
             mode: NamespaceServiceMode::Sqlite {
                 data_root: data_root.into(),
             },
-            services: HashMap::new(),
+            services: Mutex::new(HashMap::new()),
         }
     }
 
@@ -1038,35 +1161,49 @@ impl NamespaceServiceStore {
                 sidecar_path: sidecar_path.into(),
                 tls,
             },
-            services: HashMap::new(),
+            services: Mutex::new(HashMap::new()),
         }
     }
 
-    fn execute<T, F>(&mut self, namespace: &NamespaceId, operation: F) -> Result<T, HttpError>
+    fn handle(&self, namespace: &NamespaceId) -> Result<Arc<NamespaceServiceHandle>, HttpError> {
+        let mut services = self.services.lock().map_err(|_| HttpError::LockPoisoned)?;
+        Ok(Arc::clone(
+            services
+                .entry(namespace.clone())
+                .or_insert_with(|| Arc::new(NamespaceServiceHandle::uninitialized())),
+        ))
+    }
+
+    fn execute<T, F>(&self, namespace: &NamespaceId, operation: F) -> Result<T, HttpError>
     where
         F: FnOnce(&mut dyn KernelService) -> Result<T, HttpError>,
     {
-        if !self.services.contains_key(namespace) {
-            let service = self.open_namespace_service(namespace)?;
-            self.services.insert(namespace.clone(), service);
+        let handle = self.handle(namespace)?;
+        let mut state = handle.state.lock().map_err(|_| HttpError::LockPoisoned)?;
+        if matches!(*state, NamespaceServiceState::Uninitialized) {
+            match self.open_namespace_service(namespace) {
+                Ok(service) => *state = NamespaceServiceState::Ready(service),
+                Err(error) => {
+                    let message = error.audit_message();
+                    *state = NamespaceServiceState::Failed(message.clone());
+                    return Err(HttpError::NamespaceInitializationFailed(message));
+                }
+            }
         }
-        let service = self.services.get_mut(namespace).ok_or_else(|| {
-            HttpError::Api(ApiError::Validation(format!(
-                "namespace {} is not available",
-                namespace
-            )))
-        })?;
-        operation(service.as_mut())
+        match &mut *state {
+            NamespaceServiceState::Ready(service) => operation(service.as_mut()),
+            NamespaceServiceState::Failed(message) => {
+                Err(HttpError::NamespaceInitializationFailed(message.clone()))
+            }
+            NamespaceServiceState::Uninitialized => unreachable!("namespace initialized above"),
+        }
     }
 
-    fn active_namespaces(&self) -> Vec<NamespaceId> {
-        let mut namespaces = self.services.keys().cloned().collect::<Vec<_>>();
+    fn active_namespaces(&self) -> Result<Vec<NamespaceId>, HttpError> {
+        let services = self.services.lock().map_err(|_| HttpError::LockPoisoned)?;
+        let mut namespaces = services.keys().cloned().collect::<Vec<_>>();
         namespaces.sort();
-        namespaces
-    }
-
-    fn requires_blocking_thread(&self) -> bool {
-        matches!(self.mode, NamespaceServiceMode::Postgres { .. })
+        Ok(namespaces)
     }
 
     fn default_status(&self, audit_log_path: Option<PathBuf>) -> ServiceStatusResponse {
@@ -1215,17 +1352,42 @@ struct AuthenticatedPrincipal {
     policy_bound: bool,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct AuditLog {
     entries: Arc<Mutex<Vec<AuditEntry>>>,
     path: Option<PathBuf>,
+    writer: Option<mpsc::SyncSender<AuditEntry>>,
 }
 
 impl AuditLog {
-    fn new(path: Option<PathBuf>) -> Self {
+    fn new(path: Option<PathBuf>, queue_limit: usize) -> Self {
+        let entries = Arc::new(Mutex::new(Vec::new()));
+        let writer = path.as_ref().map(|path| {
+            let (sender, receiver) = mpsc::sync_channel::<AuditEntry>(queue_limit.max(1));
+            let writer_path = path.clone();
+            let writer_entries = Arc::clone(&entries);
+            let spawn = std::thread::Builder::new()
+                .name("aether-audit-writer".into())
+                .spawn(move || {
+                    while let Ok(entry) = receiver.recv() {
+                        if let Err(error) = append_audit_entry(&writer_path, &entry) {
+                            if let Ok(mut entries) = writer_entries.lock() {
+                                entries.push(AuditEntry::audit_failure(&writer_path, &error));
+                            }
+                        }
+                    }
+                });
+            if let Err(error) = spawn {
+                if let Ok(mut entries) = entries.lock() {
+                    entries.push(AuditEntry::audit_failure(path, &error));
+                }
+            }
+            sender
+        });
         Self {
-            entries: Arc::new(Mutex::new(Vec::new())),
+            entries,
             path,
+            writer,
         }
     }
 
@@ -1235,10 +1397,20 @@ impl AuditLog {
             Err(_) => return,
         };
         entries.push(entry.clone());
+        drop(entries);
 
-        if let Some(path) = &self.path {
-            if let Err(error) = append_audit_entry(path, &entry) {
-                entries.push(AuditEntry::audit_failure(path, &error));
+        if let (Some(path), Some(writer)) = (&self.path, &self.writer) {
+            if let Err(error) = writer.try_send(entry) {
+                let kind = match error {
+                    mpsc::TrySendError::Full(_) => "bounded audit queue is saturated",
+                    mpsc::TrySendError::Disconnected(_) => "audit writer is unavailable",
+                };
+                if let Ok(mut entries) = self.entries.lock() {
+                    entries.push(AuditEntry::audit_failure(
+                        path,
+                        &std::io::Error::other(kind),
+                    ));
+                }
             }
         }
     }
@@ -1248,6 +1420,12 @@ impl AuditLog {
             .lock()
             .map(|entries| entries.clone())
             .map_err(|_| HttpError::LockPoisoned)
+    }
+}
+
+impl Default for AuditLog {
+    fn default() -> Self {
+        Self::new(None, default_audit_queue_limit())
     }
 }
 
@@ -1549,6 +1727,10 @@ enum HttpError {
     Api(ApiError),
     Unauthorized { principal: String, message: String },
     Forbidden { principal: String, message: String },
+    NamespaceBusy { retry_after_seconds: u64 },
+    NamespaceInitializationFailed(String),
+    WorkerUnavailable,
+    WorkerFailed,
     LockPoisoned,
 }
 
@@ -1558,6 +1740,10 @@ impl HttpError {
             Self::Api(error) => status_for_api_error(error),
             Self::Unauthorized { .. } => StatusCode::UNAUTHORIZED,
             Self::Forbidden { .. } => StatusCode::FORBIDDEN,
+            Self::NamespaceBusy { .. } | Self::WorkerUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            Self::NamespaceInitializationFailed(_) | Self::WorkerFailed => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
             Self::LockPoisoned => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -1567,7 +1753,12 @@ impl HttpError {
             Self::Unauthorized { principal, .. } | Self::Forbidden { principal, .. } => {
                 principal.clone()
             }
-            Self::Api(_) | Self::LockPoisoned => "aether".into(),
+            Self::Api(_)
+            | Self::NamespaceBusy { .. }
+            | Self::NamespaceInitializationFailed(_)
+            | Self::WorkerUnavailable
+            | Self::WorkerFailed
+            | Self::LockPoisoned => "aether".into(),
         }
     }
 
@@ -1575,6 +1766,10 @@ impl HttpError {
         match self {
             Self::Api(error) => error.to_string(),
             Self::Unauthorized { message, .. } | Self::Forbidden { message, .. } => message.clone(),
+            Self::NamespaceBusy { .. } => "namespace work queue is saturated".into(),
+            Self::NamespaceInitializationFailed(message) => message.clone(),
+            Self::WorkerUnavailable => "namespace worker executor is unavailable".into(),
+            Self::WorkerFailed => "namespace worker failed".into(),
             Self::LockPoisoned => "internal service state is unavailable".into(),
         }
     }
@@ -1604,6 +1799,12 @@ struct ErrorBody {
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         let status = self.status_code();
+        let retry_after = match &self {
+            Self::NamespaceBusy {
+                retry_after_seconds,
+            } => Some(*retry_after_seconds),
+            _ => None,
+        };
         let (error, code) = match self {
             Self::Api(error) => {
                 let code = api_error_code(&error);
@@ -1611,13 +1812,30 @@ impl IntoResponse for HttpError {
             }
             Self::Unauthorized { message, .. } => (message, "unauthorized"),
             Self::Forbidden { message, .. } => (message, "forbidden"),
+            Self::NamespaceBusy { .. } => {
+                ("namespace work queue is saturated".into(), "namespace_busy")
+            }
+            Self::NamespaceInitializationFailed(message) => {
+                (message, "namespace_initialization_failed")
+            }
+            Self::WorkerUnavailable => (
+                "namespace worker executor is unavailable".into(),
+                "namespace_worker_unavailable",
+            ),
+            Self::WorkerFailed => ("namespace worker failed".into(), "namespace_worker_failed"),
             Self::LockPoisoned => (
                 "internal service state is unavailable".into(),
                 "service_state_unavailable",
             ),
         };
 
-        (status, Json(ErrorBody { error, code })).into_response()
+        let mut response = (status, Json(ErrorBody { error, code })).into_response();
+        if let Some(seconds) = retry_after {
+            if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
+                response.headers_mut().insert(RETRY_AFTER, value);
+            }
+        }
+        response
     }
 }
 
@@ -1775,22 +1993,24 @@ async fn history(
         temporal_view: Some("history".into()),
         ..Default::default()
     };
-    let response = state.execute(
-        &headers,
-        "GET",
-        "/v1/history",
-        AuthScope::Ops,
-        request_context.clone(),
-        move |service, principal, context| {
-            let policy_context = apply_policy_binding(principal, None, context)?;
-            let response = service
-                .history(HistoryRequest { policy_context })
-                .map_err(HttpError::Api)?;
-            context.datom_count = Some(response.datoms.len());
-            context.last_element = response.datoms.last().map(|datom| datom.element.0);
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "GET",
+            "/v1/history",
+            AuthScope::Ops,
+            request_context.clone(),
+            move |service, principal, context| {
+                let policy_context = apply_policy_binding(principal, None, context)?;
+                let response = service
+                    .history(HistoryRequest { policy_context })
+                    .map_err(HttpError::Api)?;
+                context.datom_count = Some(response.datoms.len());
+                context.last_element = response.datoms.last().map(|datom| datom.element.0);
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -1850,19 +2070,21 @@ async fn append(
     Json(request): Json<AppendAdmissionRequest>,
 ) -> Result<Json<crate::AppendReceipt>, HttpError> {
     let request_context = audit_context_for_append(&request);
-    let response = state.execute(
-        &headers,
-        "POST",
-        "/v1/append",
-        AuthScope::Append,
-        request_context.clone(),
-        move |service, principal, _context| {
-            let mut request = request;
-            request.principal = Some(principal.id.clone());
-            let response = service.admit_append(request).map_err(HttpError::Api)?;
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "POST",
+            "/v1/append",
+            AuthScope::Append,
+            request_context.clone(),
+            move |service, principal, _context| {
+                let mut request = request;
+                request.principal = Some(principal.id.clone());
+                let response = service.admit_append(request).map_err(HttpError::Api)?;
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -1872,18 +2094,20 @@ async fn append_dry_run(
     Json(request): Json<AppendAdmissionRequest>,
 ) -> Result<Json<crate::AppendDryRunResponse>, HttpError> {
     let request_context = audit_context_for_append(&request);
-    let response = state.execute(
-        &headers,
-        "POST",
-        "/v1/append/dry-run",
-        AuthScope::Append,
-        request_context,
-        move |service, principal, _context| {
-            let mut request = request;
-            request.principal = Some(principal.id.clone());
-            service.dry_run_append(request).map_err(HttpError::Api)
-        },
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "POST",
+            "/v1/append/dry-run",
+            AuthScope::Append,
+            request_context,
+            move |service, principal, _context| {
+                let mut request = request;
+                request.principal = Some(principal.id.clone());
+                service.dry_run_append(request).map_err(HttpError::Api)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -1891,17 +2115,19 @@ async fn append_receipts_endpoint(
     State(state): State<HttpKernelState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<crate::AppendReceipt>>, HttpError> {
-    let response = state.execute(
-        &headers,
-        "GET",
-        "/v1/append/receipts",
-        AuthScope::Ops,
-        AuditContext {
-            temporal_view: Some("append_receipts".into()),
-            ..Default::default()
-        },
-        move |service, _principal, _context| service.append_receipts().map_err(HttpError::Api),
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "GET",
+            "/v1/append/receipts",
+            AuthScope::Ops,
+            AuditContext {
+                temporal_view: Some("append_receipts".into()),
+                ..Default::default()
+            },
+            move |service, _principal, _context| service.append_receipts().map_err(HttpError::Api),
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -1909,17 +2135,19 @@ async fn schema_catalog_endpoint(
     State(state): State<HttpKernelState>,
     headers: HeaderMap,
 ) -> Result<Json<crate::SchemaCatalogResponse>, HttpError> {
-    let response = state.execute(
-        &headers,
-        "GET",
-        "/v1/schema",
-        AuthScope::Query,
-        AuditContext {
-            temporal_view: Some("schema_catalog".into()),
-            ..Default::default()
-        },
-        move |service, _principal, _context| service.schema_catalog().map_err(HttpError::Api),
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "GET",
+            "/v1/schema",
+            AuthScope::Query,
+            AuditContext {
+                temporal_view: Some("schema_catalog".into()),
+                ..Default::default()
+            },
+            move |service, _principal, _context| service.schema_catalog().map_err(HttpError::Api),
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -1928,19 +2156,21 @@ async fn register_schema_endpoint(
     headers: HeaderMap,
     Json(request): Json<RegisterSchemaRequest>,
 ) -> Result<Json<crate::NamespaceSchemaRevision>, HttpError> {
-    let response = state.execute(
-        &headers,
-        "POST",
-        "/v1/schema/register",
-        AuthScope::Ops,
-        AuditContext {
-            temporal_view: Some("schema_register".into()),
-            ..Default::default()
-        },
-        move |service, _principal, _context| {
-            service.register_schema(request).map_err(HttpError::Api)
-        },
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "POST",
+            "/v1/schema/register",
+            AuthScope::Ops,
+            AuditContext {
+                temporal_view: Some("schema_register".into()),
+                ..Default::default()
+            },
+            move |service, _principal, _context| {
+                service.register_schema(request).map_err(HttpError::Api)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -1949,19 +2179,21 @@ async fn activate_schema_endpoint(
     headers: HeaderMap,
     Json(request): Json<ActivateSchemaRequest>,
 ) -> Result<Json<crate::NamespaceSchemaRevision>, HttpError> {
-    let response = state.execute(
-        &headers,
-        "POST",
-        "/v1/schema/activate",
-        AuthScope::Ops,
-        AuditContext {
-            temporal_view: Some("schema_activate".into()),
-            ..Default::default()
-        },
-        move |service, _principal, _context| {
-            service.activate_schema(request).map_err(HttpError::Api)
-        },
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "POST",
+            "/v1/schema/activate",
+            AuthScope::Ops,
+            AuditContext {
+                temporal_view: Some("schema_activate".into()),
+                ..Default::default()
+            },
+            move |service, _principal, _context| {
+                service.activate_schema(request).map_err(HttpError::Api)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -1975,22 +2207,24 @@ async fn current_state(
         datom_count: Some(request.datoms.len()),
         ..Default::default()
     };
-    let response = state.execute(
-        &headers,
-        "POST",
-        "/v1/state/current",
-        AuthScope::Query,
-        request_context.clone(),
-        move |service, principal, context| {
-            let mut request = request;
-            request.policy_context =
-                apply_policy_binding(principal, request.policy_context, context)?;
-            let response = service.current_state(request).map_err(HttpError::Api)?;
-            context.entity_count = Some(response.state.entities.len());
-            context.last_element = response.state.as_of.map(|element| element.0);
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "POST",
+            "/v1/state/current",
+            AuthScope::Query,
+            request_context.clone(),
+            move |service, principal, context| {
+                let mut request = request;
+                request.policy_context =
+                    apply_policy_binding(principal, request.policy_context, context)?;
+                let response = service.current_state(request).map_err(HttpError::Api)?;
+                context.entity_count = Some(response.state.entities.len());
+                context.last_element = response.state.as_of.map(|element| element.0);
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2005,22 +2239,24 @@ async fn as_of(
         datom_count: Some(request.datoms.len()),
         ..Default::default()
     };
-    let response = state.execute(
-        &headers,
-        "POST",
-        "/v1/state/as-of",
-        AuthScope::Query,
-        request_context.clone(),
-        move |service, principal, context| {
-            let mut request = request;
-            request.policy_context =
-                apply_policy_binding(principal, request.policy_context, context)?;
-            let response = service.as_of(request).map_err(HttpError::Api)?;
-            context.entity_count = Some(response.state.entities.len());
-            context.last_element = response.state.as_of.map(|element| element.0);
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "POST",
+            "/v1/state/as-of",
+            AuthScope::Query,
+            request_context.clone(),
+            move |service, principal, context| {
+                let mut request = request;
+                request.policy_context =
+                    apply_policy_binding(principal, request.policy_context, context)?;
+                let response = service.as_of(request).map_err(HttpError::Api)?;
+                context.entity_count = Some(response.state.entities.len());
+                context.last_element = response.state.as_of.map(|element| element.0);
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2030,17 +2266,19 @@ async fn parse_document(
     Json(request): Json<ParseDocumentRequest>,
 ) -> Result<Json<crate::ParseDocumentResponse>, HttpError> {
     let request_context = audit_context_for_document(&request.dsl);
-    let response = state.execute(
-        &headers,
-        "POST",
-        "/v1/documents/parse",
-        AuthScope::Query,
-        request_context.clone(),
-        move |service, _principal, _context| {
-            let response = service.parse_document(request).map_err(HttpError::Api)?;
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "POST",
+            "/v1/documents/parse",
+            AuthScope::Query,
+            request_context.clone(),
+            move |service, _principal, _context| {
+                let response = service.parse_document(request).map_err(HttpError::Api)?;
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2050,24 +2288,26 @@ async fn run_document(
     Json(request): Json<RunDocumentRequest>,
 ) -> Result<Json<crate::RunDocumentResponse>, HttpError> {
     let request_context = audit_context_for_document(&request.dsl);
-    let response = state.execute(
-        &headers,
-        "POST",
-        "/v1/documents/run",
-        AuthScope::Query,
-        request_context.clone(),
-        move |service, principal, context| {
-            let mut request = request;
-            request.policy_context =
-                apply_policy_binding(principal, request.policy_context, context)?;
-            let response = service.run_document(request).map_err(HttpError::Api)?;
-            context.entity_count = Some(response.state.entities.len());
-            context.last_element = response.state.as_of.map(|element| element.0);
-            context.derived_tuple_count = Some(response.derived.tuples.len());
-            context.row_count = response.query.as_ref().map(|query| query.rows.len());
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "POST",
+            "/v1/documents/run",
+            AuthScope::Query,
+            request_context.clone(),
+            move |service, principal, context| {
+                let mut request = request;
+                request.policy_context =
+                    apply_policy_binding(principal, request.policy_context, context)?;
+                let response = service.run_document(request).map_err(HttpError::Api)?;
+                context.entity_count = Some(response.state.entities.len());
+                context.last_element = response.state.as_of.map(|element| element.0);
+                context.derived_tuple_count = Some(response.derived.tuples.len());
+                context.row_count = response.query.as_ref().map(|query| query.rows.len());
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2083,34 +2323,36 @@ async fn coordination_pilot_report(
         selected_cut: Some("current".into()),
         ..Default::default()
     };
-    let response = state.execute(
-        &headers,
-        "POST",
-        "/v1/reports/pilot/coordination",
-        AuthScope::Query,
-        request_context.clone(),
-        move |service, principal, context| {
-            let mut request = request;
-            request.policy_context =
-                apply_policy_binding(principal, request.policy_context, context)?;
-            let response = service
-                .coordination_pilot_report(request)
-                .map_err(HttpError::Api)?;
-            context.datom_count = Some(response.history_len);
-            context.row_count = Some(
-                response.pre_heartbeat_authorized.len()
-                    + response.as_of_authorized.len()
-                    + response.live_heartbeats.len()
-                    + response.current_authorized.len()
-                    + response.claimable.len()
-                    + response.accepted_outcomes.len()
-                    + response.rejected_outcomes.len(),
-            );
-            context.trace_tuple_count = response.trace.as_ref().map(|trace| trace.tuple_count);
-            context.tuple_id = response.trace.as_ref().map(|trace| trace.root.0);
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "POST",
+            "/v1/reports/pilot/coordination",
+            AuthScope::Query,
+            request_context.clone(),
+            move |service, principal, context| {
+                let mut request = request;
+                request.policy_context =
+                    apply_policy_binding(principal, request.policy_context, context)?;
+                let response = service
+                    .coordination_pilot_report(request)
+                    .map_err(HttpError::Api)?;
+                context.datom_count = Some(response.history_len);
+                context.row_count = Some(
+                    response.pre_heartbeat_authorized.len()
+                        + response.as_of_authorized.len()
+                        + response.live_heartbeats.len()
+                        + response.current_authorized.len()
+                        + response.claimable.len()
+                        + response.accepted_outcomes.len()
+                        + response.rejected_outcomes.len(),
+                );
+                context.trace_tuple_count = response.trace.as_ref().map(|trace| trace.tuple_count);
+                context.tuple_id = response.trace.as_ref().map(|trace| trace.root.0);
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2130,40 +2372,42 @@ async fn coordination_delta_report(
         )),
         ..Default::default()
     };
-    let response = state.execute(
-        &headers,
-        "POST",
-        "/v1/reports/pilot/coordination-delta",
-        AuthScope::Query,
-        request_context,
-        move |service, principal, context| {
-            let mut request = request;
-            request.policy_context =
-                apply_policy_binding(principal, request.policy_context, context)?;
-            let response = service
-                .coordination_delta_report(request)
-                .map_err(HttpError::Api)?;
-            context.datom_count = Some(response.right_history_len);
-            context.row_count = Some(
-                response.current_authorized.added.len()
-                    + response.current_authorized.removed.len()
-                    + response.current_authorized.changed.len()
-                    + response.claimable.added.len()
-                    + response.claimable.removed.len()
-                    + response.claimable.changed.len()
-                    + response.live_heartbeats.added.len()
-                    + response.live_heartbeats.removed.len()
-                    + response.live_heartbeats.changed.len()
-                    + response.accepted_outcomes.added.len()
-                    + response.accepted_outcomes.removed.len()
-                    + response.accepted_outcomes.changed.len()
-                    + response.rejected_outcomes.added.len()
-                    + response.rejected_outcomes.removed.len()
-                    + response.rejected_outcomes.changed.len(),
-            );
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "POST",
+            "/v1/reports/pilot/coordination-delta",
+            AuthScope::Query,
+            request_context,
+            move |service, principal, context| {
+                let mut request = request;
+                request.policy_context =
+                    apply_policy_binding(principal, request.policy_context, context)?;
+                let response = service
+                    .coordination_delta_report(request)
+                    .map_err(HttpError::Api)?;
+                context.datom_count = Some(response.right_history_len);
+                context.row_count = Some(
+                    response.current_authorized.added.len()
+                        + response.current_authorized.removed.len()
+                        + response.current_authorized.changed.len()
+                        + response.claimable.added.len()
+                        + response.claimable.removed.len()
+                        + response.claimable.changed.len()
+                        + response.live_heartbeats.added.len()
+                        + response.live_heartbeats.removed.len()
+                        + response.live_heartbeats.changed.len()
+                        + response.accepted_outcomes.added.len()
+                        + response.accepted_outcomes.removed.len()
+                        + response.accepted_outcomes.changed.len()
+                        + response.rejected_outcomes.added.len()
+                        + response.rejected_outcomes.removed.len()
+                        + response.rejected_outcomes.changed.len(),
+                );
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2171,30 +2415,32 @@ async fn partition_status(
     State(state): State<HttpKernelState>,
     headers: HeaderMap,
 ) -> Result<Json<PartitionStatusResponse>, HttpError> {
-    let response = state.execute_partitioned(
-        &headers,
-        "GET",
-        "/v1/partitions/status",
-        AuthScope::Ops,
-        AuditContext {
-            command_source: Some("http".into()),
-            temporal_view: Some("partition_status".into()),
-            selected_report: Some("partition_status".into()),
-            ..Default::default()
-        },
-        move |service, _principal, context| {
-            let response = service.partition_status().map_err(HttpError::Api)?;
-            context.entity_count = Some(response.partitions.len());
-            context.row_count = Some(
-                response
-                    .partitions
-                    .iter()
-                    .map(|partition| partition.replicas.len())
-                    .sum(),
-            );
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute_partitioned(
+            &headers,
+            "GET",
+            "/v1/partitions/status",
+            AuthScope::Ops,
+            AuditContext {
+                command_source: Some("http".into()),
+                temporal_view: Some("partition_status".into()),
+                selected_report: Some("partition_status".into()),
+                ..Default::default()
+            },
+            move |service, _principal, context| {
+                let response = service.partition_status().map_err(HttpError::Api)?;
+                context.entity_count = Some(response.partitions.len());
+                context.row_count = Some(
+                    response
+                        .partitions
+                        .iter()
+                        .map(|partition| partition.replicas.len())
+                        .sum(),
+                );
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2207,18 +2453,20 @@ async fn promote_replica(
         temporal_view: Some(format!("partition({})", request.partition)),
         ..Default::default()
     };
-    let response = state.execute_partitioned(
-        &headers,
-        "POST",
-        "/v1/partitions/promote",
-        AuthScope::Ops,
-        request_context,
-        move |service, _principal, context| {
-            let response = service.promote_replica(request).map_err(HttpError::Api)?;
-            context.requested_element = Some(response.leader_epoch.0);
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute_partitioned(
+            &headers,
+            "POST",
+            "/v1/partitions/promote",
+            AuthScope::Ops,
+            request_context,
+            move |service, _principal, context| {
+                let response = service.promote_replica(request).map_err(HttpError::Api)?;
+                context.requested_element = Some(response.leader_epoch.0);
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2233,19 +2481,21 @@ async fn partition_append(
         last_element: request.datoms.last().map(|datom| datom.element.0),
         ..Default::default()
     };
-    let response = state.execute_partitioned(
-        &headers,
-        "POST",
-        "/v1/partitions/append",
-        AuthScope::Append,
-        request_context,
-        move |service, principal, context| {
-            request.principal = Some(principal.id.clone());
-            let response = service.append_partition(request).map_err(HttpError::Api)?;
-            context.requested_element = response.leader_epoch.as_ref().map(|epoch| epoch.0);
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute_partitioned(
+            &headers,
+            "POST",
+            "/v1/partitions/append",
+            AuthScope::Append,
+            request_context,
+            move |service, principal, context| {
+                request.principal = Some(principal.id.clone());
+                let response = service.append_partition(request).map_err(HttpError::Api)?;
+                context.requested_element = response.leader_epoch.as_ref().map(|epoch| epoch.0);
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2259,30 +2509,32 @@ async fn partition_history(
         requested_element: request.cut.as_of.map(|element| element.0),
         ..Default::default()
     };
-    let response = state.execute_partitioned(
-        &headers,
-        "POST",
-        "/v1/partitions/history",
-        AuthScope::Query,
-        request_context,
-        move |service, principal, context| {
-            let mut request = request;
-            request.policy_context =
-                apply_policy_binding(principal, request.policy_context, context)?;
-            let response = service.partition_history(request).map_err(HttpError::Api)?;
-            context.datom_count = Some(response.datoms.len());
-            context.entity_count = Some(
-                response
-                    .datoms
-                    .iter()
-                    .map(|datom| datom.entity)
-                    .collect::<BTreeSet<_>>()
-                    .len(),
-            );
-            context.last_element = response.datoms.last().map(|datom| datom.element.0);
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute_partitioned(
+            &headers,
+            "POST",
+            "/v1/partitions/history",
+            AuthScope::Query,
+            request_context,
+            move |service, principal, context| {
+                let mut request = request;
+                request.policy_context =
+                    apply_policy_binding(principal, request.policy_context, context)?;
+                let response = service.partition_history(request).map_err(HttpError::Api)?;
+                context.datom_count = Some(response.datoms.len());
+                context.entity_count = Some(
+                    response
+                        .datoms
+                        .iter()
+                        .map(|datom| datom.entity)
+                        .collect::<BTreeSet<_>>()
+                        .len(),
+                );
+                context.last_element = response.datoms.last().map(|datom| datom.element.0);
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2296,22 +2548,24 @@ async fn partition_state(
         requested_element: request.cut.as_of.map(|element| element.0),
         ..Default::default()
     };
-    let response = state.execute_partitioned(
-        &headers,
-        "POST",
-        "/v1/partitions/state",
-        AuthScope::Query,
-        request_context,
-        move |service, principal, context| {
-            let mut request = request;
-            request.policy_context =
-                apply_policy_binding(principal, request.policy_context, context)?;
-            let response = service.partition_state(request).map_err(HttpError::Api)?;
-            context.entity_count = Some(response.state.entities.len());
-            context.last_element = response.cut.as_of.map(|element| element.0);
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute_partitioned(
+            &headers,
+            "POST",
+            "/v1/partitions/state",
+            AuthScope::Query,
+            request_context,
+            move |service, principal, context| {
+                let mut request = request;
+                request.policy_context =
+                    apply_policy_binding(principal, request.policy_context, context)?;
+                let response = service.partition_state(request).map_err(HttpError::Api)?;
+                context.entity_count = Some(response.state.entities.len());
+                context.last_element = response.cut.as_of.map(|element| element.0);
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2324,28 +2578,30 @@ async fn federated_history(
         temporal_view: Some("federated_history".into()),
         ..Default::default()
     };
-    let response = state.execute_partitioned(
-        &headers,
-        "POST",
-        "/v1/federated/history",
-        AuthScope::Query,
-        request_context,
-        move |service, principal, context| {
-            let mut request = request;
-            request.policy_context =
-                apply_policy_binding(principal, request.policy_context, context)?;
-            let response = service.federated_history(request).map_err(HttpError::Api)?;
-            context.datom_count = Some(
-                response
-                    .partitions
-                    .iter()
-                    .map(|partition| partition.datoms.len())
-                    .sum(),
-            );
-            context.entity_count = Some(response.partitions.len());
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute_partitioned(
+            &headers,
+            "POST",
+            "/v1/federated/history",
+            AuthScope::Query,
+            request_context,
+            move |service, principal, context| {
+                let mut request = request;
+                request.policy_context =
+                    apply_policy_binding(principal, request.policy_context, context)?;
+                let response = service.federated_history(request).map_err(HttpError::Api)?;
+                context.datom_count = Some(
+                    response
+                        .partitions
+                        .iter()
+                        .map(|partition| partition.datoms.len())
+                        .sum(),
+                );
+                context.entity_count = Some(response.partitions.len());
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2360,32 +2616,34 @@ async fn federated_run_document(
         selected_report: Some("federated_run".into()),
         ..Default::default()
     };
-    let response = state.execute_partitioned(
-        &headers,
-        "POST",
-        "/v1/federated/run",
-        AuthScope::Query,
-        request_context,
-        move |service, principal, context| {
-            let mut request = request;
-            request.policy_context =
-                apply_policy_binding(principal, request.policy_context, context)?;
-            let response = service
-                .federated_run_document(request)
-                .map_err(HttpError::Api)?;
-            context.entity_count = Some(response.cut.cuts.len());
-            context.row_count = Some(
-                response
-                    .run
-                    .query
-                    .as_ref()
-                    .map(|query| query.rows.len())
-                    .unwrap_or(0),
-            );
-            context.derived_tuple_count = Some(response.run.derived.tuples.len());
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute_partitioned(
+            &headers,
+            "POST",
+            "/v1/federated/run",
+            AuthScope::Query,
+            request_context,
+            move |service, principal, context| {
+                let mut request = request;
+                request.policy_context =
+                    apply_policy_binding(principal, request.policy_context, context)?;
+                let response = service
+                    .federated_run_document(request)
+                    .map_err(HttpError::Api)?;
+                context.entity_count = Some(response.cut.cuts.len());
+                context.row_count = Some(
+                    response
+                        .run
+                        .query
+                        .as_ref()
+                        .map(|query| query.rows.len())
+                        .unwrap_or(0),
+                );
+                context.derived_tuple_count = Some(response.run.derived.tuples.len());
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2400,34 +2658,36 @@ async fn federated_report(
         selected_report: Some("federated_report".into()),
         ..Default::default()
     };
-    let response = state.execute_partitioned(
-        &headers,
-        "POST",
-        "/v1/federated/report",
-        AuthScope::Explain,
-        request_context,
-        move |service, principal, context| {
-            let mut request = request;
-            request.policy_context =
-                apply_policy_binding(principal, request.policy_context, context)?;
-            let response = service
-                .build_federated_explain_report(request)
-                .map_err(HttpError::Api)?;
-            context.entity_count = Some(response.cut.cuts.len());
-            context.row_count = Some(
-                response.primary_query.len()
-                    + response
-                        .named_queries
-                        .iter()
-                        .map(|query| query.rows.len())
-                        .sum::<usize>(),
-            );
-            context.trace_tuple_count =
-                Some(response.traces.iter().map(|trace| trace.tuple_count).sum());
-            context.tuple_id = response.traces.first().map(|trace| trace.root.0);
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute_partitioned(
+            &headers,
+            "POST",
+            "/v1/federated/report",
+            AuthScope::Explain,
+            request_context,
+            move |service, principal, context| {
+                let mut request = request;
+                request.policy_context =
+                    apply_policy_binding(principal, request.policy_context, context)?;
+                let response = service
+                    .build_federated_explain_report(request)
+                    .map_err(HttpError::Api)?;
+                context.entity_count = Some(response.cut.cuts.len());
+                context.row_count = Some(
+                    response.primary_query.len()
+                        + response
+                            .named_queries
+                            .iter()
+                            .map(|query| query.rows.len())
+                            .sum::<usize>(),
+                );
+                context.trace_tuple_count =
+                    Some(response.traces.iter().map(|trace| trace.tuple_count).sum());
+                context.tuple_id = response.traces.first().map(|trace| trace.root.0);
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2442,21 +2702,23 @@ async fn explain_tuple(
         selected_report: Some("tuple_explain".into()),
         ..Default::default()
     };
-    let response = state.execute(
-        &headers,
-        "POST",
-        "/v1/explain/tuple",
-        AuthScope::Explain,
-        request_context.clone(),
-        move |service, principal, context| {
-            let mut request = request;
-            request.policy_context =
-                apply_policy_binding(principal, request.policy_context, context)?;
-            let response = service.explain_tuple(request).map_err(HttpError::Api)?;
-            context.trace_tuple_count = Some(response.trace.tuples.len());
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "POST",
+            "/v1/explain/tuple",
+            AuthScope::Explain,
+            request_context.clone(),
+            move |service, principal, context| {
+                let mut request = request;
+                request.policy_context =
+                    apply_policy_binding(principal, request.policy_context, context)?;
+                let response = service.explain_tuple(request).map_err(HttpError::Api)?;
+                context.trace_tuple_count = Some(response.trace.tuples.len());
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2470,7 +2732,9 @@ async fn resolve_trace_handle(
         selected_report: Some("trace_handle_resolve".into()),
         ..Default::default()
     };
-    let response = state.resolve_execution_trace(&headers, request, request_context)?;
+    let response = state
+        .resolve_execution_trace(&headers, request, request_context)
+        .await?;
     Ok(Json(response))
 }
 
@@ -2484,19 +2748,21 @@ async fn register_artifact_reference(
         requested_element: Some(request.reference.registered_at.0),
         ..Default::default()
     };
-    let response = state.execute(
-        &headers,
-        "POST",
-        "/v1/sidecars/artifacts/register",
-        AuthScope::Append,
-        request_context.clone(),
-        move |service, _principal, _context| {
-            let response = service
-                .register_artifact_reference(request)
-                .map_err(HttpError::Api)?;
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "POST",
+            "/v1/sidecars/artifacts/register",
+            AuthScope::Append,
+            request_context.clone(),
+            move |service, _principal, _context| {
+                let response = service
+                    .register_artifact_reference(request)
+                    .map_err(HttpError::Api)?;
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2509,22 +2775,24 @@ async fn get_artifact_reference(
         temporal_view: Some("sidecar_artifact_lookup".into()),
         ..Default::default()
     };
-    let response = state.execute(
-        &headers,
-        "POST",
-        "/v1/sidecars/artifacts/get",
-        AuthScope::Query,
-        request_context.clone(),
-        move |service, principal, context| {
-            let mut request = request;
-            request.policy_context =
-                apply_policy_binding(principal, request.policy_context, context)?;
-            let response = service
-                .get_artifact_reference(request)
-                .map_err(HttpError::Api)?;
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "POST",
+            "/v1/sidecars/artifacts/get",
+            AuthScope::Query,
+            request_context.clone(),
+            move |service, principal, context| {
+                let mut request = request;
+                request.policy_context =
+                    apply_policy_binding(principal, request.policy_context, context)?;
+                let response = service
+                    .get_artifact_reference(request)
+                    .map_err(HttpError::Api)?;
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2538,19 +2806,21 @@ async fn register_vector_record(
         requested_element: Some(request.record.registered_at.0),
         ..Default::default()
     };
-    let response = state.execute(
-        &headers,
-        "POST",
-        "/v1/sidecars/vectors/register",
-        AuthScope::Append,
-        request_context.clone(),
-        move |service, _principal, _context| {
-            let response = service
-                .register_vector_record(request)
-                .map_err(HttpError::Api)?;
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "POST",
+            "/v1/sidecars/vectors/register",
+            AuthScope::Append,
+            request_context.clone(),
+            move |service, _principal, _context| {
+                let response = service
+                    .register_vector_record(request)
+                    .map_err(HttpError::Api)?;
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2564,21 +2834,23 @@ async fn search_vectors(
         requested_element: request.as_of.map(|element| element.0),
         ..Default::default()
     };
-    let response = state.execute(
-        &headers,
-        "POST",
-        "/v1/sidecars/vectors/search",
-        AuthScope::Query,
-        request_context.clone(),
-        move |service, principal, context| {
-            let mut request = request;
-            request.policy_context =
-                apply_policy_binding(principal, request.policy_context, context)?;
-            let response = service.search_vectors(request).map_err(HttpError::Api)?;
-            context.row_count = Some(response.matches.len());
-            Ok(response)
-        },
-    )?;
+    let response = state
+        .execute(
+            &headers,
+            "POST",
+            "/v1/sidecars/vectors/search",
+            AuthScope::Query,
+            request_context.clone(),
+            move |service, principal, context| {
+                let mut request = request;
+                request.policy_context =
+                    apply_policy_binding(principal, request.policy_context, context)?;
+                let response = service.search_vectors(request).map_err(HttpError::Api)?;
+                context.row_count = Some(response.matches.len());
+                Ok(response)
+            },
+        )
+        .await?;
     Ok(Json(response))
 }
 
@@ -2682,4 +2954,329 @@ fn now_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
     duration.as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+#[cfg(test)]
+mod concurrency_tests {
+    use super::{
+        health, AuditContext, AuditEntry, AuditLog, AuthScope, BoundedBlockingExecutor, HeaderMap,
+        HttpError, HttpKernelOptions, HttpKernelState, NamespaceServiceDirectory,
+        NamespaceServiceState, AUTHORIZATION,
+    };
+    use crate::{
+        NamespaceId, PilotAuthConfig, PilotConcurrencyConfig, PilotHttpTransportConfig,
+        PilotServiceConfig, PilotStorageConfig, PilotTokenConfig, ServiceMode,
+    };
+    use axum::{
+        http::{header::RETRY_AFTER, StatusCode},
+        response::IntoResponse,
+    };
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::{mpsc, Arc, Mutex},
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
+
+    fn directory(label: &str) -> Arc<NamespaceServiceDirectory> {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("aether-http-{label}-{nonce}"));
+        fs::create_dir_all(&root).expect("create namespace test root");
+        Arc::new(NamespaceServiceDirectory::sqlite(root))
+    }
+
+    fn audit_entry() -> AuditEntry {
+        AuditEntry {
+            timestamp_ms: 1,
+            principal: "test".into(),
+            principal_id: None,
+            token_id: None,
+            method: "GET".into(),
+            path: "/test".into(),
+            status: 200,
+            scope: AuthScope::Ops,
+            outcome: "allowed".into(),
+            detail: None,
+            context: AuditContext::default(),
+        }
+    }
+
+    #[test]
+    fn audit_backpressure_is_bounded_and_visible() {
+        let (writer, receiver) = mpsc::sync_channel(1);
+        writer.try_send(audit_entry()).expect("fill audit queue");
+        let audit = AuditLog {
+            entries: Arc::new(Mutex::new(Vec::new())),
+            path: Some(PathBuf::from("audit.jsonl")),
+            writer: Some(writer),
+        };
+        audit.record(audit_entry());
+        let entries = audit.snapshot().expect("audit snapshot");
+        assert!(entries.iter().any(|entry| {
+            entry.outcome == "audit_write_failed"
+                && entry
+                    .detail
+                    .as_deref()
+                    .is_some_and(|detail| detail.contains("saturated"))
+        }));
+        drop(receiver);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn blocked_namespace_does_not_delay_another_namespace_or_directory_status() {
+        let executor = BoundedBlockingExecutor::new(2, 2);
+        let services = directory("independent");
+        let blocked_namespace = NamespaceId::new("blocked").expect("namespace");
+        let free_namespace = NamespaceId::new("free").expect("namespace");
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+
+        let blocked = {
+            let executor = executor.clone();
+            let services = Arc::clone(&services);
+            let namespace = blocked_namespace.clone();
+            tokio::spawn(async move {
+                executor
+                    .run(move || {
+                        services.execute(&namespace, |_service| {
+                            started_tx.send(()).expect("signal blocked operation");
+                            release_rx.recv().expect("release blocked operation");
+                            Ok(())
+                        })
+                    })
+                    .await
+            })
+        };
+        started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("blocked namespace started");
+
+        let active = services.active_namespaces().expect("directory status");
+        assert!(active.contains(&blocked_namespace));
+        tokio::time::timeout(Duration::from_secs(1), {
+            let executor = executor.clone();
+            let services = Arc::clone(&services);
+            async move {
+                executor
+                    .run(move || services.execute(&free_namespace, |_service| Ok(17_u8)))
+                    .await
+            }
+        })
+        .await
+        .expect("free namespace must not wait")
+        .expect("free namespace result");
+
+        release_tx.send(()).expect("release blocked namespace");
+        blocked
+            .await
+            .expect("blocked task join")
+            .expect("blocked task result");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn saturated_namespace_work_does_not_delay_health_status_or_auth_reload() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("aether-http-control-{nonce}"));
+        fs::create_dir_all(&root).expect("create control test root");
+        let config_path = root.join("pilot-service.json");
+        let data_root = root.join("data");
+        let config = PilotServiceConfig {
+            config_version: "control-test".into(),
+            schema_version: "v1".into(),
+            service_mode: ServiceMode::SingleNode,
+            bind_addr: "127.0.0.1:3000".into(),
+            http_transport: PilotHttpTransportConfig::default(),
+            concurrency: PilotConcurrencyConfig {
+                namespace_workers: 1,
+                namespace_queue: 0,
+                audit_queue: 1_024,
+            },
+            database_path: None,
+            storage: Some(PilotStorageConfig::Sqlite {
+                data_root: data_root.clone(),
+            }),
+            audit_log_path: Some(root.join("audit.jsonl")),
+            auth: PilotAuthConfig {
+                tokens: vec![PilotTokenConfig {
+                    principal: "operator".into(),
+                    principal_id: Some("principal:operator".into()),
+                    token_id: Some("token:operator".into()),
+                    scopes: vec![AuthScope::Ops],
+                    policy_context: None,
+                    token: Some("control-token".into()),
+                    token_env: None,
+                    token_file: None,
+                    token_command: None,
+                    namespaces: vec![NamespaceId::default()],
+                    revoked: false,
+                }],
+                revoked_token_ids: Vec::new(),
+                revoked_principal_ids: Vec::new(),
+            },
+        };
+        fs::write(
+            &config_path,
+            serde_json::to_vec_pretty(&config).expect("serialize config"),
+        )
+        .expect("write config");
+        let resolved = config.resolve(&config_path).expect("resolve config");
+        let options = HttpKernelOptions::new()
+            .with_auth(resolved.auth.clone())
+            .with_audit_log_path(resolved.audit_log_path.clone())
+            .with_service_status(resolved.service_status())
+            .with_auth_reload_config_path(config_path)
+            .with_namespace_work_limits(1, 0);
+        let state = HttpKernelState::with_sqlite_namespaces(data_root, options);
+
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        let running = {
+            let executor = state.blocking.clone();
+            tokio::spawn(async move {
+                executor
+                    .run(move || {
+                        started_tx.send(()).expect("work started");
+                        release_rx.recv().expect("release work");
+                        Ok(())
+                    })
+                    .await
+            })
+        };
+        started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("work saturated executor");
+
+        assert_eq!(health().await.status, "ok");
+        assert_eq!(state.status_snapshot().expect("status").status, "ok");
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, "Bearer control-token".parse().unwrap());
+        state
+            .authorize(&headers, AuthScope::Ops, &NamespaceId::default())
+            .expect("authorization unaffected");
+        state
+            .reload_auth_from_config()
+            .expect("auth reload unaffected");
+
+        release_tx.send(()).expect("release work");
+        running.await.expect("work join").expect("work result");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn same_namespace_is_ordered_and_initializes_once() {
+        let executor = BoundedBlockingExecutor::new(2, 2);
+        let services = directory("ordered");
+        let namespace = NamespaceId::new("ordered").expect("namespace");
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+
+        let first = {
+            let executor = executor.clone();
+            let services = Arc::clone(&services);
+            let namespace = namespace.clone();
+            let order = Arc::clone(&order);
+            tokio::spawn(async move {
+                executor
+                    .run(move || {
+                        services.execute(&namespace, |_service| {
+                            order.lock().expect("order lock").push(1);
+                            started_tx.send(()).expect("first started");
+                            release_rx.recv().expect("release first");
+                            Ok(())
+                        })
+                    })
+                    .await
+            })
+        };
+        started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("first operation started");
+        let second = {
+            let executor = executor.clone();
+            let services = Arc::clone(&services);
+            let namespace = namespace.clone();
+            let order = Arc::clone(&order);
+            tokio::spawn(async move {
+                executor
+                    .run(move || {
+                        services.execute(&namespace, |_service| {
+                            order.lock().expect("order lock").push(2);
+                            Ok(())
+                        })
+                    })
+                    .await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(*order.lock().expect("order lock"), vec![1]);
+        release_tx.send(()).expect("release first");
+        first.await.expect("first join").expect("first result");
+        second.await.expect("second join").expect("second result");
+        assert_eq!(*order.lock().expect("order lock"), vec![1, 2]);
+
+        let handle = services.handle(&namespace).expect("namespace handle");
+        assert!(matches!(
+            *handle.state.lock().expect("namespace state"),
+            NamespaceServiceState::Ready(_)
+        ));
+        assert!(Arc::ptr_eq(
+            &handle,
+            &services.handle(&namespace).expect("same namespace handle")
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn executor_saturation_and_panics_fail_boundedly() {
+        let saturated = BoundedBlockingExecutor::new(1, 0);
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        let running = {
+            let executor = saturated.clone();
+            tokio::spawn(async move {
+                executor
+                    .run(move || {
+                        started_tx.send(()).expect("worker started");
+                        release_rx.recv().expect("release worker");
+                        Ok(())
+                    })
+                    .await
+            })
+        };
+        started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("worker started");
+        assert!(matches!(
+            saturated.run(|| Ok(())).await,
+            Err(HttpError::NamespaceBusy { .. })
+        ));
+        let response = HttpError::NamespaceBusy {
+            retry_after_seconds: 1,
+        }
+        .into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers().get(RETRY_AFTER).unwrap(), "1");
+        release_tx.send(()).expect("release worker");
+        running
+            .await
+            .expect("running join")
+            .expect("running result");
+
+        let executor = BoundedBlockingExecutor::new(1, 0);
+        assert!(matches!(
+            executor
+                .run(|| -> Result<(), HttpError> { panic!("worker panic") })
+                .await,
+            Err(HttpError::WorkerFailed)
+        ));
+        executor
+            .run(|| Ok(()))
+            .await
+            .expect("permit must be released after panic");
+    }
 }

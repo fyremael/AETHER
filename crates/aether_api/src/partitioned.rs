@@ -26,6 +26,7 @@ use std::{
     fmt::Write as _,
     fs,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, MutexGuard},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -116,8 +117,8 @@ pub struct PromoteReplicaResponse {
 #[derive(Debug)]
 pub struct ReplicatedAuthorityPartitionService {
     root: PathBuf,
-    partitions: RefCell<IndexMap<PartitionId, ReplicatedPartition>>,
-    execution_store: SqliteExecutionStore,
+    partitions: IndexMap<PartitionId, Arc<Mutex<ReplicatedPartition>>>,
+    execution_store: Mutex<SqliteExecutionStore>,
 }
 
 #[derive(Debug)]
@@ -460,14 +461,14 @@ impl ReplicatedAuthorityPartitionService {
         for config in configs {
             let partition = config.partition.clone();
             let runtime = ReplicatedPartition::open(&root, config)?;
-            partitions.insert(partition, runtime);
+            partitions.insert(partition, Arc::new(Mutex::new(runtime)));
         }
         let execution_store = SqliteExecutionStore::open(root.join("federated.executions.sqlite"))
             .map_err(crate::execution::ExecutionError::from)?;
         Ok(Self {
             root,
-            partitions: RefCell::new(partitions),
-            execution_store,
+            partitions,
+            execution_store: Mutex::new(execution_store),
         })
     }
 
@@ -476,13 +477,10 @@ impl ReplicatedAuthorityPartitionService {
     }
 
     pub fn append_partition(
-        &mut self,
+        &self,
         request: PartitionAppendRequest,
     ) -> Result<PartitionAppendResponse, ApiError> {
-        let mut partitions = self.partitions.borrow_mut();
-        let partition = partitions.get_mut(&request.partition).ok_or_else(|| {
-            ApiError::Validation(format!("unknown partition {}", request.partition))
-        })?;
+        let mut partition = self.partition(&request.partition)?;
         partition.append(request)
     }
 
@@ -490,10 +488,7 @@ impl ReplicatedAuthorityPartitionService {
         &self,
         request: PartitionHistoryRequest,
     ) -> Result<PartitionHistoryResponse, ApiError> {
-        let mut partitions = self.partitions.borrow_mut();
-        let partition = partitions.get_mut(&request.cut.partition).ok_or_else(|| {
-            ApiError::Validation(format!("unknown partition {}", request.cut.partition))
-        })?;
+        let mut partition = self.partition(&request.cut.partition)?;
         partition_history_for(partition.leader_service_mut()?, request)
     }
 
@@ -501,10 +496,7 @@ impl ReplicatedAuthorityPartitionService {
         &self,
         request: PartitionStateRequest,
     ) -> Result<PartitionStateResponse, ApiError> {
-        let mut partitions = self.partitions.borrow_mut();
-        let partition = partitions.get_mut(&request.cut.partition).ok_or_else(|| {
-            ApiError::Validation(format!("unknown partition {}", request.cut.partition))
-        })?;
+        let mut partition = self.partition(&request.cut.partition)?;
         partition_state_for(partition.leader_service_mut()?, request)
     }
 
@@ -524,14 +516,11 @@ impl ReplicatedAuthorityPartitionService {
     }
 
     pub fn import_partition_facts(
-        &mut self,
+        &self,
         request: ImportedFactQueryRequest,
         policy_context: Option<PolicyContext>,
     ) -> Result<ImportedFactQueryResponse, ApiError> {
-        let mut partitions = self.partitions.borrow_mut();
-        let partition = partitions.get_mut(&request.cut.partition).ok_or_else(|| {
-            ApiError::Validation(format!("unknown partition {}", request.cut.partition))
-        })?;
+        let mut partition = self.partition(&request.cut.partition)?;
         let epoch = partition.metadata.leader_epoch.clone();
         let mut response = import_partition_facts_from_service(
             partition.leader_service_mut()?,
@@ -543,7 +532,7 @@ impl ReplicatedAuthorityPartitionService {
     }
 
     pub fn federated_run_document(
-        &mut self,
+        &self,
         request: FederatedRunDocumentRequest,
     ) -> Result<FederatedRunDocumentResponse, ApiError> {
         let imports = request
@@ -552,13 +541,15 @@ impl ReplicatedAuthorityPartitionService {
             .cloned()
             .map(|import| self.import_partition_facts(import, request.policy_context.clone()))
             .collect::<Result<Vec<_>, ApiError>>()?;
-        let response =
-            execute_federated_document_request(request, imports, &mut self.execution_store)?;
+        let mut execution_store = self.execution_store.lock().map_err(|_| {
+            ApiError::Validation("partition execution store lock is poisoned".into())
+        })?;
+        let response = execute_federated_document_request(request, imports, &mut *execution_store)?;
         Ok(response)
     }
 
     pub fn build_federated_explain_report(
-        &mut self,
+        &self,
         request: FederatedRunDocumentRequest,
     ) -> Result<FederatedExplainReport, ApiError> {
         let policy_context = request.policy_context.clone();
@@ -570,11 +561,14 @@ impl ReplicatedAuthorityPartitionService {
     }
 
     pub fn resolve_trace_handle(
-        &mut self,
+        &self,
         request: ResolveTraceHandleRequest,
     ) -> Result<ResolveTraceHandleResponse, ApiError> {
+        let mut execution_store = self.execution_store.lock().map_err(|_| {
+            ApiError::Validation("partition execution store lock is poisoned".into())
+        })?;
         Ok(resolve_trace(
-            &mut self.execution_store,
+            &mut *execution_store,
             &NamespaceId::default(),
             request,
         )?)
@@ -582,8 +576,13 @@ impl ReplicatedAuthorityPartitionService {
 
     pub fn partition_status(&self) -> Result<PartitionStatusResponse, ApiError> {
         let mut statuses = Vec::new();
-        for partition in self.partitions.borrow().values() {
-            statuses.push(partition.status()?);
+        for partition in self.partitions.values() {
+            statuses.push(
+                partition
+                    .lock()
+                    .map_err(|_| ApiError::Validation("partition service lock is poisoned".into()))?
+                    .status()?,
+            );
         }
         Ok(PartitionStatusResponse {
             partitions: statuses,
@@ -591,19 +590,27 @@ impl ReplicatedAuthorityPartitionService {
     }
 
     pub fn promote_replica(
-        &mut self,
+        &self,
         request: PromoteReplicaRequest,
     ) -> Result<PromoteReplicaResponse, ApiError> {
-        let mut partitions = self.partitions.borrow_mut();
-        let partition = partitions.get_mut(&request.partition).ok_or_else(|| {
-            ApiError::Validation(format!("unknown partition {}", request.partition))
-        })?;
+        let mut partition = self.partition(&request.partition)?;
         let leader_epoch = partition.promote(request.replica_id)?;
         Ok(PromoteReplicaResponse {
             partition: request.partition,
             replica_id: request.replica_id,
             leader_epoch,
         })
+    }
+
+    fn partition(
+        &self,
+        partition: &PartitionId,
+    ) -> Result<MutexGuard<'_, ReplicatedPartition>, ApiError> {
+        self.partitions
+            .get(partition)
+            .ok_or_else(|| ApiError::Validation(format!("unknown partition {partition}")))?
+            .lock()
+            .map_err(|_| ApiError::Validation(format!("partition {partition} lock is poisoned")))
     }
 }
 
@@ -2088,10 +2095,88 @@ mod tests {
     use std::{
         path::{Path, PathBuf},
         sync::atomic::{AtomicU64, Ordering},
-        time::{SystemTime, UNIX_EPOCH},
+        sync::{mpsc, Arc},
+        thread,
+        time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
     static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(1);
+
+    #[test]
+    fn blocked_partition_does_not_delay_another_partition() {
+        let temp = TestPartitionDir::new("partition-lock-isolation");
+        let service = Arc::new(
+            ReplicatedAuthorityPartitionService::open(
+                temp.path(),
+                vec![
+                    AuthorityPartitionConfig {
+                        partition: PartitionId::new("blocked"),
+                        replicas: vec![ReplicaConfig {
+                            replica_id: ReplicaId::new(1),
+                            database_path: PathBuf::from("blocked.sqlite"),
+                            role: ReplicaRole::Leader,
+                        }],
+                    },
+                    AuthorityPartitionConfig {
+                        partition: PartitionId::new("free"),
+                        replicas: vec![ReplicaConfig {
+                            replica_id: ReplicaId::new(1),
+                            database_path: PathBuf::from("free.sqlite"),
+                            role: ReplicaRole::Leader,
+                        }],
+                    },
+                ],
+            )
+            .expect("open partition service"),
+        );
+        service
+            .append_partition(PartitionAppendRequest {
+                partition: PartitionId::new("free"),
+                leader_epoch: None,
+                schema_ref: None,
+                expected_cut: None,
+                idempotency_key: None,
+                principal: None,
+                datoms: vec![sample_datom(1, 1, "free-value", 1, None)],
+            })
+            .expect("seed free partition");
+
+        let blocked = Arc::clone(
+            service
+                .partitions
+                .get(&PartitionId::new("blocked"))
+                .expect("blocked partition"),
+        );
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        let blocked_thread = thread::spawn(move || {
+            let _guard = blocked.lock().expect("blocked partition lock");
+            started_tx.send(()).expect("signal blocked lock");
+            release_rx.recv().expect("release blocked lock");
+        });
+        started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("blocked partition lock acquired");
+
+        let (result_tx, result_rx) = mpsc::sync_channel(1);
+        let free_service = Arc::clone(&service);
+        let free_thread = thread::spawn(move || {
+            result_tx
+                .send(free_service.partition_history(PartitionHistoryRequest {
+                    cut: PartitionCut::as_of(PartitionId::new("free"), ElementId::new(1)),
+                    policy_context: None,
+                }))
+                .expect("send free partition result");
+        });
+        let history = result_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("free partition must not wait")
+            .expect("free partition history");
+        assert_eq!(history.datoms.len(), 1);
+        free_thread.join().expect("free partition thread");
+        release_tx.send(()).expect("release blocked partition");
+        blocked_thread.join().expect("blocked partition thread");
+    }
 
     #[test]
     fn partitioned_service_keeps_local_truth_exact_per_partition() {
@@ -2671,7 +2756,7 @@ mod tests {
     #[test]
     fn replicated_partition_service_replays_followers_and_fences_stale_epochs() {
         let temp = TestPartitionDir::new("replicated");
-        let mut service = ReplicatedAuthorityPartitionService::open(
+        let service = ReplicatedAuthorityPartitionService::open(
             temp.path(),
             vec![AuthorityPartitionConfig {
                 partition: PartitionId::new("authority"),
@@ -2799,9 +2884,8 @@ mod tests {
         let temp = TestPartitionDir::new("replicated-restart");
         let configs = replicated_authority_config();
         {
-            let mut service =
-                ReplicatedAuthorityPartitionService::open(temp.path(), configs.clone())
-                    .expect("open replicated partitions");
+            let service = ReplicatedAuthorityPartitionService::open(temp.path(), configs.clone())
+                .expect("open replicated partitions");
             service
                 .append_partition(PartitionAppendRequest {
                     partition: PartitionId::new("authority"),
@@ -2820,7 +2904,7 @@ mod tests {
             );
         }
 
-        let mut service = ReplicatedAuthorityPartitionService::open(temp.path(), configs.clone())
+        let service = ReplicatedAuthorityPartitionService::open(temp.path(), configs.clone())
             .expect("reopen replicated partitions");
         let status = service.partition_status().expect("status after reopen");
         let authority = &status.partitions[0];
@@ -2897,7 +2981,7 @@ mod tests {
     fn replicated_partition_status_reports_lag_and_rejects_divergence() {
         let temp = TestPartitionDir::new("replicated-divergence");
         let configs = replicated_authority_config();
-        let mut service = ReplicatedAuthorityPartitionService::open(temp.path(), configs.clone())
+        let service = ReplicatedAuthorityPartitionService::open(temp.path(), configs.clone())
             .expect("open replicated partitions");
         service
             .append_partition(PartitionAppendRequest {
@@ -2912,10 +2996,12 @@ mod tests {
             .expect("append through leader");
 
         {
-            let mut partitions = service.partitions.borrow_mut();
-            let partition = partitions
-                .get_mut(&PartitionId::new("authority"))
-                .expect("authority partition");
+            let mut partition = service
+                .partitions
+                .get(&PartitionId::new("authority"))
+                .expect("authority partition")
+                .lock()
+                .expect("partition lock");
             let leader = partition
                 .replicas
                 .get_mut(&ReplicaId::new(1))
@@ -2946,10 +3032,12 @@ mod tests {
         );
 
         {
-            let mut partitions = service.partitions.borrow_mut();
-            let partition = partitions
-                .get_mut(&PartitionId::new("authority"))
-                .expect("authority partition");
+            let mut partition = service
+                .partitions
+                .get(&PartitionId::new("authority"))
+                .expect("authority partition")
+                .lock()
+                .expect("partition lock");
             let follower = partition
                 .replicas
                 .get_mut(&ReplicaId::new(2))
@@ -3001,7 +3089,7 @@ mod tests {
     #[test]
     fn replicated_partition_service_reuses_identity_but_reissues_trace_handles() {
         let temp = TestPartitionDir::new("replicated-cache");
-        let mut service = ReplicatedAuthorityPartitionService::open(
+        let service = ReplicatedAuthorityPartitionService::open(
             temp.path(),
             vec![
                 AuthorityPartitionConfig {

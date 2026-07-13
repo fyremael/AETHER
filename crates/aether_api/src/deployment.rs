@@ -27,6 +27,8 @@ pub struct PilotServiceConfig {
     pub bind_addr: String,
     #[serde(default)]
     pub http_transport: PilotHttpTransportConfig,
+    #[serde(default)]
+    pub concurrency: PilotConcurrencyConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -53,6 +55,54 @@ pub enum PilotStorageConfig {
         #[serde(default)]
         tls: PostgresTlsConfig,
     },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PilotConcurrencyConfig {
+    #[serde(default = "default_namespace_workers")]
+    pub namespace_workers: usize,
+    #[serde(default = "default_namespace_queue")]
+    pub namespace_queue: usize,
+    #[serde(default = "default_audit_queue")]
+    pub audit_queue: usize,
+}
+
+impl Default for PilotConcurrencyConfig {
+    fn default() -> Self {
+        Self {
+            namespace_workers: default_namespace_workers(),
+            namespace_queue: default_namespace_queue(),
+            audit_queue: default_audit_queue(),
+        }
+    }
+}
+
+impl PilotConcurrencyConfig {
+    fn validate(&self) -> Result<(), DeploymentError> {
+        if self.namespace_workers == 0 {
+            return Err(DeploymentError::Validation(
+                "concurrency.namespace_workers must be at least 1".into(),
+            ));
+        }
+        if self.audit_queue == 0 {
+            return Err(DeploymentError::Validation(
+                "concurrency.audit_queue must be at least 1".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn default_namespace_workers() -> usize {
+    8
+}
+
+fn default_namespace_queue() -> usize {
+    64
+}
+
+fn default_audit_queue() -> usize {
+    1_024
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -166,6 +216,7 @@ impl PilotServiceConfig {
             ));
         }
         let http_transport = self.http_transport.resolve(&self.bind_addr)?;
+        self.concurrency.validate()?;
 
         let storage = resolve_storage_config(config_dir, self.database_path, self.storage)?;
         let audit_log_path = self
@@ -198,6 +249,7 @@ impl PilotServiceConfig {
             service_mode: self.service_mode,
             bind_addr: self.bind_addr,
             http_transport,
+            concurrency: self.concurrency,
             database_path: storage.legacy_database_path(),
             storage,
             audit_log_path,
@@ -428,6 +480,7 @@ pub struct ResolvedPilotServiceConfig {
     pub service_mode: ServiceMode,
     pub bind_addr: String,
     pub http_transport: ResolvedPilotHttpTransport,
+    pub concurrency: PilotConcurrencyConfig,
     pub database_path: Option<PathBuf>,
     pub storage: ResolvedPilotStorage,
     pub audit_log_path: PathBuf,
@@ -845,7 +898,12 @@ pub async fn serve_pilot_http_service(
         .with_auth(resolved.auth.clone())
         .with_audit_log_path(resolved.audit_log_path.clone())
         .with_service_status(resolved.service_status())
-        .with_auth_reload_config_path(resolved.config_path.clone());
+        .with_auth_reload_config_path(resolved.config_path.clone())
+        .with_namespace_work_limits(
+            resolved.concurrency.namespace_workers,
+            resolved.concurrency.namespace_queue,
+        )
+        .with_audit_queue_limit(resolved.concurrency.audit_queue);
     match &resolved.storage {
         ResolvedPilotStorage::LegacySqlite { database_path, .. } => {
             let service = SqliteKernelService::open(database_path)?;
@@ -984,8 +1042,8 @@ fn normalize_policy_context(policy_context: Option<PolicyContext>) -> Option<Pol
 #[cfg(test)]
 mod tests {
     use super::{
-        default_audit_log_path, DeploymentError, PilotAuthConfig, PilotHttpTransportConfig,
-        PilotServiceConfig, PilotStorageConfig, PilotTokenConfig,
+        default_audit_log_path, DeploymentError, PilotAuthConfig, PilotConcurrencyConfig,
+        PilotHttpTransportConfig, PilotServiceConfig, PilotStorageConfig, PilotTokenConfig,
     };
     use crate::{AuthScope, NamespaceId, ServiceMode};
     use aether_ast::PolicyContext;
@@ -1010,6 +1068,7 @@ mod tests {
             service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
             http_transport: PilotHttpTransportConfig::default(),
+            concurrency: PilotConcurrencyConfig::default(),
             database_path: Some(PathBuf::from("../data/coordination.sqlite")),
             storage: None,
             audit_log_path: None,
@@ -1065,6 +1124,7 @@ mod tests {
             service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
             http_transport: PilotHttpTransportConfig::default(),
+            concurrency: PilotConcurrencyConfig::default(),
             database_path: None,
             storage: Some(PilotStorageConfig::Sqlite {
                 data_root: PathBuf::from("../data"),
@@ -1148,6 +1208,7 @@ mod tests {
             service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
             http_transport: PilotHttpTransportConfig::default(),
+            concurrency: PilotConcurrencyConfig::default(),
             database_path: None,
             storage: Some(PilotStorageConfig::Postgres {
                 database_url_env: Some(env_name.clone()),
@@ -1257,6 +1318,37 @@ mod tests {
     }
 
     #[test]
+    fn concurrency_limits_are_bounded_and_validated() {
+        let mut invalid = minimal_service_config(
+            "127.0.0.1:3000",
+            PilotHttpTransportConfig::LoopbackPlaintext,
+        );
+        invalid.concurrency.namespace_workers = 0;
+        let error = invalid
+            .resolve("pilot-service.json")
+            .expect_err("zero namespace workers must fail");
+        assert!(matches!(
+            error,
+            DeploymentError::Validation(message)
+                if message.contains("namespace_workers must be at least 1")
+        ));
+
+        let mut invalid = minimal_service_config(
+            "127.0.0.1:3000",
+            PilotHttpTransportConfig::LoopbackPlaintext,
+        );
+        invalid.concurrency.audit_queue = 0;
+        let error = invalid
+            .resolve("pilot-service.json")
+            .expect_err("zero audit queue must fail");
+        assert!(matches!(
+            error,
+            DeploymentError::Validation(message)
+                if message.contains("audit_queue must be at least 1")
+        ));
+    }
+
+    #[test]
     fn postgres_plaintext_downgrade_is_rejected_for_remote_hosts() {
         let root = unique_temp_dir("pilot-postgres-plaintext-reject");
         let env_name = format!(
@@ -1301,6 +1393,7 @@ mod tests {
             service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
             http_transport: PilotHttpTransportConfig::default(),
+            concurrency: PilotConcurrencyConfig::default(),
             database_path: Some(PathBuf::from("coordination.sqlite")),
             storage: None,
             audit_log_path: None,
@@ -1342,6 +1435,7 @@ mod tests {
             service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
             http_transport: PilotHttpTransportConfig::default(),
+            concurrency: PilotConcurrencyConfig::default(),
             database_path: Some(PathBuf::from("coordination.sqlite")),
             storage: None,
             audit_log_path: None,
@@ -1379,6 +1473,7 @@ mod tests {
             service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
             http_transport: PilotHttpTransportConfig::default(),
+            concurrency: PilotConcurrencyConfig::default(),
             database_path: Some(PathBuf::from("coordination.sqlite")),
             storage: None,
             audit_log_path: None,
@@ -1423,6 +1518,7 @@ mod tests {
             service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
             http_transport: PilotHttpTransportConfig::default(),
+            concurrency: PilotConcurrencyConfig::default(),
             database_path: Some(PathBuf::from("coordination.sqlite")),
             storage: None,
             audit_log_path: None,
@@ -1463,6 +1559,7 @@ mod tests {
             service_mode: ServiceMode::SingleNode,
             bind_addr: "127.0.0.1:3000".into(),
             http_transport: PilotHttpTransportConfig::default(),
+            concurrency: PilotConcurrencyConfig::default(),
             database_path: Some(PathBuf::from("coordination.sqlite")),
             storage: None,
             audit_log_path: None,
@@ -1508,6 +1605,7 @@ mod tests {
             service_mode: ServiceMode::SingleNode,
             bind_addr: bind_addr.into(),
             http_transport,
+            concurrency: PilotConcurrencyConfig::default(),
             database_path: Some(PathBuf::from("coordination.sqlite")),
             storage: None,
             audit_log_path: None,

@@ -62,6 +62,26 @@ class ServiceV2OperabilityTests(unittest.TestCase):
         self.assertIsInstance(status["admin"], bool)
         self.assertIsInstance(status["operator"], bool)
 
+    def test_namespace_concurrency_contract_is_bounded(self) -> None:
+        http_source = (REPO_ROOT / "crates" / "aether_api" / "src" / "http.rs").read_text(
+            encoding="utf-8"
+        )
+        partition_source = (
+            REPO_ROOT / "crates" / "aether_api" / "src" / "partitioned.rs"
+        ).read_text(encoding="utf-8")
+
+        for marker in (
+            "struct BoundedBlockingExecutor",
+            "struct NamespaceServiceDirectory",
+            "try_acquire_owned",
+            '"namespace_busy"',
+            "RETRY_AFTER",
+            "mpsc::sync_channel::<AuditEntry>",
+        ):
+            self.assertIn(marker, http_source)
+        self.assertNotIn("std::thread::spawn", http_source)
+        self.assertIn("Arc<Mutex<ReplicatedPartition>>", partition_source)
+
     def test_hardening_pack_status_defaults_missing_without_latest_json(self) -> None:
         module = load_module()
         status = module.hardening_latest_status(REPO_ROOT, REPO_ROOT / "does-not-exist.json")

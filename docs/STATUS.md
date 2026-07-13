@@ -180,6 +180,13 @@ Completed:
   hostname mismatch, explicit `verify_ca`, untrusted/expired certificate, no-
   downgrade, mTLS, and two-CA rotation tests, while the hosted exact-SHA run is
   still pending
+- namespace services now live behind independent per-namespace handles and all
+  synchronous kernel/storage work uses a bounded blocking executor; saturation
+  returns structured `503 namespace_busy` with `Retry-After`, same-namespace
+  order remains deterministic, and initialization is single-handle
+- replicated authority partitions now lock independently, while the audit file
+  path uses a bounded single-writer queue with visible backpressure instead of
+  holding the in-memory audit lock across slow I/O
 - the existing beta-candidate runner remains available for diagnostics, but it does not qualify a commercial beta until R4 replaces authored/path-based readiness with exact-candidate immutable evidence
 - the commercial readiness ledger now targets controlled design-partner alpha; commercial beta is blocked by six non-waivable remediation gates, and GA remains blocked by its separate release, support/security, distribution, and distributed-truth gates
 - a repeatable perturbation sweep now exists to run the persona pass, full-stack benchmark snapshot, host-aware drift checks, deeper ignored stress workloads, and single-node capacity projections in one artifact pack

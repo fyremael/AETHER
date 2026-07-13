@@ -31,6 +31,7 @@ fn developer_config() -> Result<PilotServiceConfig, Box<dyn std::error::Error>> 
         service_mode: ServiceMode::SingleNode,
         bind_addr,
         http_transport: aether_api::PilotHttpTransportConfig::default(),
+        concurrency: aether_api::PilotConcurrencyConfig::default(),
         database_path: Some(database_path.clone()),
         storage: None,
         audit_log_path: Some(default_audit_log_path(&database_path)),

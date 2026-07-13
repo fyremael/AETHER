@@ -903,6 +903,7 @@ async fn http_service_exposes_status_and_supports_auth_reload() {
         service_mode: ServiceMode::SingleNode,
         bind_addr: "127.0.0.1:0".into(),
         http_transport: aether_api::PilotHttpTransportConfig::default(),
+        concurrency: aether_api::PilotConcurrencyConfig::default(),
         database_path: Some(database_path.clone()),
         storage: None,
         audit_log_path: Some(audit_path.clone()),
@@ -3104,6 +3105,10 @@ fn unique_postgres_schema(prefix: &str) -> String {
 }
 
 fn read_audit_entries(path: &Path) -> Vec<AuditEntry> {
+    // Audit persistence is intentionally handled by a bounded writer so slow
+    // disk I/O cannot hold the request/state lock. Give the writer a short,
+    // bounded drain window before inspecting the durable file.
+    std::thread::sleep(std::time::Duration::from_millis(50));
     std::fs::read_to_string(path)
         .expect("read audit log")
         .lines()

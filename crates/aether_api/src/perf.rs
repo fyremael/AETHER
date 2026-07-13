@@ -2073,7 +2073,7 @@ fn build_replicated_partition_fixture() -> Result<ReplicatedPartitionFixture, Ap
     })?;
     let guard = TempDirGuard { path: root.clone() };
     let configs = replicated_partition_configs();
-    let mut service = ReplicatedAuthorityPartitionService::open(&root, configs.clone())?;
+    let service = ReplicatedAuthorityPartitionService::open(&root, configs.clone())?;
     service.append_partition(PartitionAppendRequest {
         partition: PartitionId::new("readiness"),
         leader_epoch: None,
@@ -2213,7 +2213,7 @@ fn benchmark_replicated_leader_append_impl(
         observer,
         move || {
             let cloned = clone_replicated_fixture_root(&fixture.root)?;
-            let mut service =
+            let service =
                 ReplicatedAuthorityPartitionService::open(&cloned.path, fixture.configs.clone())?;
             service.append_partition(PartitionAppendRequest {
                 partition: fixture.partition.clone(),
@@ -2251,7 +2251,7 @@ fn benchmark_replicated_follower_replay_impl(
         observer,
         move || {
             let cloned = clone_replicated_fixture_root(&fixture.root)?;
-            let mut service =
+            let service =
                 ReplicatedAuthorityPartitionService::open(&cloned.path, fixture.configs.clone())?;
             service.append_partition(PartitionAppendRequest {
                 partition: fixture.partition.clone(),
@@ -2346,7 +2346,7 @@ fn benchmark_replicated_federated_report_impl(
         observer,
         move || {
             let cloned = clone_replicated_fixture_root(&fixture.root)?;
-            let mut service =
+            let service =
                 ReplicatedAuthorityPartitionService::open(&cloned.path, fixture.configs.clone())?;
             service.build_federated_explain_report(fixture.federated_run_request.clone())
         },
@@ -2380,7 +2380,7 @@ fn benchmark_replicated_manual_promotion_impl(
         observer,
         move || {
             let cloned = clone_replicated_fixture_root(&fixture.root)?;
-            let mut service =
+            let service =
                 ReplicatedAuthorityPartitionService::open(&cloned.path, fixture.configs.clone())?;
             service.promote_replica(PromoteReplicaRequest {
                 partition: fixture.partition.clone(),
@@ -2420,7 +2420,7 @@ fn benchmark_replicated_stale_append_impl(
         observer,
         move || {
             let cloned = clone_replicated_fixture_root(&fixture.root)?;
-            let mut service =
+            let service =
                 ReplicatedAuthorityPartitionService::open(&cloned.path, fixture.configs.clone())?;
             let _ = service.promote_replica(PromoteReplicaRequest {
                 partition: fixture.partition.clone(),
