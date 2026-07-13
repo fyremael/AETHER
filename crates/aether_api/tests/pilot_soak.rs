@@ -2,7 +2,7 @@ use aether_api::{
     build_coordination_pilot_report, coordination_pilot_dsl, coordination_pilot_seed_history,
     http_router_with_options, AppendRequest, AuditEntry, AuditLogResponse, AuthScope,
     HistoryResponse, HttpAuthConfig, HttpKernelOptions, KernelService, ResolveTraceHandleRequest,
-    RunDocumentRequest, RunDocumentResponse, SqliteKernelService,
+    RunDocumentRequest, RunDocumentResponse, SqliteKernelService, StructuredErrorResponse,
     COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
 use aether_ast::{ElementId, EntityId, PolicyContext, Value};
@@ -254,7 +254,13 @@ async fn misuse_paths_are_rejected_cleanly_and_audited() {
         .send()
         .await
         .expect("duplicate append request");
-    assert_eq!(duplicate.status(), reqwest::StatusCode::CONFLICT);
+    assert_eq!(duplicate.status(), reqwest::StatusCode::BAD_REQUEST);
+    let duplicate = duplicate
+        .json::<StructuredErrorResponse>()
+        .await
+        .expect("structured duplicate append response");
+    assert_eq!(duplicate.code, "append_validation_failed");
+    assert!(duplicate.error.contains("duplicate element id"));
 
     let unauthorized = client
         .post(format!("{base_url}/v1/documents/run"))
@@ -336,7 +342,7 @@ async fn misuse_paths_are_rejected_cleanly_and_audited() {
 
     assert!(audit_entries.iter().any(|entry| {
         entry.path == "/v1/append"
-            && entry.status == reqwest::StatusCode::CONFLICT.as_u16()
+            && entry.status == reqwest::StatusCode::BAD_REQUEST.as_u16()
             && entry.context.datom_count == Some(25)
     }));
     assert!(audit_entries.iter().any(|entry| {
@@ -358,7 +364,7 @@ async fn misuse_paths_are_rejected_cleanly_and_audited() {
     let persisted = read_audit_entries(audit.path());
     assert!(persisted.iter().any(|entry| {
         entry.path == "/v1/append"
-            && entry.status == reqwest::StatusCode::CONFLICT.as_u16()
+            && entry.status == reqwest::StatusCode::BAD_REQUEST.as_u16()
             && entry.outcome == "error"
     }));
     assert!(persisted.iter().any(|entry| {
