@@ -50,6 +50,11 @@ persisted credentials disabled, checks HEAD/tree/clean state, runs every gate,
 builds the package once, assembles the SHA/run/attempt-named bundle, verifies it
 independently, and uploads both bundle and canonical verdict.
 
+Release Readiness places both the reusable evidence job and the operational
+readiness job behind a dedicated `release` environment approval. The hosted
+environment permits only `main`; a branch or unapproved run cannot become an
+official candidate merely by invoking the reusable workflow.
+
 Download the immutable artifact by its full name. Do not feed a file or path
 containing `latest` to the verifier. For promotion, also pass
 `--require-official`; once R5 subjects exist, promotion additionally passes

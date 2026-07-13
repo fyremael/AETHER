@@ -20,7 +20,17 @@ permissions:
   artifact-metadata: write
 
 jobs:
+  protected-release-approval:
+    name: Protected release approval
+    runs-on: ubuntu-latest
+    environment: release
+
+    steps:
+      - name: Record protected approval boundary
+        run: echo "release environment approval granted for $GITHUB_SHA"
+
   exact-candidate-evidence:
+    needs: protected-release-approval
     uses: ./.github/workflows/reusable-exact-candidate-evidence.yml
     with:
       candidate_sha: ${{ github.sha }}
@@ -29,6 +39,7 @@ jobs:
   release-readiness:
     name: Release Readiness (Windows)
     runs-on: windows-latest
+    needs: protected-release-approval
 
     steps:
       - name: Checkout

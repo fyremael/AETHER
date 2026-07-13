@@ -49,6 +49,16 @@ class RequiredHostedGateTests(unittest.TestCase):
             self.assertIn(f"- {required}", block)
         self.assertIn('payload["result"] != "success"', block)
 
+    def test_release_work_is_downstream_of_protected_approval(self) -> None:
+        approval = job_block("release-readiness.yml", "protected-release-approval")
+        exact = job_block("release-readiness.yml", "exact-candidate-evidence")
+        readiness = job_block("release-readiness.yml", "release-readiness")
+
+        self.assertIn("environment: release", approval)
+        self.assertIn("name: Protected release approval", approval)
+        self.assertIn("needs: protected-release-approval", exact)
+        self.assertIn("needs: protected-release-approval", readiness)
+
 
 if __name__ == "__main__":
     unittest.main()
