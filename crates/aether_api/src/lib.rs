@@ -46,7 +46,9 @@ pub mod partitioned;
 pub mod perf;
 pub mod pilot;
 pub mod report;
-pub mod sidecar;
+pub mod sidecar {
+    pub use aether_sidecar::*;
+}
 pub mod status;
 
 pub use admission::{

@@ -8,6 +8,7 @@ members = [
     "crates/aether_plan",
     "crates/aether_runtime",
     "crates/aether_explain",
+    "crates/aether_sidecar",
     "crates/aether_api",
 ]
 resolver = "2"

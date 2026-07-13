@@ -13,6 +13,7 @@ aether_resolver = { path = "../aether_resolver" }
 aether_rules = { path = "../aether_rules" }
 aether_runtime = { path = "../aether_runtime" }
 aether_schema = { path = "../aether_schema" }
+aether_sidecar = { path = "../aether_sidecar" }
 aether_storage = { path = "../aether_storage" }
 axum = { version = "=0.7.9", features = ["json"] }
 indexmap.workspace = true
