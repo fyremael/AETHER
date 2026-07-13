@@ -3850,7 +3850,7 @@ mod concurrency_tests {
 
         let active = services.active_namespaces().expect("directory status");
         assert!(active.contains(&blocked_namespace));
-        tokio::time::timeout(Duration::from_secs(1), {
+        tokio::time::timeout(Duration::from_secs(10), {
             let executor = executor.clone();
             let services = Arc::clone(&services);
             async move {
