@@ -92,6 +92,13 @@ isolation evidence, real TLS-Postgres evidence, and independent bundle
 verification remain required; the public claim therefore remains controlled
 alpha.
 
+R6 responsibility recovery is also implemented locally. Service semantics,
+HTTP/deployment, sidecars, partitions/federation, performance, and pilot proof
+packs now live in dedicated crates; `aether_api` is a compatibility facade.
+`aether_plan` owns a versioned executable schedule with delta, aggregate, and
+provenance nodes, and runtime consumes it fail-closed. The ownership contract,
+measurements, and dependency gate are in `docs/ARCHITECTURE_BOUNDARIES.md`.
+
 Completed:
 
 - Rust workspace root created
@@ -113,6 +120,9 @@ Completed:
   pages, rates, global workers, per-namespace queues, audit writes, and execution
   retention implemented with structured audited failures and explicit
   cancel-before-start/complete-after-start semantics
+- responsibility crates for service core, HTTP, sidecars, partitions, pilot
+  proof packs, and performance, with compatibility re-exports and a versioned
+  executable-plan/runtime boundary
 - whole-document DSL parser implemented for the current canonical v1 surface: schema, attribute classes, facts, repeated queries, explain directives, temporal views, and policy annotations
 - `Current` and `AsOf` query execution implemented
 - policy annotations wired through state, document, explanation, report, federation, and sidecar paths as pre-replay/pre-compilation semantic scope; immutable release qualification remains pending

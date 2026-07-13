@@ -158,8 +158,9 @@ If the team needs a practical ordering, use this one:
 6. `R5`: supply-chain, transport, concurrency isolation, capability-negotiated
    client migration, operational automation, and service resource controls are
    implemented locally; complete hosted exact-candidate evidence remains pending
-7. `R7`: requalify one selected commercial-beta candidate only after independent bundle verification
-8. `R6`: reorganize ownership boundaries after the repaired contracts stabilize
+7. `R6`: responsibility crates and executable-plan ownership implemented
+   locally; preserve the compatibility facade until migration evidence permits removal
+8. `R7`: requalify one selected commercial-beta candidate only after independent bundle verification
 
 Distributed-truth widening, DSL ergonomics, and broad product expansion remain
 behind this sequence unless a separate accepted ADR proves they do not touch a

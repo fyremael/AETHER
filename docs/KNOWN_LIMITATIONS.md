@@ -111,6 +111,12 @@ ordinary feature backlog:
 
 ## Boundary Clients And Scaling
 
+- `aether_api` remains a temporary compatibility facade over the recovered
+  responsibility crates. Removing those re-exports is a future breaking change
+  and requires client migration evidence.
+- The executable plan format is versioned and fail-closed but currently has one
+  supported version and no cross-version migration/serialization promise.
+
 - The governed incident blackboard demo pack is a product-facing packaging layer over current proof, not a claim that AETHER is already a general multi-agent control plane.
 - The AI support resolution desk app pack is a flagship ML-facing reference application over current proof, not a claim that AETHER is already a finished ML orchestration platform, autonomous support SaaS, or authoritative vector-truth layer.
 - The blackboard / TupleSpace language remains a reference pattern and explanation aid. It is not yet a stable top-level product API, facade contract, or replacement public identity for AETHER.

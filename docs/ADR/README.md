@@ -46,3 +46,4 @@ The current numbered ADR set is:
 - `docs/ADR/0016-capability-negotiated-api-migration.md`
 - `docs/ADR/0017-exact-operational-evidence-verdicts.md`
 - `docs/ADR/0018-fail-closed-service-resource-controls.md`
+- `docs/ADR/0019-responsibility-crates-and-executable-plans.md`
