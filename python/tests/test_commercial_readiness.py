@@ -82,6 +82,22 @@ class CommercialReadinessTests(unittest.TestCase):
         )
         self.assertEqual(module.validate_ledger(payload, REPO_ROOT), [])
 
+    def test_commercial_beta_requirements_are_enforced_by_gate_policy(self) -> None:
+        module = load_module()
+        ledger = module.load_json(
+            REPO_ROOT / "fixtures" / "release" / "commercial-readiness-ledger.json"
+        )
+        gate_policy = module.load_json(REPO_ROOT / "fixtures" / "release" / "gate-policy.json")
+        policy_gate_ids = {gate["id"] for gate in gate_policy["gates"]}
+        policy_subjects = set(gate_policy["future_required_bundle_subjects"])
+        commercial_beta = next(
+            stage for stage in ledger["stages"] if stage["id"] == "commercial_beta"
+        )
+        for gate in commercial_beta["gates"]:
+            requirement = gate["evidence_requirement"]
+            self.assertLessEqual(set(requirement["gate_ids"]), policy_gate_ids)
+            self.assertLessEqual(set(requirement["bundle_subjects"]), policy_subjects)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,8 +36,11 @@ python scripts/verify_release_evidence.py `
 
 The verifier returning success means the bundle is internally authentic and
 its verdict was recomputed. Inspect `computed_verdict` separately. A valid
-diagnostic or incomplete R4 bundle is expected to say `blocked` while official
-workflow identity and R5 bundle subjects are absent.
+diagnostic or incomplete bundle is expected to say `blocked` while official
+workflow identity or any required R5/R6 gate and bundle subject is absent.
+`gate-policy.json` enumerates supply chain, transport, beta service operations,
+recovered architecture, and evidence-integrity source gates in addition to
+R1-R4.
 
 ## Official capture
 
