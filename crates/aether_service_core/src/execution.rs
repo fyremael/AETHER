@@ -166,7 +166,7 @@ pub struct ResolveTraceHandleResponse {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub(crate) struct StoredExecutionInputs {
+pub struct StoredExecutionInputs {
     schema: Schema,
     visible_history: Vec<Datom>,
     compiled_program: CompiledProgram,
@@ -174,13 +174,13 @@ pub(crate) struct StoredExecutionInputs {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub(crate) struct StoredExecution {
+pub struct StoredExecution {
     manifest: ExecutionManifest,
     manifest_digest: ContentDigest,
     inputs: StoredExecutionInputs,
 }
 
-pub(crate) trait ExecutionStore: fmt::Debug + Send {
+pub trait ExecutionStore: fmt::Debug + Send {
     fn put_execution(&mut self, execution: StoredExecution) -> Result<(), ExecutionStoreError>;
     fn execution(
         &self,
@@ -192,7 +192,7 @@ pub(crate) trait ExecutionStore: fmt::Debug + Send {
 }
 
 #[derive(Debug)]
-pub(crate) struct InMemoryExecutionStore {
+pub struct InMemoryExecutionStore {
     executions: BTreeMap<ExecutionId, StoredExecution>,
     traces: BTreeMap<TraceHandle, TraceRecord>,
     expired_handles: BTreeSet<TraceHandle>,
@@ -274,7 +274,7 @@ impl ExecutionStore for InMemoryExecutionStore {
     }
 }
 
-pub(crate) struct SqliteExecutionStore {
+pub struct SqliteExecutionStore {
     connection: Connection,
     path: PathBuf,
     max_executions: usize,
@@ -291,7 +291,7 @@ impl fmt::Debug for SqliteExecutionStore {
 }
 
 impl SqliteExecutionStore {
-    pub(crate) fn open(path: impl AsRef<Path>) -> Result<Self, ExecutionStoreError> {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, ExecutionStoreError> {
         let path = path.as_ref().to_path_buf();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -456,12 +456,12 @@ impl ExecutionStore for SqliteExecutionStore {
     }
 }
 
-pub(crate) fn execution_catalog_path_for_journal(path: impl AsRef<Path>) -> PathBuf {
+pub fn execution_catalog_path_for_journal(path: impl AsRef<Path>) -> PathBuf {
     PathBuf::from(format!("{}.executions.sqlite", path.as_ref().display()))
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn persist_execution(
+pub fn persist_execution(
     store: &mut dyn ExecutionStore,
     namespace: &NamespaceId,
     key: &EvaluationKey,
@@ -556,7 +556,7 @@ pub(crate) fn persist_execution(
     })
 }
 
-pub(crate) fn resolve_trace(
+pub fn resolve_trace(
     store: &mut dyn ExecutionStore,
     namespace: &NamespaceId,
     request: ResolveTraceHandleRequest,
@@ -658,7 +658,7 @@ fn now_ms() -> u64 {
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum ExecutionStoreError {
+pub enum ExecutionStoreError {
     #[error("trace handle is unknown")]
     UnknownTraceHandle,
     #[error("trace handle has expired")]

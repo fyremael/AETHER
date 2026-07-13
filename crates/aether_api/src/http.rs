@@ -3085,9 +3085,11 @@ async fn coordination_pilot_report(
                 let mut request = request;
                 request.policy_context =
                     apply_policy_binding(principal, request.policy_context, context)?;
-                let response = service
-                    .coordination_pilot_report(request)
-                    .map_err(HttpError::Api)?;
+                let response = crate::build_coordination_pilot_report_with_policy(
+                    service,
+                    request.policy_context,
+                )
+                .map_err(HttpError::Api)?;
                 context.datom_count = Some(response.history_len);
                 context.row_count = Some(
                     response.pre_heartbeat_authorized.len()
@@ -3134,8 +3136,7 @@ async fn coordination_delta_report(
                 let mut request = request;
                 request.policy_context =
                     apply_policy_binding(principal, request.policy_context, context)?;
-                let response = service
-                    .coordination_delta_report(request)
+                let response = crate::build_coordination_delta_report(service, request)
                     .map_err(HttpError::Api)?;
                 context.datom_count = Some(response.right_history_len);
                 context.row_count = Some(

@@ -27,6 +27,12 @@ pub struct CoordinationPilotReport {
     pub trace: Option<TraceSummary>,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CoordinationPilotReportRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_context: Option<PolicyContext>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ReportRow {
     pub tuple_id: Option<TupleId>,
@@ -142,13 +148,13 @@ pub struct CoordinationDeltaReport {
 }
 
 pub fn build_coordination_pilot_report(
-    service: &mut impl KernelService,
+    service: &mut dyn KernelService,
 ) -> Result<CoordinationPilotReport, ApiError> {
     build_coordination_pilot_report_with_policy(service, None)
 }
 
 pub fn build_coordination_pilot_report_with_policy(
-    service: &mut impl KernelService,
+    service: &mut dyn KernelService,
     policy_context: Option<PolicyContext>,
 ) -> Result<CoordinationPilotReport, ApiError> {
     let history_len = service
@@ -276,7 +282,7 @@ pub fn build_coordination_pilot_report_with_policy(
 }
 
 pub fn build_coordination_delta_report(
-    service: &mut impl KernelService,
+    service: &mut dyn KernelService,
     request: CoordinationDeltaReportRequest,
 ) -> Result<CoordinationDeltaReport, ApiError> {
     let policy_context = request.policy_context.clone();
@@ -607,7 +613,7 @@ fn render_changed_rows(output: &mut String, rows: &[ReportRowChange]) {
 }
 
 fn run_report_query(
-    service: &mut impl KernelService,
+    service: &mut dyn KernelService,
     request: RunDocumentRequest,
 ) -> Result<Vec<ReportRow>, ApiError> {
     match service.run_document(request) {
@@ -633,7 +639,7 @@ struct CoordinationSnapshot {
 }
 
 fn build_coordination_snapshot(
-    service: &mut impl KernelService,
+    service: &mut dyn KernelService,
     cut: &CoordinationCut,
     policy_context: Option<PolicyContext>,
 ) -> Result<CoordinationSnapshot, ApiError> {
@@ -674,7 +680,7 @@ fn build_coordination_snapshot(
 }
 
 fn run_report_history_len(
-    service: &mut impl KernelService,
+    service: &mut dyn KernelService,
     cut: &CoordinationCut,
     policy_context: Option<PolicyContext>,
 ) -> Result<usize, ApiError> {
@@ -693,7 +699,7 @@ fn run_report_history_len(
 }
 
 fn run_report_query_for_cut(
-    service: &mut impl KernelService,
+    service: &mut dyn KernelService,
     cut: &CoordinationCut,
     query_body: &str,
     policy_context: Option<PolicyContext>,
@@ -708,7 +714,7 @@ fn run_report_query_for_cut(
 }
 
 fn diff_report_rows(
-    service: &mut impl KernelService,
+    service: &mut dyn KernelService,
     left: Vec<ReportRow>,
     right: Vec<ReportRow>,
     policy_context: Option<&PolicyContext>,
@@ -829,7 +835,7 @@ fn row_primary_key(row: &ReportRow) -> String {
 }
 
 fn trace_handle_for_row(
-    service: &mut impl KernelService,
+    service: &mut dyn KernelService,
     row: &ReportRow,
     policy_context: Option<&PolicyContext>,
 ) -> Result<Option<CoordinationTraceHandle>, ApiError> {

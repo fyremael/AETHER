@@ -28,6 +28,7 @@ dependencies = [
  "aether_rules",
  "aether_runtime",
  "aether_schema",
+ "aether_service_core",
  "aether_sidecar",
  "aether_storage",
  "axum",
@@ -121,6 +122,27 @@ dependencies = [
  "aether_ast",
  "indexmap",
  "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "aether_service_core"
+version = "0.1.0"
+dependencies = [
+ "aether_ast",
+ "aether_explain",
+ "aether_plan",
+ "aether_resolver",
+ "aether_rules",
+ "aether_runtime",
+ "aether_schema",
+ "aether_sidecar",
+ "aether_storage",
+ "rand 0.8.7",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
  "thiserror 1.0.69",
 ]
 

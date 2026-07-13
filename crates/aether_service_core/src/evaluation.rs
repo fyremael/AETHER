@@ -12,17 +12,17 @@ use sha2::{Digest, Sha256};
 use std::fmt;
 
 #[derive(Clone, Eq, Hash, PartialEq)]
-pub(crate) struct EvaluationKey([u8; 32]);
+pub struct EvaluationKey([u8; 32]);
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
-pub(crate) struct FederationIdentityMaterial {
-    pub(crate) leader_epochs: Vec<(String, u64)>,
-    pub(crate) visible_prefix_digests: Vec<(String, String)>,
-    pub(crate) imported_execution_ids: Vec<(String, String)>,
+pub struct FederationIdentityMaterial {
+    pub leader_epochs: Vec<(String, u64)>,
+    pub visible_prefix_digests: Vec<(String, String)>,
+    pub imported_execution_ids: Vec<(String, String)>,
 }
 
 impl EvaluationKey {
-    pub(crate) fn to_hex(&self) -> String {
+    pub fn to_hex(&self) -> String {
         self.0.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 }
@@ -37,14 +37,11 @@ impl fmt::Debug for EvaluationKey {
     }
 }
 
-pub(crate) fn project_history(
-    history: &[Datom],
-    scope: PolicyScope,
-) -> Result<Vec<Datom>, ApiError> {
+pub fn project_history(history: &[Datom], scope: PolicyScope) -> Result<Vec<Datom>, ApiError> {
     project_history_at_view(history, TemporalView::Current, scope)
 }
 
-pub(crate) fn project_history_at_view(
+pub fn project_history_at_view(
     history: &[Datom],
     view: TemporalView,
     scope: PolicyScope,
@@ -55,7 +52,7 @@ pub(crate) fn project_history_at_view(
         .to_vec())
 }
 
-pub(crate) fn resolve_snapshot(
+pub fn resolve_snapshot(
     schema: &Schema,
     history: &[Datom],
     view: TemporalView,
@@ -66,7 +63,7 @@ pub(crate) fn resolve_snapshot(
         .map_err(public_resolve_error)
 }
 
-pub(crate) struct ScopedEvaluationBuilder<'a> {
+pub struct ScopedEvaluationBuilder<'a> {
     namespace: String,
     schema: &'a Schema,
     history: &'a [Datom],
@@ -75,7 +72,7 @@ pub(crate) struct ScopedEvaluationBuilder<'a> {
 }
 
 impl<'a> ScopedEvaluationBuilder<'a> {
-    pub(crate) fn new_in_namespace(
+    pub fn new_in_namespace(
         namespace: impl Into<String>,
         schema: &'a Schema,
         history: &'a [Datom],
@@ -92,10 +89,7 @@ impl<'a> ScopedEvaluationBuilder<'a> {
         })
     }
 
-    pub(crate) fn with_federation_identity(
-        mut self,
-        mut federation: FederationIdentityMaterial,
-    ) -> Self {
+    pub fn with_federation_identity(mut self, mut federation: FederationIdentityMaterial) -> Self {
         federation.leader_epochs.sort();
         federation.visible_prefix_digests.sort();
         federation.imported_execution_ids.sort();
@@ -103,18 +97,18 @@ impl<'a> ScopedEvaluationBuilder<'a> {
         self
     }
 
-    pub(crate) fn program(&self) -> &ScopedProgram {
+    pub fn program(&self) -> &ScopedProgram {
         &self.program
     }
 
-    pub(crate) fn evaluate_with_key(
+    pub fn evaluate_with_key(
         &self,
         view: TemporalView,
     ) -> Result<(EvaluationKey, EvaluationBundle), ApiError> {
         self.evaluate_with_key_and_limits(view, RuntimeLimits::UNBOUNDED)
     }
 
-    pub(crate) fn evaluate_with_key_and_limits(
+    pub fn evaluate_with_key_and_limits(
         &self,
         view: TemporalView,
         limits: RuntimeLimits,
