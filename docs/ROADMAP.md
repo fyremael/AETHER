@@ -156,8 +156,8 @@ If the team needs a practical ordering, use this one:
 4. `R3`: transactional namespace-schema append admission implemented locally; immutable candidate evidence remains pending
 5. `R4`: immutable exact-candidate evidence implemented locally; official run and independent downloaded verification pending
 6. `R5`: supply-chain, transport, concurrency isolation, and capability-
-   negotiated client migration are implemented locally; complete hosted
-   evidence, resource controls, and operational automation
+   negotiated client migration are implemented locally; Capacity/Pages/retry
+   automation is repaired locally; complete hosted evidence and resource controls
 7. `R7`: requalify one selected commercial-beta candidate only after independent bundle verification
 8. `R6`: reorganize ownership boundaries after the repaired contracts stabilize
 

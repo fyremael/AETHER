@@ -6,7 +6,7 @@ For the operator-facing presentation flow and demo-selection guidance, read `doc
 
 For documentation publishing:
 
-- run `python scripts/build_pages.py --out-dir artifacts/pages-preview` after `cargo doc --workspace --no-deps` to stage a local Pages preview bundle
+- run `python scripts/build_pages.py --out-dir artifacts/pages-preview` after `cargo doc --workspace --no-deps` to stage a local Pages preview bundle with visible and machine-readable source SHA/version identity
 
 ## Windows Operator Shortcuts
 
@@ -72,6 +72,7 @@ For documentation publishing:
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-report.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-baseline.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-drift.ps1`
+- drift uses the tracked `fixtures/performance/verdict-policy.json`, records all five raw samples, and never retries a red verdict into green
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-performance-matrix.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-capacity-planner.ps1 -SkipHardening`
 - run `cargo run -p aether_api --example pilot_coordination_report --release`

@@ -69,6 +69,10 @@ ordinary feature backlog:
 
 - The performance suite now supports host-aware run bundles, suite-specific drift comparison, stress fixtures, matrix summaries, and a lightweight trend index across saved bundles, but it is still artifact-based rather than a persistent benchmark database.
 - The new capacity planner now produces concrete node-class guidance and explicit scale-out triggers, but those envelopes are still internal planning outputs from single-host calibration rather than public guarantees or cloud-SKU-specific commitments.
+- Capacity artifact layout and Pages source identity are now asserted locally,
+  and performance verdicts retain fixed raw samples without retry. None of those
+  local automation changes substitutes for green hosted runs on the exact
+  candidate; Capacity remains diagnostic unless a claim policy explicitly names it.
 - The accepted regression gate is still deliberately narrow: `core_kernel` and `service_in_process` on the canonical native Windows dev host are the tracked release baselines, while HTTP and replicated-partition suites remain observational until their variance is better understood.
 - The current measured default `M` envelope is conservative: it presently recommends `1,024` pilot-board tasks even though larger ladders run correctly, because operator/report latency degrades before replay or local storage become the limiting factor.
 - The new R4 verifier binds observations to clean commit/tree/ref identity,

@@ -329,6 +329,8 @@ pub struct LatencyStats {
     pub mean: Duration,
     pub min: Duration,
     pub max: Duration,
+    #[serde(default)]
+    pub sample_durations_ns: Vec<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -402,6 +404,41 @@ impl Default for PerfDriftBudget {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PerfVerdictPolicy {
+    pub policy_version: String,
+    pub samples_per_workload: usize,
+    pub latency_statistic: String,
+    pub budgets: PerfDriftBudget,
+    pub pass_severities: Vec<DriftSeverity>,
+}
+
+impl PerfVerdictPolicy {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.policy_version.trim().is_empty() {
+            return Err("performance verdict policy version must not be empty".into());
+        }
+        if self.samples_per_workload < 3 {
+            return Err("performance verdict policy requires at least three samples".into());
+        }
+        if self.latency_statistic != "arithmetic_mean" {
+            return Err("only the arithmetic_mean latency statistic is supported".into());
+        }
+        if self.pass_severities.is_empty()
+            || self.pass_severities.contains(&DriftSeverity::Fail)
+            || self
+                .pass_severities
+                .contains(&DriftSeverity::MissingBaseline)
+        {
+            return Err(
+                "pass severities must be non-empty and cannot include fail or missing_baseline"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DriftSeverity {
@@ -463,6 +500,10 @@ pub struct PerfDriftReport {
     pub footprints: Vec<PerfFootprintDrift>,
     pub overall: DriftSeverity,
     pub observed_overall: DriftSeverity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verdict_policy_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verdict_statistic: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -3033,6 +3074,8 @@ fn compare_reports_internal(
         footprints,
         overall,
         observed_overall,
+        verdict_policy_version: None,
+        verdict_statistic: None,
     }
 }
 
@@ -3047,6 +3090,12 @@ pub fn render_markdown_drift_report(report: &PerfDriftReport) -> String {
     }
     if let Some(host_manifest_id) = &report.host_manifest_id {
         let _ = writeln!(output, "- Host: `{host_manifest_id}`");
+    }
+    if let Some(policy_version) = &report.verdict_policy_version {
+        let _ = writeln!(output, "- Verdict policy: `{policy_version}`");
+    }
+    if let Some(statistic) = &report.verdict_statistic {
+        let _ = writeln!(output, "- Verdict statistic: `{statistic}`");
     }
     let _ = writeln!(
         output,
@@ -3746,6 +3795,10 @@ where
             mean,
             min,
             max,
+            sample_durations_ns: durations
+                .iter()
+                .map(|duration| u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX))
+                .collect(),
         },
         throughput_per_second,
         metrics: plan.metrics,
@@ -4109,10 +4162,11 @@ fn unique_temp_dir(prefix: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        baseline_from_bundle, build_matrix_report, build_trend_index, collect_host_snapshot,
-        compare_perf_bundle_to_baseline, compare_perf_reports, DriftSeverity, FootprintEstimate,
-        LatencyStats, PerfBaseline, PerfDriftBudget, PerfHostManifest, PerfHostSnapshot,
-        PerfMeasurement, PerfReport, PerfRunBundle, PerfRunMetadata, PerfSuiteId,
+        baseline_from_bundle, benchmark_append, build_matrix_report, build_trend_index,
+        collect_host_snapshot, compare_perf_bundle_to_baseline, compare_perf_reports,
+        DriftSeverity, FootprintEstimate, LatencyStats, PerfBaseline, PerfDriftBudget,
+        PerfHostManifest, PerfHostSnapshot, PerfMeasurement, PerfReport, PerfRunBundle,
+        PerfRunMetadata, PerfSuiteId, PerfVerdictPolicy,
     };
     use std::time::Duration;
 
@@ -4138,6 +4192,7 @@ mod tests {
                         mean: Duration::from_millis(3),
                         min: Duration::from_millis(2),
                         max: Duration::from_millis(4),
+                        sample_durations_ns: Vec::new(),
                     },
                     throughput_per_second: 50_000.0,
                     metrics: Vec::new(),
@@ -4166,6 +4221,7 @@ mod tests {
                     mean: Duration::from_millis(5),
                     min: Duration::from_millis(4),
                     max: Duration::from_millis(6),
+                    sample_durations_ns: Vec::new(),
                 },
                 throughput_per_second: 35_000.0,
                 metrics: Vec::new(),
@@ -4221,6 +4277,7 @@ mod tests {
                     mean: Duration::from_millis(3),
                     min: Duration::from_millis(2),
                     max: Duration::from_millis(4),
+                    sample_durations_ns: Vec::new(),
                 },
                 throughput_per_second: 300_000.0,
                 metrics: Vec::new(),
@@ -4340,6 +4397,29 @@ mod tests {
         assert!(measurement.latest_vs_baseline_delta_pct.unwrap() > 9.0);
     }
 
+    #[test]
+    fn tracked_verdict_policy_is_predeclared_and_samples_are_recorded() {
+        let policy: PerfVerdictPolicy = serde_json::from_str(include_str!(
+            "../../../fixtures/performance/verdict-policy.json"
+        ))
+        .expect("tracked performance verdict policy");
+        policy.validate().expect("valid verdict policy");
+        assert_eq!(policy.samples_per_workload, 5);
+        assert_eq!(
+            policy.pass_severities,
+            vec![DriftSeverity::Ok, DriftSeverity::Warn]
+        );
+
+        let measurement = benchmark_append(1, 3).expect("sampled append benchmark");
+        assert_eq!(measurement.latency.samples, 3);
+        assert_eq!(measurement.latency.sample_durations_ns.len(), 3);
+        assert!(measurement
+            .latency
+            .sample_durations_ns
+            .iter()
+            .all(|sample| *sample > 0));
+    }
+
     fn fake_bundle(host_id: &str, suite_id: PerfSuiteId) -> PerfRunBundle {
         let host_snapshot = collect_host_snapshot();
         PerfRunBundle {
@@ -4380,6 +4460,7 @@ mod tests {
                         mean: Duration::from_millis(1),
                         min: Duration::from_millis(1),
                         max: Duration::from_millis(1),
+                        sample_durations_ns: Vec::new(),
                     },
                     throughput_per_second: 10_000.0,
                     metrics: Vec::new(),

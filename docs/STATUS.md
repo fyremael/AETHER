@@ -192,6 +192,10 @@ Completed:
   Python, TUI, CLI report commands, and notebook preflights prevent silent
   fallback, while audit telemetry makes legacy tuple endpoints and omitted
   schema refs visible
+- Capacity Planning now downloads matrix artifacts into their declared root,
+  asserts the complete input layout, and always uploads a hashed inventory;
+  Pages embeds and verifies the exact deployed source SHA/version; performance
+  drift retains all five predeclared samples and no longer retries red into green
 - the existing beta-candidate runner remains available for diagnostics, but it does not qualify a commercial beta until R4 replaces authored/path-based readiness with exact-candidate immutable evidence
 - the commercial readiness ledger now targets controlled design-partner alpha; commercial beta is blocked by six non-waivable remediation gates, and GA remains blocked by its separate release, support/security, distribution, and distributed-truth gates
 - a repeatable perturbation sweep now exists to run the persona pass, full-stack benchmark snapshot, host-aware drift checks, deeper ignored stress workloads, and single-node capacity projections in one artifact pack
@@ -209,6 +213,8 @@ Still open:
   for the exact candidate SHA
 - hosted confirmation that the verified-TLS Postgres matrix passes for the exact
   candidate and that the supported ingress prevents direct backend reachability
+- successful hosted Capacity Planning, Pages exact-SHA deployment, and first
+  Release Readiness runs for the selected candidate
 - post-v1 DSL ergonomics and document modularity beyond the current canonical surface
 - production hardening for the optional Postgres journal deployment path beyond current parity/concurrency coverage
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary

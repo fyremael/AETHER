@@ -154,6 +154,11 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
       - name: Download perturbation artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -164,7 +169,17 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: capacity-matrix-summary
-          path: artifacts/performance/matrix
+          path: artifacts/performance
+
+      - name: Preflight capacity artifact layout
+        if: always()
+        run: |
+          python scripts/capacity_artifact_inventory.py \
+            --root artifacts/performance \
+            --out artifacts/performance/capacity/diagnostics/input-inventory.json \
+            --required perturbation/latest.json \
+            --required matrix/latest.json \
+            --required-glob "perturbation/runs/**/capacity-curves.json"
 
       - name: Build capacity report
         shell: pwsh
@@ -193,6 +208,14 @@ jobs:
           name: capacity-report
           path: |
             artifacts/performance/capacity
+          if-no-files-found: error
+
+      - name: Upload capacity input inventory
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: capacity-input-inventory
+          path: artifacts/performance/capacity/diagnostics/input-inventory.json
           if-no-files-found: error
 
       - name: Publish workflow summary

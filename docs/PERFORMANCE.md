@@ -247,11 +247,23 @@ Technical path:
 cargo run -p aether_api --example performance_drift_report --release -- \
   --suite core_kernel \
   --host-manifest fixtures/performance/hosts/dev-chad-windows-native.json \
-  --baseline fixtures/performance/baselines/core_kernel/dev-chad-windows-native.json
+  --baseline fixtures/performance/baselines/core_kernel/dev-chad-windows-native.json \
+  --verdict-policy fixtures/performance/verdict-policy.json
 ```
 
 The drift tool rejects suite mismatch and host-manifest mismatch by default. A
 cross-host comparison belongs in the matrix report, not in the release gate.
+
+The verdict policy is predeclared and tracked. The current rule records five raw
+duration samples per workload, uses their arithmetic mean, passes `ok` and
+`warn`, and fails `fail` or `missing_baseline` under the tracked throughput and
+footprint budgets. Launch validation runs this policy once. It does not rerun a
+red performance result and retain only a later green result.
+
+Capacity Planning is a diagnostic envelope unless a separately reviewed release
+claim explicitly names it as required. The hosted workflow nevertheless asserts
+the downloaded artifact layout and retains a hashed input inventory on success
+or failure.
 
 ### Run a local Windows plus WSL matrix
 

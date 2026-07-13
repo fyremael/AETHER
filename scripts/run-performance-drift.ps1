@@ -2,6 +2,7 @@ param(
     [string]$Suite = "core_kernel",
     [string]$HostManifestPath,
     [string]$BaselinePath,
+    [string]$VerdictPolicyPath,
     [switch]$PauseOnExit
 )
 
@@ -15,6 +16,9 @@ $hostManifest = Get-Content -Path $HostManifestPath | ConvertFrom-Json
 $hostId = $hostManifest.host_id
 if (-not $BaselinePath) {
     $BaselinePath = Join-Path $repoRoot ("artifacts\performance\baselines\{0}\{1}.json" -f $Suite, $hostId)
+}
+if (-not $VerdictPolicyPath) {
+    $VerdictPolicyPath = Join-Path $repoRoot "fixtures\performance\verdict-policy.json"
 }
 
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -41,6 +45,7 @@ Write-Host "Started:  $timestamp"
 Write-Host "Suite:    $Suite"
 Write-Host "Host:     $hostId"
 Write-Host "Baseline: $BaselinePath"
+Write-Host "Policy:   $VerdictPolicyPath"
 Write-Host ""
 
 $cargo = Get-Command cargo -ErrorAction SilentlyContinue
@@ -52,6 +57,10 @@ if (-not (Test-Path $BaselinePath)) {
     Write-Host "No performance baseline exists for $Suite on $hostId." -ForegroundColor Yellow
     Close-Runner 1
 }
+if (-not (Test-Path $VerdictPolicyPath)) {
+    Write-Host "No predeclared performance verdict policy exists at $VerdictPolicyPath." -ForegroundColor Yellow
+    Close-Runner 1
+}
 
 New-Item -ItemType Directory -Force $runDir | Out-Null
 
@@ -60,6 +69,7 @@ $arguments = @(
     "--suite", $Suite,
     "--host-manifest", (Resolve-Path $HostManifestPath).Path,
     "--baseline", (Resolve-Path $BaselinePath).Path,
+    "--verdict-policy", (Resolve-Path $VerdictPolicyPath).Path,
     "--bundle-path", $bundlePath,
     "--report-path", $driftPath
 )

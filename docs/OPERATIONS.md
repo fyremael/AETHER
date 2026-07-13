@@ -97,6 +97,10 @@ double-click scripts/run-performance-drift.cmd
 
 That comparison is now host-aware and suite-aware. On the canonical Windows dev host it resolves against `artifacts/performance/baselines/<suite>/<host>.json` first and then `fixtures/performance/baselines/<suite>/<host>.json`, with `core_kernel` and `service_in_process` as the current accepted gates.
 
+The drift verdict comes from the tracked
+`fixtures/performance/verdict-policy.json`: one five-sample run with every raw
+duration retained. Do not rerun a fail-level result to obtain a green artifact.
+
 If you need the full launch candidate validation pack for the current design-partner pilot, run:
 
 ```text
