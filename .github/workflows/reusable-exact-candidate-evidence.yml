@@ -11,6 +11,10 @@ on:
         description: Exact candidate ref or tag
         required: true
         type: string
+      qualification_subject_artifact:
+        description: Immutable artifact containing the tested canonical package and candidate-bound subjects
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -83,48 +87,76 @@ jobs:
             --host github-windows-latest `
             --output-dir artifacts/release/exact-candidate
 
-      - name: Build candidate package once
-        shell: pwsh
-        run: ./scripts/build-pilot-package.ps1
+      - name: Download tested canonical package and qualification subjects
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.qualification_subject_artifact }}
+          path: artifacts/release/qualification
 
-      - name: Generate strict candidate SBOM and license evidence
+      - name: Resolve immutable qualification inputs
+        id: qualification
         shell: pwsh
         run: |
-          python scripts/supply_chain.py generate `
-            --candidate-sha "${{ inputs.candidate_sha }}" `
-            --package-zip artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip `
-            --out-dir artifacts/release/supply-chain
+          $root = "artifacts/release/qualification"
+          $inputs = Get-Content "$root/qualification-inputs/qualification-inputs.json" -Raw | ConvertFrom-Json
+          $inputRoot = Join-Path $root "qualification-inputs"
+          $package = (Join-Path $inputRoot $inputs.package_path).Replace('\', '/')
+          $supplyRoot = (Join-Path $inputRoot $inputs.artifacts.supply_chain_evidence.artifact_name).Replace('\', '/')
+          if (-not (Test-Path -LiteralPath $package -PathType Leaf)) { throw "canonical package path from qualification manifest is missing" }
+          "package=$package" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "supply_root=$supplyRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Attest exact package provenance
         id: package-attestation
         uses: actions/attest@f6bf1532d7d6793fce74eac584813a8eee607999 # v4
         with:
-          subject-path: artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip
+          subject-path: ${{ steps.qualification.outputs.package }}
 
       - name: Attest assembled-package SBOM
         uses: actions/attest@f6bf1532d7d6793fce74eac584813a8eee607999 # v4
         with:
-          subject-path: artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip
-          sbom-path: artifacts/release/supply-chain/aether-package.cdx.json
+          subject-path: ${{ steps.qualification.outputs.package }}
+          sbom-path: ${{ steps.qualification.outputs.supply_root }}/aether-package.cdx.json
+
+      - name: Build signed provenance subject
+        shell: pwsh
+        run: |
+          $tree = (git rev-parse "HEAD^{tree}").Trim()
+          $candidateRepository = (git config --get remote.origin.url).Trim()
+          python scripts/release_qualification.py build-provenance-subject `
+            --repository "${{ github.repository }}" `
+            --candidate-repository $candidateRepository `
+            --candidate-sha "${{ inputs.candidate_sha }}" `
+            --candidate-tree-sha $tree `
+            --candidate-ref "${{ inputs.candidate_ref }}" `
+            --package "${{ steps.qualification.outputs.package }}" `
+            --attestation-bundle "${{ steps.package-attestation.outputs.bundle-path }}" `
+            --qualification-inputs artifacts/release/qualification/qualification-inputs/qualification-inputs.json `
+            --output artifacts/release/qualification/qualification-subjects/package-provenance.json `
+            --run-id "${{ github.run_id }}" `
+            --attempt "${{ github.run_attempt }}"
 
       - name: Assemble immutable bundle
         shell: pwsh
         run: |
-          $package = "artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip"
+          $package = "${{ steps.qualification.outputs.package }}"
           $packageSha = (Get-FileHash -Algorithm SHA256 $package).Hash.ToLowerInvariant()
-          python scripts/release_evidence.py assemble `
-            --evidence-dir artifacts/release/exact-candidate `
-            --package $package `
-            --package-attestation-sha256 $packageSha `
-            --sbom artifacts/release/supply-chain/aether-rust.cdx.json `
-            --sbom artifacts/release/supply-chain/aether-go.cdx.json `
-            --sbom artifacts/release/supply-chain/aether-package.cdx.json `
-            --subject rust-sbom=artifacts/release/supply-chain/aether-rust.cdx.json `
-            --subject go-sbom=artifacts/release/supply-chain/aether-go.cdx.json `
-            --subject assembled-package-sbom=artifacts/release/supply-chain/aether-package.cdx.json `
-            --subject license-scan=artifacts/release/supply-chain/supply-chain-summary.json `
-            --subject package-provenance="${{ steps.package-attestation.outputs.bundle-path }}" `
-            --output-dir artifacts/release/bundles
+          $arguments = @(
+            "scripts/release_evidence.py", "assemble",
+            "--evidence-dir", "artifacts/release/exact-candidate",
+            "--package", $package,
+            "--package-attestation-sha256", $packageSha,
+            "--sbom", "${{ steps.qualification.outputs.supply_root }}/aether-rust.cdx.json",
+            "--sbom", "${{ steps.qualification.outputs.supply_root }}/aether-go.cdx.json",
+            "--sbom", "${{ steps.qualification.outputs.supply_root }}/aether-package.cdx.json",
+            "--output-dir", "artifacts/release/bundles"
+          )
+          $subjects = Get-ChildItem artifacts/release/qualification/qualification-subjects -Filter "*.json"
+          if ($subjects.Count -ne 18) { throw "expected 18 candidate-bound subjects, found $($subjects.Count)" }
+          foreach ($subject in $subjects) {
+            $arguments += @("--subject", "$($subject.BaseName)=$($subject.FullName)")
+          }
+          python @arguments
 
       - name: Upload SHA-named evidence bundle
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

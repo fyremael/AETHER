@@ -192,20 +192,24 @@ jobs:
           if (-not $capacityInputs) {
             throw "No capacity-curves.json file was downloaded from the perturbation artifact."
           }
+          $immutableJson = "artifacts/performance/capacity/capacity-report-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}.json"
+          $immutableReport = "artifacts/performance/capacity/capacity-report-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}.md"
           $arguments = @(
             "run", "-p", "aether_api", "--example", "performance_capacity_report", "--release", "--",
             "--perturbation-json", $perturbationJson.Path,
             "--matrix-json", $matrixJson.Path,
             "--capacity-inputs-json", $capacityInputs.FullName,
-            "--output-json", "artifacts/performance/capacity/latest.json",
-            "--output-report", "artifacts/performance/capacity/latest.md"
+            "--output-json", $immutableJson,
+            "--output-report", $immutableReport
           )
           & cargo @arguments
+          Copy-Item -LiteralPath $immutableJson -Destination artifacts/performance/capacity/latest.json
+          Copy-Item -LiteralPath $immutableReport -Destination artifacts/performance/capacity/latest.md
 
       - name: Upload capacity report
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: capacity-report
+          name: capacity-report-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             artifacts/performance/capacity
           if-no-files-found: error
@@ -245,7 +249,7 @@ jobs:
       - name: Download capacity report
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: capacity-report
+          name: capacity-report-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/performance/capacity
 
       - name: Write capacity summary

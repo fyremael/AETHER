@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aether.dev/schemas/release/commercial-beta-promotion-v1.json",
+  "title": "AETHER commercial beta promotion record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "promotion_id",
+    "stage",
+    "candidate",
+    "policy_id",
+    "package_sha256",
+    "workflow",
+    "bundle",
+    "dependent_verdict",
+    "verifier",
+    "independent_verification",
+    "beta_boundary",
+    "ga"
+  ],
+  "properties": {
+    "schema_version": { "const": "aether.commercial-beta-promotion.v1" },
+    "promotion_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "stage": { "const": "commercial_beta" },
+    "candidate": { "type": "object" },
+    "policy_id": { "type": "string", "minLength": 1 },
+    "package_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "workflow": { "type": "object" },
+    "bundle": { "type": "object" },
+    "dependent_verdict": { "type": "object" },
+    "verifier": { "type": "object" },
+    "independent_verification": { "type": "object" },
+    "beta_boundary": { "type": "object" },
+    "ga": { "type": "object" }
+  }
+}

@@ -44,11 +44,12 @@ tree, package, inputs, and workflow run; see `docs/RELEASE_EVIDENCE.md`.
 The current runner remains useful for development diagnostics:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1
+powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1 -CandidatePackageZip <canonical-package-zip>
 ```
 
-It can produce package, performance, recovery, customer-workflow, and
-security/key-lifecycle artifacts under `artifacts/`. Those artifacts are not a
+It tests the supplied package bytes and can produce performance, recovery,
+customer-workflow, and security/key-lifecycle artifacts under `artifacts/`.
+Those artifacts are not a
 commercial-beta qualification because they are mutable/ignored and are not all
 bound to one exact candidate. The policy renderer no longer trusts or accepts
 authored statuses; only the immutable verifier may promote.

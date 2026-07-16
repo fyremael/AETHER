@@ -2,6 +2,10 @@ param(
     [switch]$PauseOnExit,
     [string]$BaselinePath,
     [string]$HostManifestPath,
+    [string]$CandidatePackageZip,
+    [string]$CandidateSha,
+    [string]$CandidateRef = "refs/heads/main",
+    [string]$EvidenceManifestPath,
     [switch]$CommercialBetaCandidate
 )
 
@@ -13,6 +17,7 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
 $repoRoot = Split-Path -Path $PSScriptRoot -Parent
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 $outputTimestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$suiteStartedAtUtc = [DateTime]::UtcNow
 $reportDir = Join-Path $repoRoot "artifacts\qa\release-readiness"
 $transcriptPath = Join-Path $reportDir "release-readiness-$outputTimestamp.txt"
 $latestTranscriptPath = Join-Path $reportDir "latest.txt"
@@ -56,6 +61,7 @@ $pilotPackageZip = "$pilotPackageRoot.zip"
 $serviceV2PackageProofDir = Join-Path $reportDir ("service-v2-package-proof-" + $outputTimestamp)
 $securityKeyProofDir = Join-Path $reportDir ("security-key-proof-" + $outputTimestamp)
 $supplyChainProofDir = Join-Path $reportDir ("supply-chain-proof-" + $outputTimestamp)
+$pilotLaunchArtifactPath = $null
 $transcript = [System.Collections.Generic.List[string]]::new()
 if (-not $HostManifestPath) {
     $HostManifestPath = Join-Path $repoRoot "fixtures\performance\hosts\dev-chad-windows-native.json"
@@ -241,6 +247,33 @@ $commit = if ($git) {
     "<git unavailable>"
 }
 
+function Get-FileReceipt([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Required immutable readiness output is missing: $Path"
+    }
+    $resolved = (Resolve-Path -LiteralPath $Path).Path
+    $relative = [System.IO.Path]::GetRelativePath($repoRoot, $resolved).Replace('\', '/')
+    if ($relative.ToLowerInvariant().Contains('latest')) {
+        throw "Mutable latest path cannot enter the readiness evidence manifest: $relative"
+    }
+    [ordered]@{
+        path = $relative
+        sha256 = (Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash.ToLowerInvariant()
+        byte_size = (Get-Item -LiteralPath $resolved).Length
+    }
+}
+if ($CandidateSha -and $commit -ne $CandidateSha) {
+    Write-Host "Checked-out commit $commit does not match candidate $CandidateSha." -ForegroundColor Red
+    Close-Runner 1
+}
+if ($CandidatePackageZip) {
+    $CandidatePackageZip = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($CandidatePackageZip)
+    if (-not (Test-Path -LiteralPath $CandidatePackageZip -PathType Leaf)) {
+        Write-Host "Canonical candidate package does not exist: $CandidatePackageZip" -ForegroundColor Red
+        Close-Runner 1
+    }
+}
+
 New-Item -ItemType Directory -Force $reportDir | Out-Null
 
 Add-TranscriptLine("AETHER Release Readiness Suite")
@@ -290,6 +323,13 @@ try {
     Invoke-Step "Pages preview" $python.Source @("scripts/build_pages.py", "--out-dir", $pagesPreviewDir)
     Invoke-Step "Benchmark compile" $cargo.Source @("bench", "-p", "aether_api", "--no-run")
     Invoke-Step "Pilot launch validation" $pwsh.Source @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $repoRoot "scripts/run-pilot-launch-validation.ps1"), "-BaselinePath", $baseline.Path, "-HostManifestPath", (Resolve-Path $HostManifestPath).Path)
+    $pilotLaunchArtifactPath = Get-ChildItem -Path (Join-Path $repoRoot "artifacts\pilot\launch") -Filter "pilot-launch-validation-*.txt" |
+        Where-Object { $_.LastWriteTimeUtc -ge $suiteStartedAtUtc.AddSeconds(-1) } |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1 -ExpandProperty FullName
+    if (-not $pilotLaunchArtifactPath) {
+        throw "Pilot launch validation did not produce a current-run immutable transcript."
+    }
     $performanceBetaArgs = @(
         (Join-Path $repoRoot "scripts\performance_beta_gate.py"),
         "run",
@@ -306,7 +346,25 @@ try {
     if (Test-Path $performanceBetaSummaryPath) {
         Copy-Item -Force $performanceBetaSummaryPath $latestPerformanceBetaSummaryPath
     }
-    Invoke-Step "Pilot package build" $pwsh.Source @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $repoRoot "scripts/build-pilot-package.ps1"))
+    if (-not $CandidatePackageZip) {
+        throw "Release Readiness requires -CandidatePackageZip; rebuilding candidate bytes is forbidden."
+    }
+    if (Test-Path -LiteralPath $pilotPackageRoot) {
+        Remove-Item -LiteralPath $pilotPackageRoot -Recurse -Force
+    }
+    if (Test-Path -LiteralPath $pilotPackageZip) {
+        Remove-Item -LiteralPath $pilotPackageZip -Force
+    }
+    Copy-Item -LiteralPath $CandidatePackageZip -Destination $pilotPackageZip
+    Expand-Archive -LiteralPath $pilotPackageZip -DestinationPath $pilotPackageRoot -Force
+    $sourcePackageSha = (Get-FileHash -LiteralPath $CandidatePackageZip -Algorithm SHA256).Hash.ToLowerInvariant()
+    $testedPackageSha = (Get-FileHash -LiteralPath $pilotPackageZip -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($sourcePackageSha -ne $testedPackageSha) {
+        throw "Canonical package digest changed while staging Release Readiness."
+    }
+    Add-TranscriptLine("Canonical package SHA-256: $testedPackageSha")
+    Add-TranscriptLine("Canonical package input: $CandidatePackageZip")
+    Write-Host "Testing canonical Supply Chain package $testedPackageSha" -ForegroundColor Cyan
     Invoke-Step "CycloneDX SBOM, license, and delivery-input gate" $python.Source @(
         (Join-Path $repoRoot "scripts\supply_chain.py"),
         "generate",
@@ -576,11 +634,53 @@ Set-Content -Path $latestTranscriptPath -Value $transcript
 Set-Content -Path $summaryPath -Value $summary
 Set-Content -Path $latestSummaryPath -Value $summary
 
+if (-not $EvidenceManifestPath) {
+    $EvidenceManifestPath = Join-Path $reportDir "release-readiness-evidence-$outputTimestamp.json"
+} else {
+    $EvidenceManifestPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($EvidenceManifestPath)
+}
+$manifestParent = Split-Path -Parent $EvidenceManifestPath
+if ($manifestParent) {
+    New-Item -ItemType Directory -Force -Path $manifestParent | Out-Null
+}
+$treeSha = if ($git) { (& $git.Source -C $repoRoot rev-parse "HEAD^{tree}").Trim() } else { "" }
+$manifestStatus = if ($failed) { "failed" } else { "passed" }
+$readinessEvidence = [ordered]@{
+    schema_version = "aether.release-readiness-evidence.v1"
+    status = $manifestStatus
+    candidate = [ordered]@{
+        commit_sha = $commit
+        tree_sha = $treeSha
+        ref = $CandidateRef
+    }
+    workflow = [ordered]@{
+        run_id = [string]$env:GITHUB_RUN_ID
+        attempt = if ($env:GITHUB_RUN_ATTEMPT) { [int]$env:GITHUB_RUN_ATTEMPT } else { 1 }
+    }
+    package = [ordered]@{
+        path = [System.IO.Path]::GetRelativePath($repoRoot, $pilotPackageZip).Replace('\', '/')
+        sha256 = if (Test-Path -LiteralPath $pilotPackageZip) { (Get-FileHash -LiteralPath $pilotPackageZip -Algorithm SHA256).Hash.ToLowerInvariant() } else { "" }
+    }
+    outputs = [ordered]@{
+        performance_beta = Get-FileReceipt $performanceBetaJsonPath
+        service_operability = Get-FileReceipt $serviceV2JsonPath
+        rollback = Get-FileReceipt $rollbackJsonPath
+        customer_workflow = Get-FileReceipt $customerWorkflowJsonPath
+        security_lifecycle = Get-FileReceipt $securityKeyJsonPath
+        commercial_policy = Get-FileReceipt $commercialReadinessJsonPath
+        package_file_manifest = Get-FileReceipt (Join-Path $securityKeyProofDir "pilot-package-file-manifest.json")
+        readiness_transcript = Get-FileReceipt $transcriptPath
+        pilot_launch_transcript = Get-FileReceipt $pilotLaunchArtifactPath
+    }
+}
+$readinessEvidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $EvidenceManifestPath
+
 Write-Host ""
 Write-Host "Release-readiness transcript: $transcriptPath"
 Write-Host "Latest transcript:            $latestTranscriptPath"
 Write-Host "Release-readiness summary:    $summaryPath"
 Write-Host "Latest summary:               $latestSummaryPath"
+Write-Host "Immutable evidence manifest:  $EvidenceManifestPath"
 
 if ($failed) {
     Close-Runner 1

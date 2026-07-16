@@ -86,9 +86,12 @@ ordinary feature backlog:
   exact commands, workflow attempts, output bytes, package digest, signed
   provenance certificate, successful producer job, and exact GitHub artifact;
   authored statuses, declared-only runs/hosts, source-path existence, and
-  `latest` inputs are rejected. An official
-  GitHub run and independently downloaded bundle are still required before this
-  local implementation satisfies the evidence-integrity release gate.
+  `latest` inputs are rejected. Candidate-bound subjects now add producer and
+  source workflow runs, source job outcomes, artifact IDs, API sizes and
+  digests, expiry, metrics, package binding, and subject-specific semantic
+  validation. An official protected `main` run and independently downloaded
+  bundle are still required before this local implementation satisfies the
+  evidence-integrity release gate.
 - The commercial release readiness ledger targets controlled design-partner
   alpha. Commercial beta is governed by the non-waivable R1-R6 gate policy and
   additionally requires protected exact-candidate hosting controls, every named
@@ -99,6 +102,14 @@ ordinary feature backlog:
   customer-workflow artifacts remain useful partial evidence only until they
   are emitted as verified subjects in the immutable candidate bundle. They do
   not override the remaining blockers or qualify commercial beta.
+- The selected beta boundary, if the exact-candidate verdict passes, is only the
+  Windows x86_64 single-node package: SQLite by default; optional `verify_full`
+  Postgres journal with local SQLite sidecars; and loopback HTTP or trusted TLS
+  ingress with direct backend access blocked. It does not claim native HTTP TLS,
+  multi-host failover, consensus, or generalized distributed truth.
+- GA remains `0/4`. Support/incident posture, multi-platform distribution,
+  signed promotion, and distributed-truth qualification are separate blockers;
+  commercial beta cannot author any of them as passed.
 - The operational file/checksum inventory is now honestly named a file
   manifest. Strict CycloneDX Rust, Go, and assembled-package SBOMs plus pinned
   vulnerability, license, secret, package, and supported-language CodeQL gates

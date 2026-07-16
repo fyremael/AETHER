@@ -76,18 +76,26 @@ followers preserve and verify its exact identity. Schema discovery/admin,
 dry-run, receipt, structured-error, Go, and Python surfaces are implemented.
 
 R4's immutable evidence layer is also implemented locally. Versioned envelope,
-bundle, waiver, and gate-policy contracts now separate release requirements
+bundle, waiver, release-subject, promotion-record, and gate-policy contracts now separate release requirements
 from observations. A standard-library runner captures clean commit/tree/ref,
 workflow/run/job, exact commands, inputs, attempts, outputs, and expiry; the
 verifier re-hashes every byte and recomputes a deterministic verdict.
 The commercial ledger is policy-only and rejects authored outcomes. A reusable
-exact-candidate workflow builds one package, emits a SHA/run/attempt-named
-bundle, and delegates verification to a dependent job. Official verification
-now requires signed package provenance plus live GitHub run, successful
-producer-job, and immutable artifact outcomes; a numeric run declaration or
-declared host is insufficient. Official promotion still requires one protected exact-candidate run
-whose complete bundle verifies independently, so this does not widen the
-controlled-alpha claim.
+exact-candidate workflow now consumes the successful exact-SHA Supply Chain
+package after Release Readiness has downloaded, digest-checked, and tested
+those exact bytes. Eighteen candidate-bound subjects are assembled only after
+operational readiness, including customer-workflow evidence. The workflow
+emits a SHA/run/attempt-named bundle and delegates verification to a dependent
+job. Official verification now requires signed package provenance plus live
+producer and prerequisite run/job outcomes and redownloaded artifact bytes; a
+numeric run declaration, declared host, or correctly named file is
+insufficient. The qualification and generated promotion-record path are
+implemented locally. An independent adversarial review found no remaining
+P0/P1 defects after the final capacity and readiness-byte tightening. Local
+validation is green across 208 active Rust tests (plus 10 ignored stress/soak
+cases), 82 Python tests, and 18 Go tests. Merge and one protected `main`
+qualification run are still required. This does not widen the controlled-alpha
+claim.
 
 R5.1-R5.6 are now implemented locally. The service has strict dependency and
 package gates, verified transport modes, independent namespace admission,

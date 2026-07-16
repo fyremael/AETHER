@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import io
 import json
 import re
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import release_evidence as evidence
+import release_subjects
 
 
 SHA40 = re.compile(r"^[a-f0-9]{40}$")
@@ -242,11 +244,16 @@ def verify_github_outcome(
     *,
     api: Callable[[str], Any] = github_api,
     download_artifact: Callable[[str, int], bytes] = github_artifact_archive,
-) -> None:
+) -> dict[str, Any]:
     require(bundle.is_file() and bundle.suffix.lower() == ".zip", "official evidence input must be an immutable ZIP bundle")
     repository = policy["official_repository"]
     run_id = workflow["run_id"]
     attempt = workflow["attempt"]
+    protected_main = api(f"repos/{repository}/git/ref/heads/main")
+    require(
+        protected_main.get("object", {}).get("sha") == candidate["commit_sha"],
+        "protected main advanced beyond the qualified candidate",
+    )
     run = api(f"repos/{repository}/actions/runs/{run_id}/attempts/{attempt}")
     require(run.get("id") == int(run_id), "declared GitHub run does not exist in the official repository")
     require(run.get("run_attempt") == attempt, "GitHub run attempt mismatch")
@@ -318,41 +325,361 @@ def verify_github_outcome(
         evidence.sha256_bytes(archived_bundle) == evidence.sha256_file(bundle),
         "official artifact does not contain the exact input evidence bundle",
     )
+    return {
+        "artifact_id": artifact["id"],
+        "artifact_name": artifact["name"],
+        "sha256": artifact_digest.removeprefix("sha256:"),
+        "byte_size": artifact["size_in_bytes"],
+        "run_id": str(run_id),
+        "attempt": attempt,
+    }
+
+
+def verify_subject_github_outcomes(
+    subject_envelopes: dict[str, dict[str, Any]],
+    workflow: dict[str, Any],
+    candidate: dict[str, Any],
+    policy: dict[str, Any],
+    *,
+    api: Callable[[str], Any] = github_api,
+    download_artifact: Callable[[str, int], bytes] = github_artifact_archive,
+) -> None:
+    """Requery every prerequisite receipt and security job fail-closed."""
+    repository = policy["official_repository"]
+    expected_producers = {
+        ".github/workflows/release-readiness.yml",
+        ".github/workflows/reusable-exact-candidate-evidence.yml",
+    }
+    qualification_artifact_name = (
+        f"release-qualification-subjects-{candidate['commit_sha']}-"
+        f"{workflow['run_id']}-{workflow['attempt']}"
+    )
+    qualification_artifacts = api(
+        f"repos/{repository}/actions/runs/{workflow['run_id']}/artifacts?per_page=100"
+    )
+    qualification_matches = [
+        item for item in qualification_artifacts.get("artifacts", [])
+        if item.get("name") == qualification_artifact_name
+    ]
+    require(len(qualification_matches) == 1, "qualification subject artifact is missing or ambiguous")
+    qualification_artifact = qualification_matches[0]
+    require(qualification_artifact.get("expired") is False, "qualification subject artifact expired")
+    qualification_digest = str(qualification_artifact.get("digest", ""))
+    require(qualification_digest.startswith("sha256:"), "qualification subject artifact digest is missing")
+    qualification_archive = download_artifact(repository, qualification_artifact["id"])
+    require(len(qualification_archive) == qualification_artifact.get("size_in_bytes"), "qualification subject artifact size mismatch")
+    require(evidence.sha256_bytes(qualification_archive) == qualification_digest.removeprefix("sha256:"), "qualification subject artifact digest mismatch")
+    try:
+        with zipfile.ZipFile(io.BytesIO(qualification_archive)) as archive:
+            files = [item for item in archive.infolist() if not item.is_dir()]
+            require(len(files) == len({item.filename for item in files}), "qualification artifact has duplicate ZIP entries")
+            qualification_members = {
+                evidence.safe_bundle_relative(item.filename).as_posix(): archive.read(item)
+                for item in files
+            }
+    except zipfile.BadZipFile as exc:
+        raise evidence.EvidenceError("qualification subject artifact is not a valid ZIP") from exc
+    readiness_manifests = [
+        content for path, content in qualification_members.items()
+        if "qualification-readiness/" in path
+        and Path(path).name.startswith("release-readiness-evidence-")
+        and Path(path).suffix == ".json"
+    ]
+    require(len(readiness_manifests) == 1, "qualification artifact omits or duplicates its readiness manifest")
+    try:
+        readiness_manifest = json.loads(readiness_manifests[0])
+    except json.JSONDecodeError as exc:
+        raise evidence.EvidenceError("qualification readiness manifest is invalid JSON") from exc
+    require(readiness_manifest.get("schema_version") == "aether.release-readiness-evidence.v1", "qualification readiness schema is invalid")
+    require(readiness_manifest.get("status") == "passed", "qualification readiness did not pass")
+    require(
+        readiness_manifest.get("candidate")
+        == {
+            "commit_sha": candidate["commit_sha"],
+            "tree_sha": candidate["tree_sha"],
+            "ref": candidate["ref"],
+        },
+        "qualification readiness is cross-candidate",
+    )
+    require(readiness_manifest.get("workflow") == workflow, "qualification readiness workflow binding differs")
+    required_readiness_outputs = {
+        "commercial_policy",
+        "customer_workflow",
+        "package_file_manifest",
+        "performance_beta",
+        "pilot_launch_transcript",
+        "readiness_transcript",
+        "rollback",
+        "security_lifecycle",
+        "service_operability",
+    }
+    outputs = readiness_manifest.get("outputs", {})
+    require(isinstance(outputs, dict) and set(outputs) == required_readiness_outputs, "qualification readiness output catalog is incomplete")
+    for output_name, descriptor in outputs.items():
+        require(isinstance(descriptor, dict), f"qualification readiness descriptor is invalid: {output_name}")
+        original = evidence.safe_bundle_relative(str(descriptor.get("path", "")))
+        require("latest" not in original.as_posix().lower(), f"qualification readiness uses mutable latest output: {output_name}")
+        expected_name = f"{output_name}-{original.name}"
+        matches = [
+            content for path, content in qualification_members.items()
+            if "qualification-readiness/" in path and Path(path).name == expected_name
+        ]
+        require(len(matches) == 1, f"qualification artifact omits or duplicates readiness output: {output_name}")
+        require(len(matches[0]) == descriptor.get("byte_size"), f"qualification readiness output size mismatch: {output_name}")
+        require(evidence.sha256_bytes(matches[0]) == descriptor.get("sha256"), f"qualification readiness output digest mismatch: {output_name}")
+    for subject_id, envelope in subject_envelopes.items():
+        if subject_id == "package-provenance":
+            continue
+        matches = [
+            content for path, content in qualification_members.items()
+            if "qualification-subjects/" in path and Path(path).name == f"{subject_id}.json"
+        ]
+        require(len(matches) == 1, f"qualification artifact omits or duplicates subject: {subject_id}")
+        require(matches[0] == evidence.canonical_bytes(envelope), f"qualification artifact subject bytes differ: {subject_id}")
+    receipts: dict[tuple[str, int], dict[str, Any]] = {}
+    declared_runs: dict[tuple[str, int], dict[str, Any]] = {}
+    for subject_id, envelope in subject_envelopes.items():
+        producer = envelope["producer"]
+        require(producer["workflow_file"] in expected_producers, f"{subject_id} has an unauthorized producer workflow")
+        require(producer["run_id"] == str(workflow["run_id"]), f"{subject_id} was produced by another release run")
+        require(producer["attempt"] == workflow["attempt"], f"{subject_id} was produced by another release attempt")
+        for receipt in envelope["source_artifacts"]:
+            key = (str(receipt["run_id"]), receipt["artifact_id"])
+            previous = receipts.get(key)
+            require(previous is None or previous == receipt, f"ambiguous artifact receipt across subjects: {key}")
+            receipts[key] = receipt
+        for source_run in envelope["source_runs"]:
+            key = (str(source_run["run_id"]), source_run["attempt"])
+            previous_run = declared_runs.get(key)
+            require(previous_run is None or previous_run == source_run, f"ambiguous source run across subjects: {key}")
+            declared_runs[key] = source_run
+
+    run_cache: dict[tuple[str, int], dict[str, Any]] = {}
+    job_cache: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    archive_cache: dict[int, bytes] = {}
+    for run_key, declared in declared_runs.items():
+        run = api(f"repos/{repository}/actions/runs/{run_key[0]}/attempts/{run_key[1]}")
+        require(run.get("id") == int(run_key[0]), "release subject source run does not exist")
+        require(run.get("run_attempt") == run_key[1], "release subject source attempt mismatch")
+        require(run.get("head_sha") == candidate["commit_sha"], "release subject source run is cross-candidate")
+        require(run.get("status") == "completed" and run.get("conclusion") == "success", "release subject source run did not pass")
+        require(str(run.get("path", "")).split("@", 1)[0] == declared["workflow_file"], "release subject source workflow mismatch")
+        require(run.get("head_branch") == "main", "release subject source is not a protected main run")
+        run_cache[run_key] = run
+    for (run_id, artifact_id), receipt in receipts.items():
+        attempt = receipt["attempt"]
+        run_key = (run_id, attempt)
+        if run_key not in run_cache:
+            run_cache[run_key] = api(f"repos/{repository}/actions/runs/{run_id}/attempts/{attempt}")
+        run = run_cache[run_key]
+        require(run.get("id") == int(run_id), "release subject source run does not exist")
+        require(run.get("run_attempt") == attempt, "release subject source attempt mismatch")
+        require(run.get("head_sha") == candidate["commit_sha"], "release subject source run is cross-candidate")
+        require(run.get("status") == "completed" and run.get("conclusion") == "success", "release subject source run did not pass")
+        run_path = str(run.get("path", "")).split("@", 1)[0]
+        require(run_path == receipt["workflow_file"], "release subject source workflow mismatch")
+        require(run.get("head_branch") == "main", "release subject source is not a protected main run")
+        artifacts = api(f"repos/{repository}/actions/runs/{run_id}/artifacts?per_page=100")
+        matches = [item for item in artifacts.get("artifacts", []) if item.get("id") == artifact_id]
+        require(len(matches) == 1, "release subject artifact ID is missing or ambiguous")
+        artifact = matches[0]
+        require(artifact.get("name") == receipt["artifact_name"], "release subject artifact name mismatch")
+        require(artifact.get("expired") is False, "release subject artifact expired")
+        require(artifact.get("size_in_bytes") == receipt["byte_size"], "release subject artifact API size changed")
+        require(artifact.get("digest") == f"sha256:{receipt['sha256']}", "release subject artifact API digest changed")
+        archive = download_artifact(repository, artifact_id)
+        require(len(archive) == receipt["byte_size"], "release subject artifact download size mismatch")
+        require(evidence.sha256_bytes(archive) == receipt["sha256"], "release subject artifact download digest mismatch")
+        archive_cache[artifact_id] = archive
+
+    member_cache: dict[int, dict[str, bytes]] = {}
+
+    def artifact_members(artifact_id: int) -> dict[str, bytes]:
+        if artifact_id in member_cache:
+            return member_cache[artifact_id]
+        try:
+            with zipfile.ZipFile(io.BytesIO(archive_cache[artifact_id])) as archive:
+                files = [item for item in archive.infolist() if not item.is_dir()]
+                require(len(files) == len({item.filename for item in files}), "release subject artifact has duplicate ZIP entries")
+                members: dict[str, bytes] = {}
+                for item in files:
+                    relative = evidence.safe_bundle_relative(item.filename).as_posix()
+                    require(relative not in members, "release subject artifact has ambiguous normalized paths")
+                    members[relative] = archive.read(item)
+        except zipfile.BadZipFile as exc:
+            raise evidence.EvidenceError("release subject artifact is not a valid ZIP") from exc
+        member_cache[artifact_id] = members
+        return members
+
+    for subject_id, envelope in subject_envelopes.items():
+        canonical_receipts = [
+            item for item in envelope["source_artifacts"]
+            if item["artifact_name"].startswith("supply-chain-candidate-package-")
+        ]
+        require(len(canonical_receipts) == 1, f"{subject_id} lacks one canonical package artifact receipt")
+        canonical_receipt = canonical_receipts[0]
+        canonical_members = artifact_members(canonical_receipt["artifact_id"])
+        matching_packages = [
+            content for path, content in canonical_members.items()
+            if Path(path).name == envelope["package"]["name"]
+        ]
+        require(len(matching_packages) == 1, f"{subject_id} canonical package member is missing or ambiguous")
+        require(
+            evidence.sha256_bytes(matching_packages[0]) == envelope["package"]["sha256"],
+            f"{subject_id} canonical artifact contains different package bytes",
+        )
+        source_files = envelope["observation"]["details"].get("source_files", [])
+        receipt_ids = {item["artifact_id"] for item in envelope["source_artifacts"]}
+        verified_source_payloads: list[dict[str, Any]] = []
+        for source_file in source_files:
+            artifact_id = source_file["artifact_id"]
+            require(artifact_id in receipt_ids, f"{subject_id} source file names an undeclared artifact")
+            members = artifact_members(artifact_id)
+            relative = evidence.safe_bundle_relative(source_file["path"]).as_posix()
+            require(relative in members, f"{subject_id} source file is missing from its artifact")
+            content = members[relative]
+            require(len(content) == source_file["byte_size"], f"{subject_id} source-file byte size mismatch")
+            require(evidence.sha256_bytes(content) == source_file["sha256"], f"{subject_id} source-file digest mismatch")
+            try:
+                payload = json.loads(content)
+            except json.JSONDecodeError as exc:
+                raise evidence.EvidenceError(f"{subject_id} source file is not valid JSON") from exc
+            require(isinstance(payload, dict), f"{subject_id} source payload must be an object")
+            verified_source_payloads.append(payload)
+
+        if subject_id in {"rust-sbom", "go-sbom", "assembled-package-sbom"}:
+            require(len(verified_source_payloads) == 1, f"{subject_id} source SBOM is ambiguous")
+            sbom = verified_source_payloads[0]
+            require(sbom.get("bomFormat") == "CycloneDX", f"{subject_id} source is not CycloneDX")
+            properties = sbom.get("metadata", {}).get("properties", [])
+            require(
+                any(
+                    item.get("name") == "aether:candidate:commit_sha"
+                    and item.get("value") == candidate["commit_sha"]
+                    for item in properties
+                ),
+                f"{subject_id} source SBOM is cross-candidate",
+            )
+            if subject_id == "assembled-package-sbom":
+                hashes = sbom.get("metadata", {}).get("component", {}).get("hashes", [])
+                require(
+                    any(
+                        item.get("alg") == "SHA-256"
+                        and str(item.get("content", "")).lower() == envelope["package"]["sha256"]
+                        for item in hashes
+                    ),
+                    "assembled package source SBOM is bound to different bytes",
+                )
+        elif subject_id in {"vulnerability-scan", "secret-scan"}:
+            require(len(verified_source_payloads) == 1, f"{subject_id} source scan is ambiguous")
+            scan = verified_source_payloads[0]
+            require(scan.get("status") == "passed", f"{subject_id} source scan did not pass")
+            require(scan.get("candidate_commit_sha") == candidate["commit_sha"], f"{subject_id} source scan is cross-candidate")
+        elif subject_id == "license-scan":
+            require(len(verified_source_payloads) == 1, "license source summary is ambiguous")
+            summary = verified_source_payloads[0]
+            require(summary.get("status") == "passed" and summary.get("violations") == [], "license source summary did not pass")
+            require(summary.get("candidate_commit_sha") == candidate["commit_sha"], "license source summary is cross-candidate")
+            require(summary.get("package_sha256") == envelope["package"]["sha256"], "license source summary is for another package")
+        elif subject_id == "pages-deployment":
+            require(len(verified_source_payloads) == 1, "Pages source verification is ambiguous")
+            pages = verified_source_payloads[0]
+            require(pages.get("valid") is True, "Pages source verification did not pass")
+            require(pages.get("expected_sha") == candidate["commit_sha"] and pages.get("observed_sha") == candidate["commit_sha"], "Pages source verification is cross-candidate")
+        elif subject_id == "capacity":
+            require(len(verified_source_payloads) == 1, "capacity source report is ambiguous")
+            report = verified_source_payloads[0]
+            details = envelope["observation"]["details"]
+            require(details.get("selected_envelope") in report.get("single_node_envelopes", []), "capacity selected envelope is absent from source report")
+            require(details.get("recommended_hardware") == report.get("recommended_hardware"), "capacity hardware recommendation differs from source report")
+
+    for subject_id, expected_names in {
+        "code-scan": {"CodeQL (go)", "CodeQL (python)"},
+        "transport-tls": {"Postgres verified TLS journal"},
+    }.items():
+        envelope = subject_envelopes.get(subject_id)
+        require(envelope is not None, f"official bundle is missing {subject_id}")
+        detail_jobs = envelope["observation"]["details"].get("jobs")
+        if subject_id == "transport-tls":
+            detail_jobs = [envelope["observation"]["details"].get("job")]
+        require(isinstance(detail_jobs, list), f"{subject_id} job bindings are missing")
+        observed_names = {
+            str(item.get("name", "")).split(" / ")[-1]
+            for item in detail_jobs
+            if isinstance(item, dict)
+        }
+        require(observed_names == expected_names, f"{subject_id} job binding is incomplete or ambiguous")
+        for declared in detail_jobs:
+            expected_source_workflow = {
+                "code-scan": ".github/workflows/supply-chain.yml",
+                "transport-tls": ".github/workflows/ci.yml",
+            }[subject_id]
+            matching_runs = [
+                source_run for source_run in envelope["source_runs"]
+                if source_run["workflow_file"] == expected_source_workflow
+            ]
+            require(len(matching_runs) == 1, f"{subject_id} has no unique workflow run")
+            source_run = matching_runs[0]
+            run_key = (str(source_run["run_id"]), source_run["attempt"])
+            if run_key not in job_cache:
+                jobs_payload = api(
+                    f"repos/{repository}/actions/runs/{run_key[0]}/attempts/{run_key[1]}/jobs?per_page=100"
+                )
+                job_cache[run_key] = jobs_payload.get("jobs", [])
+            matches = [item for item in job_cache[run_key] if item.get("id") == declared.get("id")]
+            require(len(matches) == 1, f"{subject_id} GitHub job ID is missing or ambiguous")
+            require(matches[0].get("name") == declared.get("name"), f"{subject_id} GitHub job name changed")
+            require(matches[0].get("status") == "completed" and matches[0].get("conclusion") == "success", f"{subject_id} GitHub job did not pass")
 
 
 def verify_package_provenance(
     package: Path,
-    attestation_bundle: Path,
+    subject_envelope: dict[str, Any],
     workflow: dict[str, Any],
     candidate: dict[str, Any],
     policy: dict[str, Any],
     *,
     runner: Callable[[list[str]], Any] = verify_attestation,
 ) -> None:
+    encoded_bundle = (
+        subject_envelope.get("observation", {})
+        .get("details", {})
+        .get("attestation_bundle_base64")
+    )
+    require(isinstance(encoded_bundle, str) and encoded_bundle, "package provenance subject has no attestation bundle")
+    try:
+        attestation_bundle = base64.b64decode(encoded_bundle, validate=True)
+    except ValueError as exc:
+        raise evidence.EvidenceError("package provenance subject contains invalid base64") from exc
+    expected_bundle_sha = subject_envelope["observation"]["details"].get("attestation_bundle_sha256")
+    require(evidence.sha256_bytes(attestation_bundle) == expected_bundle_sha, "package provenance bundle digest mismatch")
     repository = policy["official_repository"]
     signer_workflow = f"{repository}/{policy['official_attestation_workflow']}"
-    command = [
-        "gh",
-        "attestation",
-        "verify",
-        str(package),
-        "--repo",
-        repository,
-        "--bundle",
-        str(attestation_bundle),
-        "--signer-workflow",
-        signer_workflow,
-        "--signer-digest",
-        candidate["commit_sha"],
-        "--source-digest",
-        candidate["commit_sha"],
-        "--source-ref",
-        candidate["ref"],
-        "--deny-self-hosted-runners",
-        "--format",
-        "json",
-    ]
-    results = runner(command)
+    with tempfile.TemporaryDirectory(prefix="aether-provenance-") as temporary:
+        attestation_path = Path(temporary) / "attestation-bundle.json"
+        attestation_path.write_bytes(attestation_bundle)
+        command = [
+            "gh",
+            "attestation",
+            "verify",
+            str(package),
+            "--repo",
+            repository,
+            "--bundle",
+            str(attestation_path),
+            "--signer-workflow",
+            signer_workflow,
+            "--signer-digest",
+            candidate["commit_sha"],
+            "--source-digest",
+            candidate["commit_sha"],
+            "--source-ref",
+            candidate["ref"],
+            "--deny-self-hosted-runners",
+            "--format",
+            "json",
+        ]
+        results = runner(command)
     require(isinstance(results, list) and results, "package provenance verification returned no result")
     package_digest = evidence.sha256_file(package)
     expected_repository_uri = f"https://github.com/{repository}"
@@ -405,6 +732,32 @@ def extract_bundle(bundle: Path, destination: Path) -> Path:
     manifests = list(destination.rglob("bundle-manifest.json"))
     require(len(manifests) == 1, "bundle must contain exactly one manifest")
     return manifests[0].parent
+
+
+def verify_package_file_manifest(package: Path, subject_envelope: dict[str, Any]) -> None:
+    files = subject_envelope["observation"]["details"].get("files", [])
+    declared = {
+        item.get("path"): {"bytes": item.get("bytes"), "sha256": item.get("sha256")}
+        for item in files
+        if isinstance(item, dict)
+    }
+    require(len(declared) == len(files), "package file manifest has duplicate or invalid paths")
+    try:
+        with zipfile.ZipFile(package) as archive:
+            entries = [item for item in archive.infolist() if not item.is_dir()]
+            require(len(entries) == len({item.filename for item in entries}), "canonical package has duplicate ZIP entries")
+            observed: dict[str, dict[str, Any]] = {}
+            for item in entries:
+                relative = evidence.safe_bundle_relative(item.filename).as_posix()
+                content = archive.read(item)
+                require(relative not in observed, "canonical package has ambiguous normalized paths")
+                observed[relative] = {
+                    "bytes": len(content),
+                    "sha256": evidence.sha256_bytes(content),
+                }
+    except zipfile.BadZipFile as exc:
+        raise evidence.EvidenceError("canonical release package is not a valid ZIP") from exc
+    require(declared == observed, "package file manifest does not match canonical package bytes")
 
 
 def verify_bundle(
@@ -477,6 +830,7 @@ def verify_bundle(
             verify_sbom(verify_descriptor(root, item, "SBOM"))
         available_subjects: set[str] = set()
         subject_paths: dict[str, Path] = {}
+        subject_envelopes: dict[str, dict[str, Any]] = {}
         expected_subjects = set(policy.get("future_required_bundle_subjects", []))
         observed_subjects: set[str] = set()
         for subject in manifest.get("subjects", []):
@@ -489,10 +843,23 @@ def verify_bundle(
                 subject_paths[subject_id] = verify_descriptor(
                     root, subject.get("file", {}), f"bundle subject {subject_id}"
                 )
+                subject_envelopes[subject_id] = release_subjects.verify_envelope(
+                    evidence.load_json(subject_paths[subject_id]),
+                    expected_subject_id=subject_id,
+                    candidate=candidate,
+                    package_sha256=package_digest,
+                    now=now,
+                )
                 available_subjects.add(subject_id)
             else:
                 require("file" not in subject, f"missing subject {subject_id} names a file")
         require(observed_subjects == expected_subjects, f"bundle subject catalog is incomplete: {sorted(expected_subjects-observed_subjects)}")
+        if "pilot-package-file-manifest" in subject_envelopes:
+            verify_package_file_manifest(
+                package_path,
+                subject_envelopes["pilot-package-file-manifest"],
+            )
+        official_artifact = None
         if official:
             require(
                 "package-provenance" in subject_paths,
@@ -500,12 +867,18 @@ def verify_bundle(
             )
             verify_package_provenance(
                 package_path,
-                subject_paths["package-provenance"],
+                subject_envelopes["package-provenance"],
                 workflow,
                 candidate,
                 policy,
             )
-            verify_github_outcome(bundle, workflow, candidate, policy)
+            verify_subject_github_outcomes(
+                subject_envelopes,
+                workflow,
+                candidate,
+                policy,
+            )
+            official_artifact = verify_github_outcome(bundle, workflow, candidate, policy)
         verdict, blockers = evidence.compute_verdict(
             policy,
             envelopes,
@@ -527,6 +900,12 @@ def verify_bundle(
             "evidence_ids": sorted(seen_evidence_ids),
             "package_sha256": package_digest,
             "verifier": manifest["verifier"],
+            "workflow": {
+                "run_id": str(workflow["run_id"]),
+                "attempt": workflow["attempt"],
+            },
+            "official_repository": policy["official_repository"],
+            "official_artifact": official_artifact,
         }
 
 

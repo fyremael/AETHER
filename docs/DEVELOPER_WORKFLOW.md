@@ -60,7 +60,7 @@ For anything nontrivial, verify both. A change is not “done locally” if it o
 For a structured release candidate, the expected gate is the dedicated runner:
 
 ```bash
-powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1
+powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1 -CandidatePackageZip <canonical-package-zip>
 ```
 
 That suite widens the normal gate into boundary-client tests, Pages preview build, benchmark compile, pilot launch validation, and packaged-bundle production.

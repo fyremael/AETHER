@@ -56,7 +56,8 @@ class RequiredHostedGateTests(unittest.TestCase):
 
         self.assertIn("environment: release", approval)
         self.assertIn("name: Protected release approval", approval)
-        self.assertIn("needs: protected-release-approval", exact)
+        self.assertIn("- protected-release-approval", exact)
+        self.assertIn("- release-readiness", exact)
         self.assertIn("needs: protected-release-approval", readiness)
 
 

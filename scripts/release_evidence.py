@@ -26,7 +26,7 @@ from typing import Any, Iterable
 ENVELOPE_VERSION = "aether.release-evidence-envelope.v1"
 BUNDLE_VERSION = "aether.release-evidence-bundle.v1"
 POLICY_VERSION = "aether.release-gate-policy.v1"
-VERIFIER_VERSION = "aether-release-evidence-verifier-v2"
+VERIFIER_VERSION = "aether-release-evidence-verifier-v3"
 ALGORITHM = "sha256-canonical-json-v1"
 OBSERVED_STATUSES = {"passed", "failed", "error", "skipped"}
 NON_WAIVABLE_CORE = {
@@ -596,15 +596,28 @@ def assemble(args: argparse.Namespace) -> int:
             if subject_id in supplied_subjects:
                 raise EvidenceError(f"duplicate bundle subject: {subject_id}")
             supplied_subjects[subject_id] = Path(source_text).resolve()
+        # Imported lazily because release_subjects reuses canonical helpers
+        # from this module.
+        import release_subjects
+
         subject_items = []
+        validated_subjects: set[str] = set()
         for subject_id in sorted(policy.get("future_required_bundle_subjects", [])):
             source = supplied_subjects.get(subject_id)
             if source is None:
                 subject_items.append({"id": subject_id, "status": "missing"})
                 continue
+            release_subjects.verify_envelope(
+                load_json(source),
+                expected_subject_id=subject_id,
+                candidate=candidate,
+                package_sha256=package_digest,
+                now=utc_now(),
+            )
             item = copy_into(staging, source, f"subjects/{subject_id}/{source.name}")
             integrity_paths.append(staging / item["path"])
             subject_items.append({"id": subject_id, "status": "present", "file": item})
+            validated_subjects.add(subject_id)
         integrity_payload = {
             "schema_version": "aether.bundle-file-integrity.v1",
             "files": [
@@ -621,7 +634,7 @@ def assemble(args: argparse.Namespace) -> int:
             waiver_payloads,
             candidate,
             official,
-            available_subjects=set(supplied_subjects),
+            available_subjects=validated_subjects,
         )
         manifest: dict[str, Any] = {
             "schema_version": BUNDLE_VERSION,

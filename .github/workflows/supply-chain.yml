@@ -60,7 +60,7 @@ jobs:
       - name: Upload candidate package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: supply-chain-candidate-package
+          name: supply-chain-candidate-package-${{ env.CANDIDATE_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip
           if-no-files-found: error
 
@@ -107,7 +107,7 @@ jobs:
       - name: Download exact candidate package
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: supply-chain-candidate-package
+          name: supply-chain-candidate-package-${{ env.CANDIDATE_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/pilot/packages
 
       - name: Generate strict CycloneDX SBOMs and license verdict
@@ -193,7 +193,7 @@ jobs:
         with:
           # Pull-request runs use the immutable head SHA rather than GitHub's
           # synthetic merge commit.
-          name: supply-chain-evidence-${{ env.CANDIDATE_SHA }}
+          name: supply-chain-evidence-${{ env.CANDIDATE_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/release/supply-chain
           if-no-files-found: error
 

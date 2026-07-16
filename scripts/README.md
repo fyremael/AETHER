@@ -54,9 +54,9 @@ For documentation publishing:
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-hardening-sweep.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1`
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1 -BaselinePath <accepted-baseline-path>`
-- run `powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1`
-- run `powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1 -BaselinePath <accepted-baseline-path>`
-- run `powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1 -CommercialBetaCandidate`
+- run `powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1 -CandidatePackageZip <canonical-package-zip>`
+- run `powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1 -CandidatePackageZip <canonical-package-zip> -BaselinePath <accepted-baseline-path>`
+- run `powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1 -CandidatePackageZip <canonical-package-zip> -CommercialBetaCandidate`
 
 ### Deployment and auth helpers
 

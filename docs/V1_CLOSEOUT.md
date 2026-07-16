@@ -92,7 +92,7 @@ During remediation it is diagnostic only; it cannot qualify a release until R4
 binds every required result to one exact candidate:
 
 ```text
-powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1
+powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1 -CandidatePackageZip <canonical-package-zip>
 ```
 
 That suite is expected to produce:
