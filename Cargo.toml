@@ -29,4 +29,4 @@ indexmap = { version = "2.7.0", features = ["serde"] }
 rand = "0.8.6"
 serde = { version = "1.0.215", features = ["derive"] }
 sha2 = "0.10.9"
-thiserror = "1.0.69"
+thiserror = "2.0.18"
