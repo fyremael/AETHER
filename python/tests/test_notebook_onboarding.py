@@ -125,9 +125,19 @@ class NotebookOnboardingTest(unittest.TestCase):
         self.assertTrue(hasattr(module, "start_http_service"))
         self.assertTrue(hasattr(module, "start_pilot_service"))
         self.assertTrue(hasattr(module, "stop_http_service"))
+        self.assertTrue(hasattr(module, "require_service_capabilities"))
 
         repo_root = module.bootstrap_repo(repo_root=REPO_ROOT)
         self.assertEqual(Path(repo_root).resolve(), REPO_ROOT.resolve())
+
+    def test_notebooks_preflight_service_capabilities(self) -> None:
+        for notebook_path in sorted(NOTEBOOK_ROOT.glob("*.ipynb")):
+            data = json.loads(notebook_path.read_text(encoding="utf-8"))
+            source = "\n".join(
+                "".join(cell.get("source", [])) for cell in data.get("cells", [])
+            )
+            with self.subTest(notebook=notebook_path.name):
+                self.assertIn("require_service_capabilities(client)", source)
 
     def test_colab_helper_prefers_built_pilot_binary_when_present(self) -> None:
         module = _load_colab_setup_module()

@@ -30,6 +30,8 @@ fn developer_config() -> Result<PilotServiceConfig, Box<dyn std::error::Error>> 
         schema_version: "v1".into(),
         service_mode: ServiceMode::SingleNode,
         bind_addr,
+        http_transport: aether_api::PilotHttpTransportConfig::default(),
+        concurrency: aether_api::PilotConcurrencyConfig::default(),
         database_path: Some(database_path.clone()),
         storage: None,
         audit_log_path: Some(default_audit_log_path(&database_path)),
@@ -70,7 +72,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  storage: {}", config.storage.storage_label());
         println!("  sidecars: {}", config.sidecar_path().display());
         println!("  audit log: {}", config.audit_log_path.display());
-        println!("  listening: http://{}", config.bind_addr);
+        let transport = config.service_status().transport;
+        println!("  backend listener: http://{}", config.bind_addr);
+        println!("  HTTP transport: {}", transport.http_mode);
+        if let Some(origin) = transport.external_https_origin {
+            println!("  external HTTPS origin: {origin}");
+        }
         return Ok(serve_pilot_http_service(config).await?);
     }
 
@@ -104,7 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  POST /v1/documents/run");
     println!("  POST /v1/reports/pilot/coordination");
     println!("  POST /v1/reports/pilot/coordination-delta");
-    println!("  POST /v1/explain/tuple");
+    println!("  POST /v1/explanations/resolve");
     println!("  POST /v1/sidecars/artifacts/register");
     println!("  POST /v1/sidecars/artifacts/get");
     println!("  POST /v1/sidecars/vectors/register");

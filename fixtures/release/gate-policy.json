@@ -1,0 +1,230 @@
+{
+  "schema_version": "aether.release-gate-policy.v1",
+  "policy_id": "commercial-beta-r6-v1",
+  "claim_stage": "commercial_beta_candidate",
+  "official_workflow": ".github/workflows/reusable-exact-candidate-evidence.yml",
+  "official_job": "exact-candidate-evidence",
+  "allowed_official_runners": ["Windows", "windows-latest"],
+  "allowed_observed_statuses": ["passed", "failed", "error", "skipped"],
+  "validity_hours": 24,
+  "non_waivable_gate_ids": [
+    "semantic.policy_noninterference",
+    "semantic.trace_handle_identity",
+    "storage.transactional_schema_append",
+    "semantic.full_acceptance",
+    "quality.rust_fmt_clippy_all_targets",
+    "quality.go_boundary",
+    "quality.python_boundary",
+    "security.supply_chain",
+    "security.transport",
+    "operations.beta_service",
+    "architecture.boundaries_recovered",
+    "release.evidence_integrity"
+  ],
+  "gates": [
+    {
+      "id": "semantic.policy_noninterference",
+      "owner": "kernel",
+      "requirement": "Policy scope is a semantic input before replay, compilation, and fixed-point execution.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": [
+        "cargo test -p aether_api --test policy_noninterference",
+        "cargo test -p aether_runtime --test policy_scoped_execution"
+      ],
+      "inputs": [
+        "Cargo.lock",
+        "crates/aether_api/tests/policy_noninterference.rs",
+        "crates/aether_runtime/tests/policy_scoped_execution.rs"
+      ]
+    },
+    {
+      "id": "semantic.trace_handle_identity",
+      "owner": "service",
+      "requirement": "Service proof identity is execution-scoped, durable, authorized, and replay-verifiable.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": [
+        "cargo test -p aether_api --test execution_handles"
+      ],
+      "inputs": [
+        "Cargo.lock",
+        "crates/aether_api/tests/execution_handles.rs"
+      ]
+    },
+    {
+      "id": "storage.transactional_schema_append",
+      "owner": "storage",
+      "requirement": "Every public append is schema-valid, dependency-valid, atomic, cut-bound, and durably receipted.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": [
+        "cargo test -p aether_api --test append_admission",
+        "cargo test -p aether_storage"
+      ],
+      "inputs": [
+        "Cargo.lock",
+        "crates/aether_api/tests/append_admission.rs",
+        "crates/aether_storage/src/lib.rs"
+      ]
+    },
+    {
+      "id": "semantic.full_acceptance",
+      "owner": "kernel",
+      "requirement": "The complete Rust workspace acceptance suite passes without ignored correctness debt.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": [
+        "cargo test --workspace"
+      ],
+      "inputs": ["Cargo.lock", "Cargo.toml"]
+    },
+    {
+      "id": "quality.rust_fmt_clippy_all_targets",
+      "owner": "kernel",
+      "requirement": "Rust formatting and strict all-target clippy pass at the declared MSRV.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": [
+        "cargo fmt --all --check",
+        "cargo clippy --workspace --all-targets -- -D warnings"
+      ],
+      "inputs": ["Cargo.lock", "Cargo.toml"]
+    },
+    {
+      "id": "quality.go_boundary",
+      "owner": "clients",
+      "requirement": "The complete Go shell and client boundary suite passes.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": "go",
+      "commands": ["go test ./..."],
+      "inputs": ["go/go.mod", "go/go.sum"]
+    },
+    {
+      "id": "quality.python_boundary",
+      "owner": "clients",
+      "requirement": "The complete Python SDK, notebook, and readiness test boundary passes.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": ["python -m pytest python/tests -q"],
+      "inputs": ["python/aether_sdk/client.py", "python/tests"]
+    },
+    {
+      "id": "security.supply_chain",
+      "owner": "security",
+      "requirement": "Supply-chain policy, standard SBOM generation, action pinning, license exceptions, and package completeness contracts pass; exact scanner outputs remain required bundle subjects.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": ["python -m unittest python.tests.test_supply_chain -v"],
+      "inputs": [
+        "Cargo.lock",
+        "go/go.sum",
+        "scripts/supply_chain.py",
+        "fixtures/release/license-policy.json",
+        ".github/workflows",
+        "python/tests/test_supply_chain.py"
+      ]
+    },
+    {
+      "id": "security.transport",
+      "owner": "security",
+      "requirement": "Supported Postgres and HTTP transport modes fail closed on untrusted, expired, mismatched, incomplete, or downgraded TLS configuration.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": [
+        "cargo test -p aether_storage --test postgres_tls",
+        "cargo test -p aether_http deployment::tests"
+      ],
+      "inputs": [
+        "Cargo.lock",
+        "crates/aether_storage/tests/postgres_tls.rs",
+        "crates/aether_http/src/deployment.rs",
+        ".github/workflows/ci.yml"
+      ]
+    },
+    {
+      "id": "operations.beta_service",
+      "owner": "operations",
+      "requirement": "Namespace isolation, bounded queues, resource limits, audit backpressure, finite execution retention, pagination, rate limits, and durable service behavior pass without partial mutation.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": [
+        "cargo test -p aether_http",
+        "cargo test -p aether_service_core",
+        "cargo test -p aether_api --test http_service"
+      ],
+      "inputs": [
+        "Cargo.lock",
+        "crates/aether_http/src/http.rs",
+        "crates/aether_service_core/src/execution.rs",
+        "crates/aether_api/tests/http_service.rs",
+        "docs/RESOURCE_CONTROL_CONTRACT.md"
+      ]
+    },
+    {
+      "id": "architecture.boundaries_recovered",
+      "owner": "architecture",
+      "requirement": "Responsibility crates depend inward, the API is a compatibility facade, and runtime consumes the versioned executable plan.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": [
+        "python -m unittest python.tests.test_architecture_boundaries -v",
+        "cargo test -p aether_plan -p aether_rules -p aether_runtime"
+      ],
+      "inputs": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "crates/aether_plan/src/lib.rs",
+        "crates/aether_runtime/src/lib.rs",
+        "python/tests/test_architecture_boundaries.py",
+        "docs/ARCHITECTURE_BOUNDARIES.md"
+      ]
+    },
+    {
+      "id": "release.evidence_integrity",
+      "owner": "release",
+      "requirement": "Candidate identity, immutable envelope, deterministic bundle, tamper rejection, expiry, waiver, subject, and independent-verifier contracts pass; the final assembled bundle must still verify separately.",
+      "waivable": false,
+      "retry_policy": "never",
+      "working_directory": ".",
+      "commands": ["python -m unittest python.tests.test_release_evidence -v"],
+      "inputs": [
+        "fixtures/release/gate-policy.json",
+        "schemas/release",
+        "scripts/release_evidence.py",
+        "scripts/verify_release_evidence.py",
+        "python/tests/test_release_evidence.py"
+      ]
+    }
+  ],
+  "future_required_bundle_subjects": [
+    "pilot-package-file-manifest",
+    "rust-sbom",
+    "go-sbom",
+    "assembled-package-sbom",
+    "vulnerability-scan",
+    "license-scan",
+    "code-scan",
+    "secret-scan",
+    "transport-tls",
+    "namespace-contention",
+    "resource-controls",
+    "recovery",
+    "performance",
+    "soak",
+    "capacity",
+    "pages-deployment",
+    "package-provenance"
+  ]
+}

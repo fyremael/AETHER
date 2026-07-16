@@ -61,6 +61,10 @@ impl JournalCatalog {
             .ok_or(SidecarError::UnknownJournalElement(element))
     }
 
+    fn contains(&self, element: ElementId) -> bool {
+        self.positions.contains_key(&element)
+    }
+
     fn ensure_current_tail(&self, element: ElementId) -> Result<(), SidecarError> {
         self.ensure_known(element)?;
         match self.latest {
@@ -322,12 +326,19 @@ impl SidecarFederation for InMemorySidecarFederation {
             if record.metadata.sidecar_id != request.sidecar_id
                 || record.metadata.metric != request.metric
                 || record.metadata.dimensions != request.query_embedding.len()
-                || !journal.is_visible_at(record.metadata.registered_at, request.as_of)?
                 || !policy_allows(
                     request.policy_context.as_ref(),
                     record.metadata.policy.as_ref(),
                 )
             {
+                continue;
+            }
+            if !journal.contains(record.metadata.registered_at) {
+                return Err(SidecarError::UnavailableScopedAnchor {
+                    subject: format!("vector {}", record.metadata.vector_id),
+                });
+            }
+            if !journal.is_visible_at(record.metadata.registered_at, request.as_of)? {
                 continue;
             }
 
@@ -344,6 +355,13 @@ impl SidecarFederation for InMemorySidecarFederation {
                 !policy_allows(request.policy_context.as_ref(), artifact.policy.as_ref())
             }) {
                 continue;
+            }
+            if let Some(artifact) = &artifact {
+                if !journal.contains(artifact.registered_at) {
+                    return Err(SidecarError::UnavailableScopedAnchor {
+                        subject: format!("artifact {}", artifact.artifact_id),
+                    });
+                }
             }
             records.push((record.clone(), artifact));
         }
@@ -463,10 +481,15 @@ impl SqliteSidecarFederation {
             {
                 continue;
             }
-            if !journal.is_visible_at(metadata.registered_at, request.as_of)? {
+            if !policy_allows(request.policy_context.as_ref(), metadata.policy.as_ref()) {
                 continue;
             }
-            if !policy_allows(request.policy_context.as_ref(), metadata.policy.as_ref()) {
+            if !journal.contains(metadata.registered_at) {
+                return Err(SidecarError::UnavailableScopedAnchor {
+                    subject: format!("vector {}", metadata.vector_id),
+                });
+            }
+            if !journal.is_visible_at(metadata.registered_at, request.as_of)? {
                 continue;
             }
             let embedding: Vec<f32> = serde_json::from_str(&embedding_json)?;
@@ -478,6 +501,13 @@ impl SqliteSidecarFederation {
                 !policy_allows(request.policy_context.as_ref(), artifact.policy.as_ref())
             }) {
                 continue;
+            }
+            if let Some(artifact) = &artifact {
+                if !journal.contains(artifact.registered_at) {
+                    return Err(SidecarError::UnavailableScopedAnchor {
+                        subject: format!("artifact {}", artifact.artifact_id),
+                    });
+                }
             }
             records.push((
                 StoredVectorRecord {
@@ -698,11 +728,9 @@ fn ensure_policy_allows_artifact(
     if policy_allows(policy_context, reference.policy.as_ref()) {
         Ok(())
     } else {
-        Err(SidecarError::PolicyDenied {
-            subject: format!(
-                "artifact {}:{}",
-                reference.sidecar_id, reference.artifact_id
-            ),
+        Err(SidecarError::UnknownArtifactId {
+            sidecar_id: reference.sidecar_id.clone(),
+            artifact_id: reference.artifact_id.clone(),
         })
     }
 }
@@ -890,6 +918,9 @@ pub enum SidecarError {
     },
     #[error("vector fact projection for predicate {predicate} requires arity 3, found {arity}")]
     UnsupportedProjectionArity { predicate: String, arity: usize },
+    #[error("{subject} depends on a journal anchor unavailable in this policy scope")]
+    UnavailableScopedAnchor { subject: String },
+    #[deprecated(note = "hidden and nonexistent sidecar records now share the unknown-id error")]
     #[error("policy denied access to {subject}")]
     PolicyDenied { subject: String },
     #[error(transparent)]
@@ -1235,7 +1266,25 @@ mod tests {
             artifact_id: "doc-1".into(),
             policy_context: None,
         });
-        assert!(matches!(denied, Err(SidecarError::PolicyDenied { .. })));
+        assert!(matches!(
+            &denied,
+            Err(SidecarError::UnknownArtifactId { .. })
+        ));
+        let absent = InMemorySidecarFederation::default().get_artifact_reference(
+            GetArtifactReferenceRequest {
+                sidecar_id: "vector-store".into(),
+                artifact_id: "doc-1".into(),
+                policy_context: None,
+            },
+        );
+        assert_eq!(
+            denied
+                .expect_err("protected artifact must be opaque")
+                .to_string(),
+            absent
+                .expect_err("absent artifact must be unknown")
+                .to_string()
+        );
 
         let allowed = federation
             .get_artifact_reference(GetArtifactReferenceRequest {

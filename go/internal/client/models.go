@@ -7,6 +7,17 @@ import (
 	"strings"
 )
 
+func RequiredServiceCapabilities() []string {
+	return []string{
+		"trace_handles_v1",
+		"namespace_schema_ref_v1",
+		"append_receipts_v1",
+		"structured_errors_v1",
+		"resource_limits_v1",
+		"pagination_v1",
+	}
+}
+
 type ElementID = uint64
 type TupleID = uint64
 
@@ -196,18 +207,102 @@ type HistoryResponse struct {
 	Datoms []Datom `json:"datoms"`
 }
 
+type SchemaRef struct {
+	Version string `json:"version"`
+	Digest  string `json:"digest"`
+}
+
+type JournalCutRef struct {
+	LastElement  *ElementID `json:"last_element,omitempty"`
+	EntryCount   uint64     `json:"entry_count"`
+	PrefixDigest string     `json:"prefix_digest"`
+}
+
+type AppendAdmissionRequest struct {
+	SchemaRef      *SchemaRef     `json:"schema_ref,omitempty"`
+	ExpectedCut    *JournalCutRef `json:"expected_cut,omitempty"`
+	IdempotencyKey *string        `json:"idempotency_key,omitempty"`
+	Datoms         []Datom        `json:"datoms"`
+}
+
+type AppendReceipt struct {
+	BatchID              string        `json:"batch_id"`
+	SchemaRef            SchemaRef     `json:"schema_ref"`
+	PriorCut             JournalCutRef `json:"prior_cut"`
+	CommittedCut         JournalCutRef `json:"committed_cut"`
+	BatchDigest          string        `json:"batch_digest"`
+	Appended             int           `json:"appended"`
+	IdempotentReplay     bool          `json:"idempotent_replay"`
+	SchemaRefWasImplicit bool          `json:"schema_ref_was_implicit"`
+}
+
+type AppendDryRunResponse struct {
+	Valid       bool           `json:"valid"`
+	SchemaRef   *SchemaRef     `json:"schema_ref,omitempty"`
+	CurrentCut  *JournalCutRef `json:"current_cut,omitempty"`
+	BatchDigest *string        `json:"batch_digest,omitempty"`
+	Diagnostics []string       `json:"diagnostics"`
+}
+
+type RegisterSchemaRequest struct {
+	Schema        map[string]any `json:"schema"`
+	Predecessor   *SchemaRef     `json:"predecessor,omitempty"`
+	Compatibility string         `json:"compatibility"`
+}
+
+type ActivateSchemaRequest struct {
+	SchemaRef      SchemaRef  `json:"schema_ref"`
+	ExpectedActive *SchemaRef `json:"expected_active,omitempty"`
+}
+
+type NamespaceSchemaRevision struct {
+	SchemaRef     SchemaRef      `json:"schema_ref"`
+	Schema        map[string]any `json:"schema"`
+	Predecessor   *SchemaRef     `json:"predecessor,omitempty"`
+	Compatibility string         `json:"compatibility"`
+	Status        string         `json:"status"`
+}
+
+type SchemaBaselineReceipt struct {
+	SchemaRef               SchemaRef     `json:"schema_ref"`
+	Cut                     JournalCutRef `json:"cut"`
+	Status                  string        `json:"status"`
+	ValidationEngineVersion string        `json:"validation_engine_version"`
+	Diagnostics             []string      `json:"diagnostics"`
+	MigrationManifestJSON   *string       `json:"migration_manifest_json,omitempty"`
+}
+
+type SchemaCatalogResponse struct {
+	Active    *NamespaceSchemaRevision  `json:"active,omitempty"`
+	Revisions []NamespaceSchemaRevision `json:"revisions"`
+	Baselines []SchemaBaselineReceipt   `json:"baselines"`
+}
+
 type RunDocumentRequest struct {
 	DSL           string         `json:"dsl"`
 	PolicyContext *PolicyContext `json:"policy_context,omitempty"`
 }
 
-type ExplainTupleRequest struct {
-	TupleID       uint64         `json:"tuple_id"`
+type ResolveTraceHandleRequest struct {
+	Handle        string         `json:"handle"`
 	PolicyContext *PolicyContext `json:"policy_context,omitempty"`
+	VerifyReplay  bool           `json:"verify_replay"`
 }
 
 type HealthResponse struct {
 	Status string `json:"status"`
+}
+
+type PageInfo struct {
+	Offset     int  `json:"offset"`
+	Limit      int  `json:"limit"`
+	Total      int  `json:"total"`
+	NextOffset *int `json:"next_offset,omitempty"`
+}
+
+type PagedHistoryResponse struct {
+	Page   PageInfo `json:"page"`
+	Datoms []Datom  `json:"datoms"`
 }
 
 type ServiceStatusStorage struct {
@@ -255,9 +350,19 @@ type ServiceStatusResponse struct {
 	ServiceMode          string                   `json:"service_mode"`
 	Storage              ServiceStatusStorage     `json:"storage"`
 	ActiveNamespaceCount int                      `json:"active_namespace_count"`
+	Capabilities         []string                 `json:"capabilities"`
 	Namespaces           []NamespaceStatusSummary `json:"namespaces"`
 	Principals           []PrincipalStatusSummary `json:"principals"`
 	Replicas             []ReplicaStatusSummary   `json:"replicas"`
+}
+
+func (s ServiceStatusResponse) Supports(capability string) bool {
+	for _, candidate := range s.Capabilities {
+		if candidate == capability {
+			return true
+		}
+	}
+	return false
 }
 
 type NamespaceStatusSummary struct {
@@ -293,6 +398,8 @@ type AuditContext struct {
 	EffectiveCapabilities []string `json:"effective_capabilities"`
 	EffectiveVisibilities []string `json:"effective_visibilities"`
 	PolicyDecision        *string  `json:"policy_decision"`
+	LegacyEndpoint        bool     `json:"legacy_endpoint,omitempty"`
+	SchemaRefOmitted      bool     `json:"schema_ref_omitted,omitempty"`
 }
 
 type AuditEntry struct {
@@ -337,7 +444,9 @@ type CoordinationDeltaReportRequest struct {
 }
 
 type CoordinationTraceHandle struct {
-	TupleID        uint64      `json:"tuple_id"`
+	ExecutionID    string      `json:"execution_id"`
+	Handle         string      `json:"handle"`
+	LocalTupleID   uint64      `json:"local_tuple_id"`
 	TupleCount     int         `json:"tuple_count"`
 	SourceDatomIDs []ElementID `json:"source_datom_ids"`
 	ParentTupleIDs []TupleID   `json:"parent_tuple_ids"`
@@ -376,8 +485,10 @@ type CoordinationDeltaReport struct {
 }
 
 type ReportRow struct {
-	TupleID *uint64 `json:"tuple_id,omitempty"`
-	Values  []Value `json:"values"`
+	TupleID     *uint64 `json:"tuple_id,omitempty"`
+	ExecutionID *string `json:"execution_id,omitempty"`
+	TraceHandle *string `json:"trace_handle,omitempty"`
+	Values      []Value `json:"values"`
 }
 
 type TraceTupleSummary struct {
@@ -389,9 +500,11 @@ type TraceTupleSummary struct {
 }
 
 type TraceSummary struct {
-	Root       uint64              `json:"root"`
-	TupleCount int                 `json:"tuple_count"`
-	Tuples     []TraceTupleSummary `json:"tuples"`
+	ExecutionID string              `json:"execution_id"`
+	Handle      string              `json:"handle"`
+	Root        uint64              `json:"root"`
+	TupleCount  int                 `json:"tuple_count"`
+	Tuples      []TraceTupleSummary `json:"tuples"`
 }
 
 type CoordinationPilotReport struct {
@@ -441,8 +554,19 @@ type DerivationTrace struct {
 	Tuples []DerivedTuple `json:"tuples"`
 }
 
-type ExplainTupleResponse struct {
-	Trace DerivationTrace `json:"trace"`
+type TraceRecord struct {
+	Handle       string          `json:"handle"`
+	ExecutionID  string          `json:"execution_id"`
+	LocalTupleID uint64          `json:"local_tuple_id"`
+	TupleDigest  string          `json:"tuple_digest"`
+	TraceDigest  string          `json:"trace_digest"`
+	Trace        DerivationTrace `json:"trace"`
+}
+
+type ResolveTraceHandleResponse struct {
+	Record          TraceRecord `json:"record"`
+	DigestsVerified bool        `json:"digests_verified"`
+	ReplayVerified  bool        `json:"replay_verified"`
 }
 
 func FormatPolicyContext(policy *PolicyContext) string {

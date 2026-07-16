@@ -1,6 +1,6 @@
 use aether_api::{
-    coordination_pilot_dsl, coordination_pilot_seed_history, AppendRequest, ExplainTupleRequest,
-    InMemoryKernelService, KernelService, RunDocumentRequest, SqliteKernelService,
+    coordination_pilot_dsl, coordination_pilot_seed_history, AppendRequest, InMemoryKernelService,
+    KernelService, ResolveTraceHandleRequest, RunDocumentRequest, SqliteKernelService,
     COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
 use aether_ast::{EntityId, Value};
@@ -174,14 +174,29 @@ fn capture_contract(service: &mut impl KernelService) -> PilotContractSnapshot {
         .expect("run current authorization");
     let current_authorized = current_authorized_response
         .query
+        .as_ref()
         .expect("current query result")
-        .rows;
+        .rows
+        .clone();
+    let tuple_id = current_authorized[0].tuple_id.expect("authorized tuple id");
+    let handle = current_authorized_response
+        .execution
+        .as_ref()
+        .expect("current execution receipt")
+        .trace_handles
+        .iter()
+        .find(|binding| binding.local_tuple_id == tuple_id)
+        .expect("current authorization trace handle")
+        .handle
+        .clone();
     let trace_tuple_count = service
-        .explain_tuple(ExplainTupleRequest {
-            tuple_id: current_authorized[0].tuple_id.expect("authorized tuple id"),
+        .resolve_trace_handle(ResolveTraceHandleRequest {
+            handle,
             policy_context: None,
+            verify_replay: true,
         })
         .expect("explain current authorization")
+        .record
         .trace
         .tuples
         .len();

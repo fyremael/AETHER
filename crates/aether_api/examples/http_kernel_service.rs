@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  POST /v1/state/as-of");
     println!("  POST /v1/documents/parse");
     println!("  POST /v1/documents/run");
-    println!("  POST /v1/explain/tuple");
+    println!("  POST /v1/explanations/resolve");
     println!("  POST /v1/sidecars/artifacts/register");
     println!("  POST /v1/sidecars/artifacts/get");
     println!("  POST /v1/sidecars/vectors/register");

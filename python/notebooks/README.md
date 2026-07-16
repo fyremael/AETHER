@@ -21,6 +21,12 @@ the helper prefers the built pilot binary instead of invoking `cargo run`
 again. Rerunning the setup cell in the same kernel also reuses the live pilot
 service when it is still healthy.
 
+Every notebook performs a capability preflight before issuing semantic
+requests. The service must advertise trace handles, namespace schema
+references, append receipts, and structured errors. Tutorials fail closed on
+an older contract; they never fall back from immutable trace handles to
+process-local tuple IDs.
+
 Notebook output is intentionally verbose. Cells print a short plain-language
 summary first, then the raw JSON response, so a reader can understand the
 semantic result without losing the exact service payload.

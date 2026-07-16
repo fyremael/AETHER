@@ -1,13 +1,25 @@
 # V1 Closeout
 
-- Status: Closed for the v1 single-node semantic thesis
+- Status: Reopened in part; immutable qualification remains unsatisfied
 - Date: 2026-03-28
-- Scope: full v1 single-node semantic closure plus the launch-ready
-  design-partner pilot
+- Reopened: 2026-07-09 following the comprehensive audit
+- Scope: historical v1 acceptance record, now limited to the unrestricted
+  single-node kernel slice
+
+The active external claim is:
+
+> Controlled single-node alpha with a real Rust semantic kernel, limited to one
+> visibility domain, trusted appenders, and explicitly supported deployment
+> boundaries.
+
+The reproduced policy, explanation-identity, append-admission, and evidence
+defects are recorded in `docs/COMPREHENSIVE_AUDIT_2026-07-09.md`. Their binding
+repair order and requalification gates are in `docs/REMEDIATION_PROGRAMME.md`.
 
 ## What This Document Closes
 
-This document closes the repository's v1 claim in its explicitly narrow form:
+This document records the repository's original v1 closeout. The following
+items remain supported for the unrestricted library slice:
 
 - append-only journal truth
 - deterministic `History`, `Current`, and `AsOf`
@@ -16,17 +28,22 @@ This document closes the repository's v1 claim in its explicitly narrow form:
 - stratified negation
 - bounded aggregation in the current v1 slice
 - provenance-bearing derived tuples and explanation
-- policy-aware derivation and reporting
+- policy-scoped replay, compilation, runtime, reporting, and explanation
+- execution-scoped service proof handles with durable replay metadata
 - sidecar subordination on the current single-node path
 - pilot-grade coordination semantics and authenticated service boundaries
 
-It does not close the broader platform horizon.
-That later work remains real, but it is post-v1 work rather than unfinished
-kernel truth.
+The local R1 and R2 implementations repair policy-aware semantics and proof
+identity, but this historical closeout still does not promote those claims:
+R3 append admission is implemented locally. R4's immutable evidence contracts,
+runner, deterministic bundle, verifier, negative tests, and reusable workflow
+are also implemented locally, but the required official run and independent
+downloaded verification remain open. The repaired contracts are therefore not
+yet a release claim.
 
 ## Acceptance Closure Against The Original Kernel Bar
 
-The original library-level acceptance target is now satisfied:
+The original unrestricted library-level acceptance target is satisfied:
 
 - schema with attribute merge classes exists
 - datoms append to in-memory and durable journals
@@ -70,8 +87,9 @@ The closeout case rests on five evidence layers:
 
 ## Release And Validation Contract
 
-The minimum release-candidate gate for this closeout is the structured
-release-readiness suite:
+The historical closeout used the structured release-readiness suite below.
+During remediation it is diagnostic only; it cannot qualify a release until R4
+binds every required result to one exact candidate:
 
 ```text
 powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1
@@ -113,20 +131,23 @@ Those are intentionally outside the v1 bar.
 
 ## Operational Release Language
 
-The correct external wording for this closeout is:
+The only current external wording authorized by R0 is:
 
-- **full v1 single-node semantic kernel**
-- **launch-ready design-partner pilot**
+> Controlled single-node alpha with a real Rust semantic kernel, limited to one
+> visibility domain, trusted appenders, and explicitly supported deployment
+> boundaries.
 
 The wrong wording is broader than the evidence, for example:
 
 - production-complete platform
 - general multi-agent operating system
 - finished distributed control plane
+- full policy-aware v1 closure
+- selected commercial beta
 
 ## What Moves To Post-v1
 
-After this closeout, the next roadmap center is:
+The remediation programme now precedes the former post-v1 roadmap tracks:
 
 - post-pilot service hardening
 - distributed-truth execution beyond the current prototype
@@ -138,10 +159,7 @@ Those tracks are already governed in `docs/ROADMAP.md`.
 
 ## Release Recommendation
 
-The repository is now in a state that can be honestly tagged and discussed as
-v1 for the single-node semantic thesis, provided the exact candidate tree
-passes the documented release-readiness and CI gates.
-
-This document closes the semantic and governance question.
-Future work should widen from this point without pretending the scope was
-larger than it was.
+Do not use this historical record to qualify a new release or restore the
+policy-aware v1 claim. Requalification requires the ordered R1-R5 gates and one
+independently verified exact-candidate evidence bundle at R7. Until then, the
+controlled-alpha statement above is the complete release recommendation.

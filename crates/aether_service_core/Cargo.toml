@@ -1,0 +1,23 @@
+[package]
+name = "aether_service_core"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+aether_ast = { path = "../aether_ast" }
+aether_explain = { path = "../aether_explain" }
+aether_plan = { path = "../aether_plan" }
+aether_resolver = { path = "../aether_resolver" }
+aether_rules = { path = "../aether_rules" }
+aether_runtime = { path = "../aether_runtime" }
+aether_schema = { path = "../aether_schema" }
+aether_sidecar = { path = "../aether_sidecar" }
+aether_storage = { path = "../aether_storage" }
+rand.workspace = true
+rusqlite = { version = "=0.32.1", features = ["bundled"] }
+serde.workspace = true
+serde_json = "1.0.133"
+sha2.workspace = true
+thiserror.workspace = true

@@ -1,7 +1,11 @@
-use aether_ast::{AttributeId, Datom, ElementId, EntityId, OperationKind, PolicyEnvelope, Value};
+use aether_ast::{
+    policy_requirements_subset_of, AttributeId, Datom, ElementId, EntityId, OperationKind,
+    PolicyEnvelope, PolicyScope, TemporalView, Value,
+};
 use aether_schema::{AttributeClass, AttributeSchema, Schema};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use thiserror::Error;
 
 pub trait Resolver {
@@ -12,6 +16,423 @@ pub trait Resolver {
         datoms: &[Datom],
         at: &ElementId,
     ) -> Result<ResolvedState, ResolveError>;
+
+    fn resolve_scoped(
+        &self,
+        schema: &Schema,
+        replay: &ScopedReplay,
+    ) -> Result<ResolvedSnapshot, ResolveError> {
+        let state = self.current(schema, replay.datoms())?;
+        Ok(ResolvedSnapshot {
+            state,
+            requested_view: replay.requested_view().clone(),
+            visible_cut: replay.visible_cut(),
+            scope: replay.scope().clone(),
+        })
+    }
+
+    fn replay_scoped(
+        &self,
+        schema: &Schema,
+        history: &[Datom],
+        view: TemporalView,
+        scope: PolicyScope,
+    ) -> Result<ResolvedSnapshot, ResolveError> {
+        let replay = ScopedReplay::new(history, view, scope)?;
+        self.resolve_scoped(schema, &replay)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JournalDependencyKind {
+    ProvenanceParent,
+    CausalFrontier,
+    SequenceAnchor,
+}
+
+impl fmt::Display for JournalDependencyKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            Self::ProvenanceParent => "provenance-parent",
+            Self::CausalFrontier => "causal-frontier",
+            Self::SequenceAnchor => "sequence-anchor",
+        };
+        formatter.write_str(label)
+    }
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryDependencyViolationReason {
+    MissingReference,
+    ForwardReference,
+    PolicyNotClosed,
+    MissingSequenceAnchor,
+    MalformedSequenceAnchor { parent_count: usize },
+    InvalidSequenceAnchor,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct HistoryDependencyViolation {
+    pub element: ElementId,
+    pub kind: JournalDependencyKind,
+    pub dependency: Option<ElementId>,
+    pub reason: HistoryDependencyViolationReason,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct HistoryDependencyCertification {
+    pub datom_count: usize,
+    pub violations: Vec<HistoryDependencyViolation>,
+}
+
+impl HistoryDependencyCertification {
+    pub fn is_valid(&self) -> bool {
+        self.violations.is_empty()
+    }
+}
+
+pub fn certify_history_dependencies(history: &[Datom]) -> HistoryDependencyCertification {
+    let mut violations = Vec::new();
+
+    for (child_index, child) in history.iter().enumerate() {
+        if child.op == OperationKind::InsertAfter {
+            certify_sequence_anchor(history, child_index, child, &mut violations);
+        } else {
+            for dependency in &child.provenance.parent_datom_ids {
+                certify_reference(
+                    history,
+                    child_index,
+                    child,
+                    *dependency,
+                    JournalDependencyKind::ProvenanceParent,
+                    &mut violations,
+                );
+            }
+        }
+
+        for dependency in &child.causal_context.frontier {
+            certify_reference(
+                history,
+                child_index,
+                child,
+                *dependency,
+                JournalDependencyKind::CausalFrontier,
+                &mut violations,
+            );
+        }
+    }
+
+    violations.sort();
+    violations.dedup();
+    HistoryDependencyCertification {
+        datom_count: history.len(),
+        violations,
+    }
+}
+
+fn certify_sequence_anchor(
+    history: &[Datom],
+    child_index: usize,
+    child: &Datom,
+    violations: &mut Vec<HistoryDependencyViolation>,
+) {
+    match child.provenance.parent_datom_ids.as_slice() {
+        [] => {
+            let prior_sequence_entry = history[..child_index].iter().any(|candidate| {
+                candidate.entity == child.entity
+                    && candidate.attribute == child.attribute
+                    && candidate.op == OperationKind::InsertAfter
+            });
+            if prior_sequence_entry {
+                violations.push(HistoryDependencyViolation {
+                    element: child.element,
+                    kind: JournalDependencyKind::SequenceAnchor,
+                    dependency: None,
+                    reason: HistoryDependencyViolationReason::MissingSequenceAnchor,
+                });
+            }
+        }
+        [dependency] => certify_reference(
+            history,
+            child_index,
+            child,
+            *dependency,
+            JournalDependencyKind::SequenceAnchor,
+            violations,
+        ),
+        dependencies => {
+            violations.push(HistoryDependencyViolation {
+                element: child.element,
+                kind: JournalDependencyKind::SequenceAnchor,
+                dependency: None,
+                reason: HistoryDependencyViolationReason::MalformedSequenceAnchor {
+                    parent_count: dependencies.len(),
+                },
+            });
+            for dependency in dependencies {
+                certify_reference(
+                    history,
+                    child_index,
+                    child,
+                    *dependency,
+                    JournalDependencyKind::SequenceAnchor,
+                    violations,
+                );
+            }
+        }
+    }
+}
+
+fn certify_reference(
+    history: &[Datom],
+    child_index: usize,
+    child: &Datom,
+    dependency: ElementId,
+    kind: JournalDependencyKind,
+    violations: &mut Vec<HistoryDependencyViolation>,
+) {
+    let Some((dependency_index, referenced)) = history
+        .iter()
+        .enumerate()
+        .find(|(_, candidate)| candidate.element == dependency)
+    else {
+        violations.push(HistoryDependencyViolation {
+            element: child.element,
+            kind,
+            dependency: Some(dependency),
+            reason: HistoryDependencyViolationReason::MissingReference,
+        });
+        return;
+    };
+
+    if dependency_index >= child_index {
+        violations.push(HistoryDependencyViolation {
+            element: child.element,
+            kind,
+            dependency: Some(dependency),
+            reason: HistoryDependencyViolationReason::ForwardReference,
+        });
+        return;
+    }
+
+    if !policy_requirements_subset_of(referenced.policy.as_ref(), child.policy.as_ref()) {
+        violations.push(HistoryDependencyViolation {
+            element: child.element,
+            kind,
+            dependency: Some(dependency),
+            reason: HistoryDependencyViolationReason::PolicyNotClosed,
+        });
+    }
+
+    if kind == JournalDependencyKind::SequenceAnchor
+        && (referenced.entity != child.entity
+            || referenced.attribute != child.attribute
+            || referenced.op != OperationKind::InsertAfter)
+    {
+        violations.push(HistoryDependencyViolation {
+            element: child.element,
+            kind,
+            dependency: Some(dependency),
+            reason: HistoryDependencyViolationReason::InvalidSequenceAnchor,
+        });
+    }
+}
+
+fn validate_scoped_dependencies(
+    authority_prefix: &[Datom],
+    scope: &PolicyScope,
+) -> Result<(), ResolveError> {
+    for (child_index, child) in authority_prefix.iter().enumerate() {
+        if !scope.allows(child.policy.as_ref()) {
+            continue;
+        }
+
+        if child.op == OperationKind::InsertAfter {
+            validate_scoped_sequence_anchor(authority_prefix, child_index, child, scope)?;
+        } else {
+            for dependency in &child.provenance.parent_datom_ids {
+                validate_scoped_reference(
+                    authority_prefix,
+                    child_index,
+                    child,
+                    *dependency,
+                    JournalDependencyKind::ProvenanceParent,
+                    scope,
+                )?;
+            }
+        }
+
+        for dependency in &child.causal_context.frontier {
+            validate_scoped_reference(
+                authority_prefix,
+                child_index,
+                child,
+                *dependency,
+                JournalDependencyKind::CausalFrontier,
+                scope,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_scoped_sequence_anchor(
+    authority_prefix: &[Datom],
+    child_index: usize,
+    child: &Datom,
+    scope: &PolicyScope,
+) -> Result<(), ResolveError> {
+    match child.provenance.parent_datom_ids.as_slice() {
+        [] => {
+            let prior_visible_entry = authority_prefix[..child_index].iter().any(|candidate| {
+                scope.allows(candidate.policy.as_ref())
+                    && candidate.entity == child.entity
+                    && candidate.attribute == child.attribute
+                    && candidate.op == OperationKind::InsertAfter
+            });
+            if prior_visible_entry {
+                return Err(scoped_dependency_error(
+                    child,
+                    JournalDependencyKind::SequenceAnchor,
+                ));
+            }
+        }
+        [dependency] => {
+            let referenced = validate_scoped_reference(
+                authority_prefix,
+                child_index,
+                child,
+                *dependency,
+                JournalDependencyKind::SequenceAnchor,
+                scope,
+            )?;
+            if referenced.entity != child.entity
+                || referenced.attribute != child.attribute
+                || referenced.op != OperationKind::InsertAfter
+            {
+                return Err(scoped_dependency_error(
+                    child,
+                    JournalDependencyKind::SequenceAnchor,
+                ));
+            }
+        }
+        _ => {
+            return Err(scoped_dependency_error(
+                child,
+                JournalDependencyKind::SequenceAnchor,
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_scoped_reference<'a>(
+    authority_prefix: &'a [Datom],
+    child_index: usize,
+    child: &Datom,
+    dependency: ElementId,
+    kind: JournalDependencyKind,
+    scope: &PolicyScope,
+) -> Result<&'a Datom, ResolveError> {
+    let Some((dependency_index, referenced)) = authority_prefix
+        .iter()
+        .enumerate()
+        .find(|(_, candidate)| candidate.element == dependency)
+    else {
+        return Err(scoped_dependency_error(child, kind));
+    };
+
+    if dependency_index >= child_index
+        || !scope.allows(referenced.policy.as_ref())
+        || !policy_requirements_subset_of(referenced.policy.as_ref(), child.policy.as_ref())
+    {
+        return Err(scoped_dependency_error(child, kind));
+    }
+
+    Ok(referenced)
+}
+
+fn scoped_dependency_error(child: &Datom, kind: JournalDependencyKind) -> ResolveError {
+    ResolveError::UnavailableScopedDependency {
+        element: child.element,
+        kind,
+    }
+}
+
+#[derive(Clone, PartialEq)]
+pub struct ScopedReplay {
+    datoms: Vec<Datom>,
+    requested_view: TemporalView,
+    visible_cut: Option<ElementId>,
+    scope: PolicyScope,
+}
+
+impl ScopedReplay {
+    pub fn new(
+        history: &[Datom],
+        requested_view: TemporalView,
+        scope: PolicyScope,
+    ) -> Result<Self, ResolveError> {
+        let authority_prefix = match &requested_view {
+            TemporalView::Current => history,
+            TemporalView::AsOf(at) => {
+                let end = history
+                    .iter()
+                    .position(|datom| datom.element == *at)
+                    .ok_or(ResolveError::UnknownElementId(*at))?;
+                if !scope.allows(history[end].policy.as_ref()) {
+                    return Err(ResolveError::UnknownElementId(*at));
+                }
+                &history[..=end]
+            }
+        };
+        validate_scoped_dependencies(authority_prefix, &scope)?;
+        let datoms = authority_prefix
+            .iter()
+            .filter(|datom| scope.allows(datom.policy.as_ref()))
+            .cloned()
+            .collect::<Vec<_>>();
+        let visible_cut = datoms.last().map(|datom| datom.element);
+
+        Ok(Self {
+            datoms,
+            requested_view,
+            visible_cut,
+            scope,
+        })
+    }
+
+    pub fn datoms(&self) -> &[Datom] {
+        &self.datoms
+    }
+
+    pub fn requested_view(&self) -> &TemporalView {
+        &self.requested_view
+    }
+
+    pub fn visible_cut(&self) -> Option<ElementId> {
+        self.visible_cut
+    }
+
+    pub fn scope(&self) -> &PolicyScope {
+        &self.scope
+    }
+}
+
+impl fmt::Debug for ScopedReplay {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ScopedReplay")
+            .field("datom_count", &self.datoms.len())
+            .field("requested_view", &self.requested_view)
+            .field("visible_cut", &self.visible_cut)
+            .field("scope", &self.scope)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -56,6 +477,48 @@ pub struct ResolvedState {
     pub as_of: Option<ElementId>,
 }
 
+#[derive(Clone, PartialEq)]
+pub struct ResolvedSnapshot {
+    state: ResolvedState,
+    requested_view: TemporalView,
+    visible_cut: Option<ElementId>,
+    scope: PolicyScope,
+}
+
+impl ResolvedSnapshot {
+    pub fn state(&self) -> &ResolvedState {
+        &self.state
+    }
+
+    pub fn into_state(self) -> ResolvedState {
+        self.state
+    }
+
+    pub fn requested_view(&self) -> &TemporalView {
+        &self.requested_view
+    }
+
+    pub fn visible_cut(&self) -> Option<ElementId> {
+        self.visible_cut
+    }
+
+    pub fn scope(&self) -> &PolicyScope {
+        &self.scope
+    }
+}
+
+impl fmt::Debug for ResolvedSnapshot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ResolvedSnapshot")
+            .field("entity_count", &self.state.entities.len())
+            .field("requested_view", &self.requested_view)
+            .field("visible_cut", &self.visible_cut)
+            .field("scope", &self.scope)
+            .finish()
+    }
+}
+
 impl ResolvedState {
     pub fn entity(&self, id: &EntityId) -> Option<&EntityState> {
         self.entities.get(id)
@@ -96,6 +559,20 @@ impl Resolver for MaterializedResolver {
             .position(|datom| datom.element == *at)
             .ok_or(ResolveError::UnknownElementId(*at))?;
         resolve_datoms(schema, &datoms[..=end], Some(*at))
+    }
+
+    fn resolve_scoped(
+        &self,
+        schema: &Schema,
+        replay: &ScopedReplay,
+    ) -> Result<ResolvedSnapshot, ResolveError> {
+        let state = resolve_datoms(schema, replay.datoms(), replay.visible_cut())?;
+        Ok(ResolvedSnapshot {
+            state,
+            requested_view: replay.requested_view().clone(),
+            visible_cut: replay.visible_cut(),
+            scope: replay.scope().clone(),
+        })
     }
 }
 
@@ -370,6 +847,11 @@ pub enum ResolveError {
     UnknownAttribute(AttributeId),
     #[error("unknown element id {0}")]
     UnknownElementId(ElementId),
+    #[error("element {element} has an unavailable {kind} dependency in this policy scope")]
+    UnavailableScopedDependency {
+        element: ElementId,
+        kind: JournalDependencyKind,
+    },
     #[error("attribute class mismatch for attribute {0}")]
     AttributeClassMismatch(AttributeId),
     #[error("operation {op:?} is invalid for attribute {attribute} with class {class:?}")]

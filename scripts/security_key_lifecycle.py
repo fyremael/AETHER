@@ -95,7 +95,7 @@ def file_sha256(path: Path) -> str:
     return hasher.hexdigest()
 
 
-def build_sbom(package_root: Path, artifact_dir: Path, root: Path) -> dict[str, Any]:
+def build_file_manifest(package_root: Path, artifact_dir: Path, root: Path) -> dict[str, Any]:
     files = []
     for path in sorted(package_root.rglob("*")):
         if not path.is_file():
@@ -115,15 +115,15 @@ def build_sbom(package_root: Path, artifact_dir: Path, root: Path) -> dict[str, 
         "package_root": display_path(package_root, root),
         "files": files,
     }
-    sbom_path = artifact_dir / "pilot-package-sbom.json"
+    manifest_path = artifact_dir / "pilot-package-file-manifest.json"
     checksums_path = artifact_dir / "pilot-package-sha256.txt"
-    write_json(sbom_path, payload)
+    write_json(manifest_path, payload)
     write_text(
         checksums_path,
         "".join(f"{item['sha256']}  {item['path']}\n" for item in files),
     )
     return {
-        "sbom_path": display_path(sbom_path, root),
+        "manifest_path": display_path(manifest_path, root),
         "checksums_path": display_path(checksums_path, root),
         "file_count": len(files),
     }
@@ -319,15 +319,22 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         )
     )
 
-    sbom = build_sbom(package_root, artifact_dir, root) if package_root.exists() else {"file_count": 0}
+    file_manifest = (
+        build_file_manifest(package_root, artifact_dir, root)
+        if package_root.exists()
+        else {"file_count": 0}
+    )
     gates.append(
         build_gate(
-            "package_sbom_and_checksums",
-            "Package SBOM and checksum manifest are generated",
-            sbom.get("file_count", 0) >= len(PACKAGE_REQUIRED_FILES),
-            [sbom.get("sbom_path", "sbom unavailable"), sbom.get("checksums_path", "checksums unavailable")],
-            blockers=["Package SBOM/checksum manifest did not include the expected file set."],
-            details={"file_count": sbom.get("file_count", 0)},
+            "package_file_manifest_and_checksums",
+            "Package file manifest and checksum list are generated",
+            file_manifest.get("file_count", 0) >= len(PACKAGE_REQUIRED_FILES),
+            [
+                file_manifest.get("manifest_path", "file manifest unavailable"),
+                file_manifest.get("checksums_path", "checksums unavailable"),
+            ],
+            blockers=["Package file/checksum manifest did not include the expected file set."],
+            details={"file_count": file_manifest.get("file_count", 0)},
         )
     )
 

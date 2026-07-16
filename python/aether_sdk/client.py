@@ -27,9 +27,17 @@ class AetherApiError(Exception):
     status_code: int
     message: str
     payload: JsonValue | None = None
+    code: str | None = None
+    request_id: str | None = None
+    details: dict[str, Any] | None = None
 
     def __str__(self) -> str:
-        return f"AETHER API error ({self.status_code}): {self.message}"
+        context = ""
+        if self.code:
+            context += f" code={self.code}"
+        if self.request_id:
+            context += f" request_id={self.request_id}"
+        return f"AETHER API error ({self.status_code}{context}): {self.message}"
 
 
 class AetherClient:
@@ -52,14 +60,119 @@ class AetherClient:
     def status(self) -> dict[str, Any]:
         return self._request_json("GET", "/v1/status")
 
+    def capabilities(self) -> frozenset[str]:
+        return frozenset(str(value) for value in self.status().get("capabilities", []))
+
+    def supports(self, capability: str) -> bool:
+        return capability in self.capabilities()
+
+    def require_capabilities(self, *capabilities: str) -> None:
+        available = self.capabilities()
+        missing = sorted(set(capabilities) - available)
+        if missing:
+            raise AetherApiError(
+                426,
+                f"server is missing required capabilities: {', '.join(missing)}",
+                {"available": sorted(available), "missing": missing},
+                code="capability_required",
+                details={"available": sorted(available), "missing": missing},
+            )
+
     def audit_log(self) -> dict[str, Any]:
         return self._request_json("GET", "/v1/audit")
 
     def history(self) -> dict[str, Any]:
         return self._request_json("GET", "/v1/history")
 
-    def append(self, datoms: list[dict[str, Any] | Datom]) -> dict[str, Any]:
-        return self._request_json("POST", "/v1/append", {"datoms": datoms})
+    def history_page(self, *, offset: int = 0, limit: int = 500) -> dict[str, Any]:
+        return self._request_json(
+            "GET", f"/v1/history/page?offset={offset}&limit={limit}"
+        )
+
+    def append(
+        self,
+        datoms: list[dict[str, Any] | Datom],
+        *,
+        schema_ref: dict[str, Any] | None = None,
+        expected_cut: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            "/v1/append",
+            {
+                "schema_ref": schema_ref,
+                "expected_cut": expected_cut,
+                "idempotency_key": idempotency_key,
+                "datoms": datoms,
+            },
+        )
+
+    def append_dry_run(
+        self,
+        datoms: list[dict[str, Any] | Datom],
+        *,
+        schema_ref: dict[str, Any] | None = None,
+        expected_cut: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            "/v1/append/dry-run",
+            {
+                "schema_ref": schema_ref,
+                "expected_cut": expected_cut,
+                "idempotency_key": idempotency_key,
+                "datoms": datoms,
+            },
+        )
+
+    def append_receipts(self) -> dict[str, Any]:
+        return self._request_json("GET", "/v1/append/receipts")
+
+    def schema_catalog(self) -> dict[str, Any]:
+        return self._request_json("GET", "/v1/schema")
+
+    def active_schema_ref(self) -> dict[str, Any]:
+        active = self.schema_catalog().get("active")
+        if not isinstance(active, dict) or not isinstance(active.get("schema_ref"), dict):
+            raise AetherApiError(
+                412,
+                "namespace has no active schema",
+                {},
+                code="active_schema_required",
+                details={},
+            )
+        return active["schema_ref"]
+
+    def register_schema(
+        self,
+        schema: dict[str, Any],
+        *,
+        predecessor: dict[str, Any] | None = None,
+        compatibility: str = "exact",
+    ) -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            "/v1/schema/register",
+            {
+                "schema": schema,
+                "predecessor": predecessor,
+                "compatibility": compatibility,
+            },
+        )
+
+    def activate_schema(
+        self,
+        schema_ref: dict[str, Any],
+        *,
+        expected_active: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            "/v1/schema/activate",
+            {"schema_ref": schema_ref, "expected_active": expected_active},
+        )
 
     def current_state(
         self,
@@ -114,6 +227,20 @@ class AetherClient:
             RunDocumentRequest(dsl=dsl, policy_context=policy_context),
         )
 
+    def run_document_page(
+        self,
+        dsl: str,
+        *,
+        offset: int = 0,
+        limit: int = 500,
+        policy_context: PolicyContext | dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            f"/v1/documents/run/page?offset={offset}&limit={limit}",
+            RunDocumentRequest(dsl=dsl, policy_context=policy_context),
+        )
+
     def run_named_query(
         self,
         dsl: str,
@@ -124,23 +251,67 @@ class AetherClient:
         response = self.run_document(dsl, policy_context=policy_context)
         for query in response.get("queries", []):
             if query.get("name") == query_name:
-                return query.get("result", query)
+                result = query.get("result", query)
+                execution_id = query.get("execution_id")
+                receipt = next(
+                    (
+                        item
+                        for item in response.get("executions", [])
+                        if item.get("manifest", {}).get("execution_id") == execution_id
+                    ),
+                    None,
+                )
+                handles = {
+                    binding["local_tuple_id"]: binding["handle"]
+                    for binding in (receipt or {}).get("trace_handles", [])
+                }
+                for row in result.get("rows", []):
+                    tuple_id = row.get("tuple_id")
+                    if tuple_id in handles:
+                        row["execution_id"] = execution_id
+                        row["trace_handle"] = handles[tuple_id]
+                return result
         raise AetherApiError(
             404,
             f"named query not found: {query_name}",
             {"query_name": query_name},
         )
 
-    def explain_tuple(
+    def resolve_trace_handle(
         self,
-        tuple_id: int,
+        handle: str,
         *,
         policy_context: PolicyContext | dict[str, Any] | None = None,
+        verify_replay: bool = False,
     ) -> dict[str, Any]:
-        payload: dict[str, Any] = {"tuple_id": tuple_id}
+        payload: dict[str, Any] = {
+            "handle": handle,
+            "verify_replay": verify_replay,
+        }
         if policy_context is not None:
             payload["policy_context"] = policy_context
-        return self._request_json("POST", "/v1/explain/tuple", payload)
+        return self._request_json("POST", "/v1/explanations/resolve", payload)
+
+    def resolve_trace_handle_page(
+        self,
+        handle: str,
+        *,
+        offset: int = 0,
+        limit: int = 500,
+        policy_context: PolicyContext | dict[str, Any] | None = None,
+        verify_replay: bool = False,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "handle": handle,
+            "verify_replay": verify_replay,
+        }
+        if policy_context is not None:
+            payload["policy_context"] = policy_context
+        return self._request_json(
+            "POST",
+            f"/v1/explanations/resolve/page?offset={offset}&limit={limit}",
+            payload,
+        )
 
     def coordination_report(
         self,
@@ -263,7 +434,26 @@ class AetherClient:
                 if isinstance(payload_json, dict)
                 else payload_text or exc.reason
             )
-            raise AetherApiError(exc.code, str(message), payload_json) from exc
+            code = payload_json.get("code") if isinstance(payload_json, dict) else None
+            request_id = (
+                payload_json.get("request_id")
+                if isinstance(payload_json, dict)
+                else None
+            ) or exc.headers.get("X-Aether-Request-Id")
+            details = (
+                payload_json.get("details")
+                if isinstance(payload_json, dict)
+                and isinstance(payload_json.get("details"), dict)
+                else None
+            )
+            raise AetherApiError(
+                exc.code,
+                str(message),
+                payload_json,
+                code=str(code) if code else None,
+                request_id=str(request_id) if request_id else None,
+                details=details,
+            ) from exc
 
 
 def _jsonable(value: Any) -> Any:

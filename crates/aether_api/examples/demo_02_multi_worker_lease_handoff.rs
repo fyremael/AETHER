@@ -1,6 +1,6 @@
 use aether_api::{
-    coordination_pilot_dsl, coordination_pilot_seed_history, AppendRequest, ExplainTupleRequest,
-    HistoryRequest, InMemoryKernelService, KernelService, RunDocumentRequest,
+    coordination_pilot_dsl, coordination_pilot_seed_history, AppendRequest, HistoryRequest,
+    InMemoryKernelService, KernelService, ResolveTraceHandleRequest, RunDocumentRequest,
     COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
 use aether_ast::{Datom, DerivationTrace, QueryRow, Value};
@@ -95,11 +95,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     if let Some(tuple_id) = authorized_rows.first().and_then(|row| row.tuple_id) {
+        let handle = current_authorized
+            .execution
+            .as_ref()
+            .and_then(|receipt| {
+                receipt
+                    .trace_handles
+                    .iter()
+                    .find(|binding| binding.local_tuple_id == tuple_id)
+            })
+            .expect("authorized row should carry a trace handle")
+            .handle
+            .clone();
         let trace = service
-            .explain_tuple(ExplainTupleRequest {
-                tuple_id,
+            .resolve_trace_handle(ResolveTraceHandleRequest {
+                handle,
                 policy_context: None,
+                verify_replay: true,
             })?
+            .record
             .trace;
         print_trace_summary(&trace);
     }

@@ -1,0 +1,333 @@
+#!/usr/bin/env python3
+"""Fail-closed offline verifier for AETHER immutable release evidence."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import shutil
+import sys
+import tempfile
+import zipfile
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+import release_evidence as evidence
+
+
+SHA40 = re.compile(r"^[a-f0-9]{40}$")
+SHA64 = re.compile(r"^[a-f0-9]{64}$")
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise evidence.EvidenceError(message)
+
+
+def verify_descriptor(root: Path, item: dict[str, Any], label: str) -> Path:
+    path = root / evidence.safe_bundle_relative(item.get("path", ""))
+    require(path.is_file(), f"{label} is missing: {item.get('path')}")
+    require(path.stat().st_size == item.get("byte_size"), f"{label} byte size mismatch")
+    require(evidence.sha256_file(path) == item.get("sha256"), f"{label} digest mismatch")
+    return path
+
+
+def verify_candidate(candidate: dict[str, Any]) -> None:
+    require(isinstance(candidate, dict), "candidate must be an object")
+    require(bool(candidate.get("repository")), "candidate repository is missing")
+    require(bool(SHA40.fullmatch(str(candidate.get("commit_sha", "")))), "invalid candidate commit SHA")
+    require(bool(SHA40.fullmatch(str(candidate.get("tree_sha", "")))), "invalid candidate tree SHA")
+    require(bool(candidate.get("ref")), "candidate ref is missing")
+    require(candidate.get("dirty") is False, "dirty candidate evidence is forbidden")
+
+
+def verify_time_window(envelope: dict[str, Any], now: datetime) -> None:
+    started = evidence.parse_time(envelope["started_at"])
+    ended = evidence.parse_time(envelope["ended_at"])
+    require(started <= ended, f"{envelope['gate_id']} ends before it starts")
+    require(ended <= now + timedelta(minutes=5), f"{envelope['gate_id']} has a future timestamp")
+    valid_until = envelope.get("valid_until")
+    if valid_until is not None:
+        require(evidence.parse_time(valid_until) >= now, f"{envelope['gate_id']} evidence expired")
+
+
+def verify_attempts(envelope: dict[str, Any], gate: dict[str, Any]) -> None:
+    attempts = envelope.get("attempt_history")
+    require(isinstance(attempts, list) and attempts, f"{envelope['gate_id']} has no attempt history")
+    require([item.get("attempt") for item in attempts] == list(range(1, len(attempts) + 1)), "attempt history is concealed or non-contiguous")
+    final = attempts[-1]
+    require(final.get("status") == envelope.get("observed_status"), "final attempt status mismatch")
+    require(final.get("exit_code") == envelope.get("exit_code"), "final attempt exit code mismatch")
+    if len(attempts) > 1:
+        require(gate.get("retry_policy") == "infrastructure_only", f"semantic gate {gate['id']} retried")
+        for prior in attempts[:-1]:
+            require(
+                prior.get("status") == "error" and prior.get("failure_class") == "infrastructure",
+                f"{gate['id']} concealed a fail-then-pass retry",
+            )
+
+
+def verify_envelope(
+    root: Path,
+    envelope: dict[str, Any],
+    gate: dict[str, Any],
+    candidate: dict[str, Any],
+    workflow: dict[str, Any],
+    official: bool,
+    policy: dict[str, Any],
+    now: datetime,
+) -> None:
+    require(envelope.get("schema_version") == evidence.ENVELOPE_VERSION, "unknown evidence envelope schema")
+    require(envelope.get("gate_id") == gate["id"], "evidence gate does not match policy gate")
+    require(envelope.get("observed_status") in evidence.OBSERVED_STATUSES, f"unknown observed status for {gate['id']}")
+    require(envelope.get("observed_status") != "skipped", f"skipped gate evidence is incomplete: {gate['id']}")
+    require(envelope.get("observed_status") not in {"ready", "accepted_risk", "ci_blocking"}, "authored status used as evidence")
+    require(envelope.get("candidate") == candidate, f"{gate['id']} candidate mismatch")
+    require(envelope.get("workflow") == workflow, f"{gate['id']} workflow mismatch")
+    require(envelope.get("official") is official, f"{gate['id']} official/local classification mismatch")
+    require(envelope.get("command") == gate.get("commands"), f"{gate['id']} command mismatch")
+    require(envelope.get("working_directory", ".") == gate.get("working_directory", "."), f"{gate['id']} working directory mismatch")
+    require(envelope.get("evidence_id") == evidence.identity_digest(envelope, "evidence_id"), f"{gate['id']} evidence identity mismatch")
+    verify_time_window(envelope, now)
+    verify_attempts(envelope, gate)
+    if envelope["observed_status"] == "passed":
+        require(envelope.get("exit_code") == 0, f"{gate['id']} passed with non-zero exit code")
+    expected_metrics = gate.get("expected_metrics", {})
+    for name, expected in expected_metrics.items():
+        require(envelope.get("metrics", {}).get(name) == expected, f"{gate['id']} wrong {name}")
+    if gate["id"] == "performance.capacity":
+        require(isinstance(envelope.get("metrics", {}).get("capacity"), dict), "Capacity artifact nesting regression")
+    if gate["id"] == "delivery.pages_candidate_sha":
+        require(envelope.get("metrics", {}).get("deployed_sha") == candidate["commit_sha"], "Pages deployed SHA differs from candidate SHA")
+    output = verify_descriptor(root, envelope["output"], f"{gate['id']} output")
+    require(output.suffix == ".log" or envelope["output"].get("media_type"), f"{gate['id']} output media type missing")
+    input_names = {item.get("path") for item in envelope.get("inputs", [])}
+    require(set(gate.get("inputs", [])).issubset(input_names), f"{gate['id']} input digests are incomplete")
+    if official:
+        require(policy["official_workflow"] in input_names, f"{gate['id']} did not digest the workflow at the candidate")
+
+
+def waiver_subject_digest(waiver: dict[str, Any]) -> str:
+    material = dict(waiver)
+    material.pop("waiver_id", None)
+    material.pop("signature", None)
+    return evidence.sha256_bytes(evidence.canonical_bytes(material))
+
+
+def verify_waiver(waiver: dict[str, Any], policy_gate: dict[str, Any], candidate: dict[str, Any], now: datetime) -> None:
+    require(waiver.get("schema_version") == "aether.risk-waiver.v1", "unknown waiver schema")
+    require(waiver.get("waiver_id") == evidence.identity_digest(waiver, "waiver_id"), "waiver identity mismatch")
+    require(policy_gate.get("waivable") is True, f"waiver supplied for non-waivable gate {policy_gate['id']}")
+    require(policy_gate["id"] not in evidence.NON_WAIVABLE_CORE, f"core gate {policy_gate['id']} cannot be waived")
+    require(waiver.get("candidate_commit_sha") == candidate["commit_sha"], "waiver crosses candidate commit")
+    require(waiver.get("candidate_tree_sha") == candidate["tree_sha"], "waiver crosses candidate tree")
+    require(evidence.parse_time(waiver["approved_at"]) <= now < evidence.parse_time(waiver["expires_at"]), "waiver is future-dated or expired")
+    require(bool(waiver.get("approved_by")), "waiver approver is missing")
+    require(bool(waiver.get("compensating_controls")), "waiver compensating controls are missing")
+    signature = waiver.get("signature", {})
+    require(signature.get("scheme") == "external_attestation", "waiver signature scheme is invalid")
+    require(bool(signature.get("attestation_ref")), "waiver attestation reference is missing")
+    require(signature.get("subject_digest") == waiver_subject_digest(waiver), "waiver signed subject mismatch")
+
+
+def verify_sbom(path: Path) -> None:
+    payload = evidence.load_json(path)
+    declared = payload.get("aether_lockfile_components")
+    if declared is None:
+        return
+    components = payload.get("components", [])
+    observed = {
+        component.get("purl") or f"{component.get('name')}@{component.get('version')}"
+        for component in components
+    }
+    missing = sorted(set(declared) - observed)
+    require(not missing, f"SBOM missing a lockfile component: {missing}")
+
+
+def verify_integrity_manifest(root: Path, manifest: dict[str, Any]) -> None:
+    integrity_path = verify_descriptor(root, manifest["file_integrity_manifest"], "file-integrity manifest")
+    integrity = evidence.load_json(integrity_path)
+    require(integrity.get("schema_version") == "aether.bundle-file-integrity.v1", "unknown file-integrity schema")
+    declared: set[str] = set()
+    for item in integrity.get("files", []):
+        require(item.get("path") not in declared, f"duplicate integrity entry: {item.get('path')}")
+        declared.add(item.get("path"))
+        verify_descriptor(root, item, f"integrity entry {item.get('path')}")
+    actual = {
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() and path.name not in {"bundle-manifest.json", "file-integrity-manifest.json"}
+    }
+    require(actual == declared, f"bundle files differ from integrity manifest: missing={sorted(declared-actual)}, extra={sorted(actual-declared)}")
+
+
+def verify_official_workflow(workflow: dict[str, Any], policy: dict[str, Any]) -> None:
+    require(workflow.get("workflow_file") == policy["official_workflow"], "official workflow mismatch")
+    require(workflow.get("job_id") == policy["official_job"], "official job mismatch")
+    require(str(workflow.get("run_id", "")).isdigit(), "an existing workflow declaration without a successful run is not evidence")
+    require(workflow.get("runner") in policy["allowed_official_runners"], "official runner/host is outside policy")
+
+
+def extract_bundle(bundle: Path, destination: Path) -> Path:
+    require("latest" not in bundle.name.lower(), "latest pointer is not an authoritative release input")
+    if bundle.is_dir():
+        target = destination / "bundle"
+        shutil.copytree(bundle, target)
+        return target
+    require(bundle.suffix.lower() == ".zip", "evidence bundle must be a directory or zip")
+    with zipfile.ZipFile(bundle) as archive:
+        names = archive.namelist()
+        require(len(names) == len(set(names)), "bundle contains duplicate zip entries")
+        for name in names:
+            evidence.safe_bundle_relative(name)
+        archive.extractall(destination)
+    manifests = list(destination.rglob("bundle-manifest.json"))
+    require(len(manifests) == 1, "bundle must contain exactly one manifest")
+    return manifests[0].parent
+
+
+def verify_bundle(
+    bundle: Path,
+    *,
+    expected_commit_sha: str | None = None,
+    expected_tree_sha: str | None = None,
+    expected_ref: str | None = None,
+    require_official: bool = False,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    with tempfile.TemporaryDirectory(prefix="aether-verify-") as temporary:
+        root = extract_bundle(bundle.resolve(), Path(temporary))
+        manifest_path = root / "bundle-manifest.json"
+        require(manifest_path.is_file(), "bundle manifest is missing")
+        manifest = evidence.load_json(manifest_path)
+        require(manifest.get("schema_version") == evidence.BUNDLE_VERSION, "unknown evidence bundle schema")
+        require(manifest.get("bundle_id") == evidence.identity_digest(manifest, "bundle_id"), "bundle identity mismatch")
+        require(manifest.get("verifier") == {"version": evidence.VERIFIER_VERSION, "algorithm": evidence.ALGORITHM}, "unknown verifier version")
+        candidate = manifest.get("candidate")
+        verify_candidate(candidate)
+        if expected_commit_sha:
+            require(candidate["commit_sha"] == expected_commit_sha, "bundle commit SHA does not match expected candidate")
+        if expected_tree_sha:
+            require(candidate["tree_sha"] == expected_tree_sha, "bundle tree SHA does not match expected candidate")
+        if expected_ref:
+            require(candidate["ref"] == expected_ref, "bundle ref does not match expected candidate")
+        official = manifest.get("official") is True
+        if require_official:
+            require(official, "diagnostic/local bundle cannot be used as official evidence")
+        verify_integrity_manifest(root, manifest)
+        policy_path = verify_descriptor(root, manifest["policy"], "gate policy")
+        policy = evidence.load_json(policy_path)
+        evidence.validate_policy(policy)
+        workflow = manifest.get("workflow")
+        require(isinstance(workflow, dict), "workflow identity is missing")
+        if official:
+            verify_official_workflow(workflow, policy)
+        gates = {gate["id"]: gate for gate in policy["gates"]}
+        envelopes: list[dict[str, Any]] = []
+        seen_gate_ids: set[str] = set()
+        seen_evidence_ids: set[str] = set()
+        for item in manifest.get("evidence", []):
+            path = verify_descriptor(root, item, f"evidence fragment {item.get('gate_id')}")
+            envelope = evidence.load_json(path)
+            gate_id = envelope.get("gate_id")
+            require(gate_id in gates, f"unknown evidence gate: {gate_id}")
+            require(gate_id not in seen_gate_ids, f"duplicate gate evidence: {gate_id}")
+            require(envelope.get("evidence_id") not in seen_evidence_ids, "duplicate evidence identity")
+            seen_gate_ids.add(gate_id)
+            seen_evidence_ids.add(envelope.get("evidence_id"))
+            require(item.get("gate_id") == gate_id, "manifest/envelope gate mismatch")
+            require(item.get("evidence_id") == envelope.get("evidence_id"), "manifest/envelope identity mismatch")
+            require(item.get("observed_status") == envelope.get("observed_status"), "manifest concealed evidence status")
+            verify_envelope(root, envelope, gates[gate_id], candidate, workflow, official, policy, now)
+            envelopes.append(envelope)
+        require(seen_gate_ids == set(gates), f"missing evidence gates: {sorted(set(gates) - seen_gate_ids)}")
+        waiver_payloads: list[dict[str, Any]] = []
+        for item in manifest.get("waivers", []):
+            waiver = evidence.load_json(verify_descriptor(root, item, "waiver"))
+            gate_id = waiver.get("gate_id")
+            require(gate_id in gates, f"waiver names unknown gate: {gate_id}")
+            verify_waiver(waiver, gates[gate_id], candidate, now)
+            waiver_payloads.append(waiver)
+        package_path = verify_descriptor(root, manifest["package"], "release package")
+        package_digest = evidence.sha256_file(package_path)
+        require(package_digest == manifest.get("package_attestation_subject_sha256"), "package digest does not match attested subject")
+        for item in manifest.get("sboms", []):
+            verify_sbom(verify_descriptor(root, item, "SBOM"))
+        available_subjects: set[str] = set()
+        expected_subjects = set(policy.get("future_required_bundle_subjects", []))
+        observed_subjects: set[str] = set()
+        for subject in manifest.get("subjects", []):
+            subject_id = subject.get("id")
+            require(subject_id in expected_subjects, f"unknown bundle subject: {subject_id}")
+            require(subject_id not in observed_subjects, f"duplicate bundle subject: {subject_id}")
+            observed_subjects.add(subject_id)
+            require(subject.get("status") in {"present", "missing"}, f"invalid subject status: {subject_id}")
+            if subject["status"] == "present":
+                verify_descriptor(root, subject.get("file", {}), f"bundle subject {subject_id}")
+                available_subjects.add(subject_id)
+            else:
+                require("file" not in subject, f"missing subject {subject_id} names a file")
+        require(observed_subjects == expected_subjects, f"bundle subject catalog is incomplete: {sorted(expected_subjects-observed_subjects)}")
+        verdict, blockers = evidence.compute_verdict(
+            policy,
+            envelopes,
+            waiver_payloads,
+            candidate,
+            official,
+            available_subjects=available_subjects,
+        )
+        require(manifest.get("computed_verdict") == verdict, "authored bundle verdict differs from computed verdict")
+        require(manifest.get("blockers") == blockers, "authored blockers differ from computed blockers")
+        return {
+            "schema_version": "aether.release-evidence-verdict.v1",
+            "bundle_id": manifest["bundle_id"],
+            "candidate": candidate,
+            "policy_id": policy["policy_id"],
+            "official": official,
+            "computed_verdict": verdict,
+            "blockers": blockers,
+            "evidence_ids": sorted(seen_evidence_ids),
+            "package_sha256": package_digest,
+            "verifier": manifest["verifier"],
+        }
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("bundle")
+    parser.add_argument("--expected-commit-sha")
+    parser.add_argument("--expected-tree-sha")
+    parser.add_argument("--expected-ref")
+    parser.add_argument("--require-official", action="store_true")
+    parser.add_argument("--require-passed", action="store_true")
+    parser.add_argument("--out")
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    try:
+        verdict = verify_bundle(
+            Path(args.bundle),
+            expected_commit_sha=args.expected_commit_sha,
+            expected_tree_sha=args.expected_tree_sha,
+            expected_ref=args.expected_ref,
+            require_official=args.require_official,
+        )
+        if args.out:
+            evidence.write_canonical_json(Path(args.out), verdict)
+        else:
+            sys.stdout.buffer.write(evidence.canonical_bytes(verdict))
+        if args.require_passed and verdict["computed_verdict"] != "passed":
+            return 3
+        return 0
+    except (evidence.EvidenceError, json.JSONDecodeError, KeyError, TypeError, zipfile.BadZipFile) as exc:
+        print(f"release evidence verification failed: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

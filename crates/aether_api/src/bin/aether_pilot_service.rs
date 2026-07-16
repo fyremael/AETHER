@@ -44,7 +44,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  storage: {}", config.storage.storage_label());
     println!("  sidecars: {}", config.sidecar_path().display());
     println!("  audit log: {}", config.audit_log_path.display());
-    println!("  listening: http://{}", config.bind_addr);
+    let transport = config.service_status().transport;
+    println!("  backend listener: http://{}", config.bind_addr);
+    println!("  HTTP transport: {}", transport.http_mode);
+    println!(
+        "  API capabilities: {}",
+        aether_api::status::capability_flags().join(", ")
+    );
+    if let Some(origin) = transport.external_https_origin {
+        println!("  external HTTPS origin: {origin}");
+    }
     println!("  configured principals:");
     for token in &config.token_summaries {
         let scopes = token
@@ -79,7 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  POST /v1/documents/parse");
     println!("  POST /v1/documents/run");
     println!("  POST /v1/reports/pilot/coordination-delta");
-    println!("  POST /v1/explain/tuple");
+    println!("  POST /v1/explanations/resolve");
     println!("  POST /v1/sidecars/artifacts/register");
     println!("  POST /v1/sidecars/artifacts/get");
     println!("  POST /v1/sidecars/vectors/register");

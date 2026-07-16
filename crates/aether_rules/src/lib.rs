@@ -3,20 +3,39 @@ mod parser;
 pub use parser::{DefaultDslParser, DslDocument, DslParser, ParseError};
 
 use aether_ast::{
-    AggregateFunction, AggregateTerm, Atom, AttributeId, ExtensionalFact, Literal, PredicateId,
-    RuleAst, RuleId, RuleProgram, Term, Value, Variable,
+    AggregateFunction, AggregateTerm, Atom, AttributeId, ExtensionalFact, Literal, PolicyScope,
+    PredicateId, RuleAst, RuleId, RuleProgram, Term, Value, Variable,
 };
-use aether_plan::{CompiledProgram, DeltaRulePlan, DependencyGraph, StronglyConnectedComponent};
+use aether_plan::{
+    AggregatePlanNode, CompiledProgram, DeltaAnchorStrategy, DeltaRulePlan, DependencyGraph,
+    ExecutableSchedule, ProvenanceRequirement, RuleExecutionPlan, SccExecutionPlan, ScopedProgram,
+    StronglyConnectedComponent, EXECUTABLE_PLAN_FORMAT_VERSION,
+};
 use aether_schema::{AttributeSchema, Schema, SchemaError, ValueType};
 use indexmap::{IndexMap, IndexSet};
 use thiserror::Error;
 
 pub trait RuleCompiler {
+    /// Trusted compatibility API.
+    ///
+    /// This compiles every fact in `program` and must only be used when the
+    /// caller has already established that the complete program is visible.
     fn compile(
         &self,
         schema: &Schema,
         program: &RuleProgram,
     ) -> Result<CompiledProgram, CompileError>;
+}
+
+pub trait ScopedRuleCompiler {
+    /// Projects extensional facts to `scope` before validation or planning and
+    /// returns a security-bearing compiled program bound to that scope.
+    fn compile_scoped(
+        &self,
+        schema: &Schema,
+        program: &RuleProgram,
+        scope: PolicyScope,
+    ) -> Result<ScopedProgram, CompileError>;
 }
 
 #[derive(Default)]
@@ -95,8 +114,16 @@ impl RuleCompiler for DefaultRuleCompiler {
 
         let phase_graph = build_phase_graph(schema, &dependency_graph, &sccs, &scc_lookup);
         let extensional_bindings = infer_extensional_bindings(schema, program)?;
+        let (schedule, rule_plans) = build_executable_schedule(
+            program,
+            &dependency_graph,
+            &sccs,
+            &scc_lookup,
+            &predicate_strata,
+        );
 
         Ok(CompiledProgram {
+            plan_format_version: EXECUTABLE_PLAN_FORMAT_VERSION.into(),
             dependency_graph,
             sccs,
             phase_graph,
@@ -106,7 +133,150 @@ impl RuleCompiler for DefaultRuleCompiler {
             extensional_bindings,
             facts: program.facts.clone(),
             predicate_strata,
+            schedule,
+            rule_plans,
         })
+    }
+}
+
+fn build_executable_schedule(
+    program: &RuleProgram,
+    dependency_graph: &DependencyGraph,
+    sccs: &[StronglyConnectedComponent],
+    scc_lookup: &IndexMap<PredicateId, usize>,
+    predicate_strata: &IndexMap<PredicateId, usize>,
+) -> (ExecutableSchedule, IndexMap<RuleId, RuleExecutionPlan>) {
+    let mut edges = IndexSet::new();
+    let mut indegree = sccs
+        .iter()
+        .map(|scc| (scc.id, 0usize))
+        .collect::<IndexMap<_, _>>();
+    let mut outgoing = sccs
+        .iter()
+        .map(|scc| (scc.id, Vec::new()))
+        .collect::<IndexMap<_, _>>();
+    for (head, dependencies) in &dependency_graph.edges {
+        let head_scc = scc_lookup[head];
+        for dependency in dependencies {
+            let dependency_scc = scc_lookup[dependency];
+            if dependency_scc != head_scc && edges.insert((dependency_scc, head_scc)) {
+                outgoing.entry(dependency_scc).or_default().push(head_scc);
+                *indegree.entry(head_scc).or_default() += 1;
+            }
+        }
+    }
+
+    let scc_strata = sccs
+        .iter()
+        .map(|scc| {
+            let stratum = scc
+                .predicates
+                .first()
+                .and_then(|predicate| predicate_strata.get(predicate))
+                .copied()
+                .unwrap_or_default();
+            (scc.id, stratum)
+        })
+        .collect::<IndexMap<_, _>>();
+    let mut ready = indegree
+        .iter()
+        .filter_map(|(scc_id, degree)| (*degree == 0).then_some(*scc_id))
+        .collect::<Vec<_>>();
+    ready.sort_by_key(|scc_id| (scc_strata[scc_id], *scc_id));
+    let mut scc_order = Vec::new();
+    while let Some(scc_id) = ready.first().copied() {
+        ready.remove(0);
+        scc_order.push(scc_id);
+        for neighbor in outgoing.get(&scc_id).into_iter().flatten() {
+            let degree = indegree
+                .get_mut(neighbor)
+                .expect("scheduled SCC has an indegree entry");
+            *degree -= 1;
+            if *degree == 0 {
+                ready.push(*neighbor);
+                ready.sort_by_key(|candidate| (scc_strata[candidate], *candidate));
+            }
+        }
+    }
+
+    let mut rule_plans = IndexMap::new();
+    for rule in &program.rules {
+        let scc_id = scc_lookup[&rule.head.predicate.id];
+        let aggregates = head_aggregates(rule)
+            .into_iter()
+            .map(|(output_index, aggregate)| AggregatePlanNode {
+                output_index,
+                function: aggregate.function,
+                input_variable: aggregate.variable.clone(),
+            })
+            .collect::<Vec<_>>();
+        let recursive_indices = rule
+            .body
+            .iter()
+            .enumerate()
+            .filter_map(|(index, literal)| match literal {
+                Literal::Positive(atom)
+                    if scc_lookup.get(&atom.predicate.id).copied() == Some(scc_id) =>
+                {
+                    Some(index)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let delta_anchor = if !aggregates.is_empty() {
+            DeltaAnchorStrategy::AggregateFullInputOnce
+        } else if recursive_indices.is_empty() {
+            DeltaAnchorStrategy::SeedOnce
+        } else {
+            DeltaAnchorStrategy::PositiveBodyIndices(recursive_indices)
+        };
+        rule_plans.insert(
+            rule.id,
+            RuleExecutionPlan {
+                rule_id: rule.id,
+                scc_id,
+                stratum: predicate_strata
+                    .get(&rule.head.predicate.id)
+                    .copied()
+                    .unwrap_or_default(),
+                delta_anchor,
+                aggregates,
+                provenance: ProvenanceRequirement::CompleteParentsSourcesImportsAndPolicy,
+            },
+        );
+    }
+    let schedule = ExecutableSchedule {
+        scc_order,
+        sccs: sccs
+            .iter()
+            .map(|scc| SccExecutionPlan {
+                scc_id: scc.id,
+                stratum: scc_strata[&scc.id],
+                rule_ids: program
+                    .rules
+                    .iter()
+                    .filter(|rule| scc_lookup[&rule.head.predicate.id] == scc.id)
+                    .map(|rule| rule.id)
+                    .collect(),
+            })
+            .collect(),
+    };
+    (schedule, rule_plans)
+}
+
+impl ScopedRuleCompiler for DefaultRuleCompiler {
+    fn compile_scoped(
+        &self,
+        schema: &Schema,
+        program: &RuleProgram,
+        scope: PolicyScope,
+    ) -> Result<ScopedProgram, CompileError> {
+        let mut projected = program.clone();
+        projected
+            .facts
+            .retain(|fact| scope.allows(fact.policy.as_ref()));
+        let compiled = self.compile(schema, &projected)?;
+        Ok(ScopedProgram::from_scoped_compilation(compiled, scope))
     }
 }
 
@@ -995,6 +1165,28 @@ mod tests {
         assert_eq!(edge_node.recursive_scc, None);
         assert_eq!(compiled.predicate_strata.get(&edge.id).copied(), Some(0));
         assert_eq!(compiled.predicate_strata.get(&reach.id).copied(), Some(0));
+        assert_eq!(
+            compiled.plan_format_version,
+            aether_plan::EXECUTABLE_PLAN_FORMAT_VERSION
+        );
+        assert_eq!(compiled.schedule.scc_order, vec![edge_scc.id, reach_scc.id]);
+        assert!(matches!(
+            compiled
+                .rule_plans
+                .get(&RuleId::new(1))
+                .expect("seed rule plan")
+                .delta_anchor,
+            aether_plan::DeltaAnchorStrategy::SeedOnce
+        ));
+        assert!(matches!(
+            &compiled
+                .rule_plans
+                .get(&RuleId::new(2))
+                .expect("recursive rule plan")
+                .delta_anchor,
+            aether_plan::DeltaAnchorStrategy::PositiveBodyIndices(indices)
+                if indices == &[0]
+        ));
         assert!(compiled.phase_graph.edges.iter().any(|edge_ref| {
             edge_ref.from == format!("scc-{}", edge_scc.id)
                 && edge_ref.to == format!("scc-{}", reach_scc.id)

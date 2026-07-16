@@ -1,6 +1,36 @@
 # Operator Guide
 
+Release-candidate capture and offline verification are documented in
+[`RELEASE_EVIDENCE.md`](RELEASE_EVIDENCE.md). Commercial claim policy is not an
+operational evidence source.
+
+Service exhaustion and cancellation behavior is specified in
+[`RESOURCE_CONTROL_CONTRACT.md`](RESOURCE_CONTROL_CONTRACT.md). Before a pilot,
+inspect `/v1/status.resource_controls`, configure the trusted HTTPS ingress with
+an equal or stricter request/rate policy, and verify direct backend access is
+blocked. Treat `audit_write_failed`, repeated `namespace_busy`, and
+`operation_timed_out` outcomes as operational incidents, not successful retries.
+
 This guide is for people running AETHER demonstrations, capturing reports, or presenting the project to others.
+
+## Transport and certificate rotation
+
+Remote Postgres uses `verify_full` by default. Configure one or more CA PEM
+paths and, for mTLS, a PEM client certificate plus PKCS #8 PEM key. Never put
+private-key bytes or database URLs in status, logs, or evidence envelopes.
+
+For CA rotation, first deploy a trust bundle containing both old and new CA
+files, prove both endpoints, rotate the server/client certificates, and only
+then remove the old CA after every supported client has crossed the transition.
+A failed TLS handshake is an incident; do not change the mode to
+`development_plaintext`. That mode is accepted only on literal loopback/Unix
+development paths.
+
+The HTTP service is either loopback-only plaintext or an explicitly declared
+backend behind a trusted HTTPS ingress. For ingress mode, network policy must
+prevent direct access to the backend listener. Rotate ingress certificates with
+an overlap window and verify the declared external `https://` origin before
+retiring the old certificate.
 
 It assumes you are not trying to extend the kernel. It assumes you want the cleanest path to showing what the system already does.
 
@@ -73,6 +103,10 @@ double-click scripts/run-performance-drift.cmd
 ```
 
 That comparison is now host-aware and suite-aware. On the canonical Windows dev host it resolves against `artifacts/performance/baselines/<suite>/<host>.json` first and then `fixtures/performance/baselines/<suite>/<host>.json`, with `core_kernel` and `service_in_process` as the current accepted gates.
+
+The drift verdict comes from the tracked
+`fixtures/performance/verdict-policy.json`: one five-sample run with every raw
+duration retained. Do not rerun a fail-level result to obtain a green artifact.
 
 If you need the full launch candidate validation pack for the current design-partner pilot, run:
 
@@ -212,17 +246,32 @@ Available endpoints today:
 - `GET /v1/status`
 - `POST /v1/admin/auth/reload`
 - `POST /v1/append`
+- `POST /v1/append/dry-run`
+- `GET /v1/append/receipts`
+- `GET /v1/schema`
+- `POST /v1/schema/register`
+- `POST /v1/schema/activate`
 - `POST /v1/state/current`
 - `POST /v1/state/as-of`
 - `POST /v1/documents/parse`
 - `POST /v1/documents/run`
 - `POST /v1/reports/pilot/coordination`
 - `POST /v1/reports/pilot/coordination-delta`
-- `POST /v1/explain/tuple`
+- `POST /v1/explanations/resolve` resolves an opaque execution-scoped trace
+  handle after namespace and current-policy authorization. The former
+  `/v1/explain/tuple` path returns `409` and never selects a recent execution.
 - `POST /v1/sidecars/artifacts/register`
 - `POST /v1/sidecars/artifacts/get`
 - `POST /v1/sidecars/vectors/register`
 - `POST /v1/sidecars/vectors/search`
+
+`POST /v1/append` returns a durable admission receipt. Strict writers should
+discover the active schema, provide its `schema_ref`, provide an
+`expected_cut`, and use an idempotency key. Omitted schema references remain a
+one-release compatibility path and are marked by
+`schema_ref_was_implicit: true`; they are not an unvalidated bypass. A
+quarantined baseline is read-only until an operator registers a compatible
+schema or migrates into a new namespace generation.
 
 ## Reports
 
@@ -323,6 +372,12 @@ Use the launch validation pack when someone asks, “Is this exact pilot candida
 Use the operations playbook when someone asks, “How do we deploy, rotate, upgrade, or roll back this pilot safely?”
 Use the trend index when someone asks, “What changed across recent benchmark runs without manually opening every bundle?”
 
+Before running any semantic client or report operation, read `/v1/status` and
+require `trace_handles_v1`, `namespace_schema_ref_v1`, `append_receipts_v1`, and
+`structured_errors_v1`. Do not fall back to tuple-ID explanation. During the
+transition, monitor `/v1/audit` for `legacy_endpoint` and `schema_ref_omitted`;
+the removal gates are in `docs/API_CLIENT_MIGRATION.md`.
+
 ## Replicated Prototype
 
 The replicated authority-partition prototype is now exposed as an example
@@ -396,4 +451,6 @@ Run Demo 03 and keep the report from that run. It is the best current summary of
 - `scripts/README.md` for launcher details
 - `docs/PILOT_LAUNCH.md` for the launch-readiness contract and full validation pack
 - `docs/PERFORMANCE.md` for the benchmark harness and interpretation guidance
+- `docs/SUPPLY_CHAIN_SECURITY.md` for SBOM, scanner, attestation, and repository-control gates
+- `docs/API_CLIENT_MIGRATION.md` for capability negotiation and legacy-contract sunset gates
 - `examples/demo-03-coordination-situation-room.md` for the flagship narrative

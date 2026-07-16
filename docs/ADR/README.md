@@ -37,3 +37,13 @@ The current numbered ADR set is:
 - `docs/ADR/0007-sidecars-remain-subordinate-to-semantic-control.md`
 - `docs/ADR/0008-ai-support-resolution-desk-is-reference-app-packaging.md`
 - `docs/ADR/0009-service-v2-namespaces-and-postgres-journal.md`
+- `docs/ADR/0010-policy-scoped-semantic-snapshots.md`
+- `docs/ADR/0011-execution-receipts-and-trace-handles.md`
+- `docs/ADR/0012-namespace-schema-and-append-admission.md`
+- `docs/ADR/0013-immutable-release-evidence-and-claim-computation.md`
+- `docs/ADR/0014-beta-transport-security.md`
+- `docs/ADR/0015-namespace-and-partition-concurrency-isolation.md`
+- `docs/ADR/0016-capability-negotiated-api-migration.md`
+- `docs/ADR/0017-exact-operational-evidence-verdicts.md`
+- `docs/ADR/0018-fail-closed-service-resource-controls.md`
+- `docs/ADR/0019-responsibility-crates-and-executable-plans.md`

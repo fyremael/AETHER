@@ -288,6 +288,33 @@ where
     (!merged.is_public()).then_some(merged)
 }
 
+pub fn policy_requirements_subset_of(
+    required: Option<&PolicyEnvelope>,
+    containing: Option<&PolicyEnvelope>,
+) -> bool {
+    let Some(required) = required else {
+        return true;
+    };
+    if required.is_public() {
+        return true;
+    }
+    let Some(containing) = containing else {
+        return false;
+    };
+
+    required.capabilities.iter().all(|capability| {
+        containing
+            .capabilities
+            .iter()
+            .any(|candidate| candidate == capability)
+    }) && required.visibilities.iter().all(|visibility| {
+        containing
+            .visibilities
+            .iter()
+            .any(|candidate| candidate == visibility)
+    })
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PolicyContext {
     pub capabilities: Vec<String>,
@@ -295,6 +322,16 @@ pub struct PolicyContext {
 }
 
 impl PolicyContext {
+    pub fn public() -> Self {
+        Self::default()
+    }
+
+    pub fn normalized(mut self) -> Self {
+        self.capabilities = normalize_policy_values(self.capabilities);
+        self.visibilities = normalize_policy_values(self.visibilities);
+        self
+    }
+
     pub fn is_empty(&self) -> bool {
         self.capabilities.is_empty() && self.visibilities.is_empty()
     }
@@ -319,6 +356,74 @@ impl PolicyContext {
                 .visibilities
                 .iter()
                 .all(|value| other.visibilities.iter().any(|allowed| allowed == value))
+    }
+}
+
+#[derive(Clone, Default, Eq, PartialEq)]
+pub struct PolicyScope {
+    context: PolicyContext,
+}
+
+impl PolicyScope {
+    pub fn public() -> Self {
+        Self::default()
+    }
+
+    pub fn new(context: PolicyContext) -> Self {
+        Self {
+            context: context.normalized(),
+        }
+    }
+
+    pub fn from_optional(context: Option<PolicyContext>) -> Self {
+        context.map(Self::new).unwrap_or_default()
+    }
+
+    pub fn is_public(&self) -> bool {
+        self.context.is_empty()
+    }
+
+    pub fn context(&self) -> &PolicyContext {
+        &self.context
+    }
+
+    pub fn allows(&self, envelope: Option<&PolicyEnvelope>) -> bool {
+        policy_allows(Some(&self.context), envelope)
+    }
+}
+
+impl fmt::Debug for PolicyScope {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PolicyScope")
+            .field(
+                "classification",
+                if self.is_public() {
+                    &"public"
+                } else {
+                    &"restricted"
+                },
+            )
+            .finish()
+    }
+}
+
+impl std::hash::Hash for PolicyScope {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::hash::Hash::hash(&self.context.capabilities, state);
+        std::hash::Hash::hash(&self.context.visibilities, state);
+    }
+}
+
+impl From<PolicyContext> for PolicyScope {
+    fn from(context: PolicyContext) -> Self {
+        Self::new(context)
+    }
+}
+
+impl From<Option<PolicyContext>> for PolicyScope {
+    fn from(context: Option<PolicyContext>) -> Self {
+        Self::from_optional(context)
     }
 }
 
@@ -567,10 +672,13 @@ pub struct PlanExplanation {
 #[cfg(test)]
 mod tests {
     use super::{
-        merge_policy_envelopes, policy_allows, AttributeId, Datom, DatomProvenance, ElementId,
-        EntityId, FactProvenance, FederatedCut, OperationKind, PartitionCut, PartitionId,
-        PolicyContext, PolicyEnvelope, ReplicaId, SidecarKind, SidecarOrigin, SourceRef, Value,
+        merge_policy_envelopes, policy_allows, policy_requirements_subset_of, AttributeId, Datom,
+        DatomProvenance, ElementId, EntityId, FactProvenance, FederatedCut, OperationKind,
+        PartitionCut, PartitionId, PolicyContext, PolicyEnvelope, PolicyScope, ReplicaId,
+        SidecarKind, SidecarOrigin, SourceRef, Value,
     };
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
 
     #[test]
     fn ids_are_deterministic_and_displayable() {
@@ -705,6 +813,54 @@ mod tests {
     }
 
     #[test]
+    fn policy_scope_normalizes_identity_and_redacts_debug_output() {
+        let left = PolicyScope::new(PolicyContext {
+            capabilities: vec!["operator".into(), "executor".into(), "operator".into()],
+            visibilities: vec!["ops".into(), "finance".into(), "ops".into()],
+        });
+        let right = PolicyScope::new(PolicyContext {
+            capabilities: vec!["executor".into(), "operator".into()],
+            visibilities: vec!["finance".into(), "ops".into()],
+        });
+
+        assert_eq!(left, right);
+        assert_eq!(
+            left.context().capabilities,
+            vec!["executor".to_string(), "operator".to_string()]
+        );
+        assert_eq!(
+            left.context().visibilities,
+            vec!["finance".to_string(), "ops".to_string()]
+        );
+
+        let mut left_hasher = DefaultHasher::new();
+        left.hash(&mut left_hasher);
+        let mut right_hasher = DefaultHasher::new();
+        right.hash(&mut right_hasher);
+        assert_eq!(left_hasher.finish(), right_hasher.finish());
+
+        let debug = format!("{left:?}");
+        assert!(debug.contains("restricted"));
+        assert!(!debug.contains("executor"));
+        assert!(!debug.contains("finance"));
+    }
+
+    #[test]
+    fn absent_and_empty_wire_contexts_map_to_public_scope() {
+        let absent = PolicyScope::from_optional(None);
+        let empty = PolicyScope::from_optional(Some(PolicyContext::public()));
+        let protected = PolicyEnvelope {
+            capabilities: vec!["executor".into()],
+            visibilities: Vec::new(),
+        };
+
+        assert_eq!(absent, empty);
+        assert!(absent.is_public());
+        assert!(absent.allows(None));
+        assert!(!absent.allows(Some(&protected)));
+    }
+
+    #[test]
     fn policy_envelope_deserializes_legacy_single_value_fields() {
         let decoded: PolicyEnvelope =
             serde_json::from_str(r#"{"capability":"executor","visibility":"ops"}"#)
@@ -740,6 +896,32 @@ mod tests {
                 visibilities: vec!["finance".into(), "ops".into()],
             }
         );
+    }
+
+    #[test]
+    fn policy_dependency_requirements_must_be_contained_by_the_child() {
+        let public = PolicyEnvelope::default();
+        let executor = PolicyEnvelope {
+            capabilities: vec!["executor".into()],
+            visibilities: Vec::new(),
+        };
+        let executor_ops = PolicyEnvelope {
+            capabilities: vec!["executor".into()],
+            visibilities: vec!["ops".into()],
+        };
+
+        assert!(policy_requirements_subset_of(None, None));
+        assert!(policy_requirements_subset_of(Some(&public), None));
+        assert!(policy_requirements_subset_of(None, Some(&executor)));
+        assert!(policy_requirements_subset_of(
+            Some(&executor),
+            Some(&executor_ops)
+        ));
+        assert!(!policy_requirements_subset_of(Some(&executor), None));
+        assert!(!policy_requirements_subset_of(
+            Some(&executor_ops),
+            Some(&executor)
+        ));
     }
 
     #[test]

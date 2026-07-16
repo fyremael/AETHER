@@ -8,6 +8,12 @@ members = [
     "crates/aether_plan",
     "crates/aether_runtime",
     "crates/aether_explain",
+    "crates/aether_sidecar",
+    "crates/aether_service_core",
+    "crates/aether_pilot",
+    "crates/aether_partition",
+    "crates/aether_http",
+    "crates/aether_perf",
     "crates/aether_api",
 ]
 resolver = "2"
@@ -15,10 +21,12 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "Apache-2.0 OR MIT"
-rust-version = "1.78"
+rust-version = "1.86"
 version = "0.1.0"
 
 [workspace.dependencies]
 indexmap = { version = "2.7.0", features = ["serde"] }
+rand = "0.8.6"
 serde = { version = "1.0.215", features = ["derive"] }
+sha2 = "0.10.9"
 thiserror = "1.0.69"

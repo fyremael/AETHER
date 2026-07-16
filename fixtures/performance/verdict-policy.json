@@ -1,0 +1,15 @@
+{
+  "policy_version": "performance-drift-v1",
+  "samples_per_workload": 5,
+  "latency_statistic": "arithmetic_mean",
+  "budgets": {
+    "warn_throughput_regression_pct": 15.0,
+    "fail_throughput_regression_pct": 30.0,
+    "warn_footprint_growth_pct": 10.0,
+    "fail_footprint_growth_pct": 20.0
+  },
+  "pass_severities": [
+    "ok",
+    "warn"
+  ]
+}

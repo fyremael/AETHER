@@ -1,0 +1,11 @@
+[package]
+name = "aether_pilot"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+aether_ast = { path = "../aether_ast" }
+aether_service_core = { path = "../aether_service_core" }
+serde.workspace = true

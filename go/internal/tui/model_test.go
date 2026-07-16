@@ -95,7 +95,7 @@ func TestSelectingCoordinationRowLoadsExplainAndSwitchesTab(t *testing.T) {
 	updated, _ = model.Update(msg)
 	model = updated.(Model)
 
-	if model.explain == nil || model.explain.Trace.Root != 7 {
+	if model.explain == nil || model.explain.Record.Trace.Root != 7 {
 		t.Fatalf("expected explain trace for tuple 7, got %#v", model.explain)
 	}
 }
@@ -151,7 +151,7 @@ func TestExplainViewHasEmptyStateBeforeSelection(t *testing.T) {
 	model.explain = nil
 
 	view := model.renderExplain()
-	if !strings.Contains(view, "No tuple trace selected yet") {
+	if !strings.Contains(view, "No proof selected yet") {
 		t.Fatalf("expected empty explain state, got %q", view)
 	}
 }
@@ -194,7 +194,7 @@ type fakeDataSource struct {
 	reportErrors     []error
 	deltaResponses   []*client.CoordinationDeltaReport
 	deltaErrors      []error
-	explainResponses []*client.ExplainTupleResponse
+	explainResponses []*client.ResolveTraceHandleResponse
 	explainErrors    []error
 	healthCalls      int
 	statusCalls      int
@@ -213,7 +213,7 @@ func newFakeDataSource() *fakeDataSource {
 		auditResponses:   []*client.AuditLogResponse{baseAudit()},
 		reportResponses:  []*client.CoordinationPilotReport{baseReport(1)},
 		deltaResponses:   []*client.CoordinationDeltaReport{baseDelta()},
-		explainResponses: []*client.ExplainTupleResponse{baseExplain()},
+		explainResponses: []*client.ResolveTraceHandleResponse{baseExplain()},
 	}
 }
 
@@ -271,7 +271,7 @@ func (f *fakeDataSource) CoordinationDeltaReport(context.Context, client.Coordin
 	return pickDelta(f.deltaResponses, index), nil
 }
 
-func (f *fakeDataSource) ExplainTupleWithPolicy(context.Context, uint64, *client.PolicyContext) (*client.ExplainTupleResponse, error) {
+func (f *fakeDataSource) ResolveTraceHandleWithPolicy(context.Context, string, *client.PolicyContext, bool) (*client.ResolveTraceHandleResponse, error) {
 	index := f.explainCalls
 	f.explainCalls++
 	if err := pickErr(f.explainErrors, index); err != nil {
@@ -332,7 +332,7 @@ func pickDelta(values []*client.CoordinationDeltaReport, index int) *client.Coor
 	return values[index]
 }
 
-func pickExplain(values []*client.ExplainTupleResponse, index int) *client.ExplainTupleResponse {
+func pickExplain(values []*client.ResolveTraceHandleResponse, index int) *client.ResolveTraceHandleResponse {
 	if index >= len(values) {
 		return values[len(values)-1]
 	}
@@ -368,6 +368,7 @@ func baseStatus() *client.ServiceStatusResponse {
 		SchemaVersion:      "v1",
 		EffectiveNamespace: ptrString("default"),
 		ServiceMode:        "single_node",
+		Capabilities:       client.RequiredServiceCapabilities(),
 		Principals: []client.PrincipalStatusSummary{
 			{
 				Principal:   "pilot-operator",
@@ -405,7 +406,9 @@ func baseReport(currentCount int) *client.CoordinationPilotReport {
 	for index := 0; index < currentCount; index++ {
 		tupleID := uint64(7 + index)
 		authorized = append(authorized, client.ReportRow{
-			TupleID: &tupleID,
+			TupleID:     &tupleID,
+			ExecutionID: ptrString("execution-a"),
+			TraceHandle: ptrString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
 			Values: []client.Value{
 				{Kind: "Entity", Entity: 1},
 				{Kind: "String", String: "worker-b"},
@@ -501,24 +504,30 @@ func baseDelta() *client.CoordinationDeltaReport {
 	}
 }
 
-func baseExplain() *client.ExplainTupleResponse {
-	return &client.ExplainTupleResponse{
-		Trace: client.DerivationTrace{
-			Root: 7,
-			Tuples: []client.DerivedTuple{
-				{
-					Tuple: client.Tuple{
-						ID:        7,
-						Predicate: 42,
-						Values: []client.Value{
-							{Kind: "Entity", Entity: 1},
-							{Kind: "String", String: "worker-b"},
+func baseExplain() *client.ResolveTraceHandleResponse {
+	return &client.ResolveTraceHandleResponse{
+		DigestsVerified: true,
+		ReplayVerified:  true,
+		Record: client.TraceRecord{
+			Handle:      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			ExecutionID: "execution-a",
+			Trace: client.DerivationTrace{
+				Root: 7,
+				Tuples: []client.DerivedTuple{
+					{
+						Tuple: client.Tuple{
+							ID:        7,
+							Predicate: 42,
+							Values: []client.Value{
+								{Kind: "Entity", Entity: 1},
+								{Kind: "String", String: "worker-b"},
+							},
 						},
-					},
-					Metadata: client.DerivedTupleMetadata{
-						Iteration:      1,
-						SourceDatomIDs: []client.ElementID{1, 2},
-						ParentTupleIDs: []client.TupleID{3},
+						Metadata: client.DerivedTupleMetadata{
+							Iteration:      1,
+							SourceDatomIDs: []client.ElementID{1, 2},
+							ParentTupleIDs: []client.TupleID{3},
+						},
 					},
 				},
 			},

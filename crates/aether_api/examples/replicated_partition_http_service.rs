@@ -107,9 +107,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             build_version: env!("CARGO_PKG_VERSION").into(),
             config_version: "replicated-prototype".into(),
             schema_version: "v1".into(),
+            capabilities: aether_api::status::capability_flags(),
             bind_addr: Some(bind_addr.to_string()),
             effective_namespace: None,
             service_mode: ServiceMode::Partitioned,
+            transport: aether_api::ServiceTransportStatus::default(),
             storage: ServiceStatusStorage {
                 database_path: None,
                 sidecar_path: None,
@@ -121,6 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             namespaces: Vec::new(),
             principals: Vec::new(),
             replicas: Vec::new(),
+            resource_controls: Default::default(),
         });
     let router =
         http_router_with_partitioned_options(InMemoryKernelService::new(), partitioned, options);

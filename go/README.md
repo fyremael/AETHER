@@ -2,6 +2,11 @@
 
 This directory now contains the first real Go operator shell for AETHER.
 
+The Go client negotiates `resource_limits_v1` and `pagination_v1` and exposes
+`HistoryPage`, `RunDocumentPage`, and `ResolveTraceHandlePage`. Typed limit or
+rate failures are terminal for that request; callers must not bypass them with
+legacy endpoints.
+
 Scope for Go in v1:
 
 - CLI and admin commands
@@ -13,7 +18,7 @@ Implemented today:
 
 - `cmd/aetherctl`, a real CLI over the stable HTTP boundary
 - `cmd/aetherctl tui`, a pilot-focused read-mostly operator cockpit for live service health, coordination state, cut diffs, audit entries, history, and tuple proof traces
-- `internal/client`, a typed Go HTTP client for health, service status, history, audit, pilot coordination reports, pilot coordination delta reports, document runs, and tuple explanation
+- `internal/client`, a typed Go HTTP client for health, service status, history, audit, pilot coordination reports, pilot coordination delta reports, document runs, and execution-scoped proof resolution
 - request-level policy-context support for document execution, with authenticated tokens able to impose the maximum semantic visibility that requests may narrow but not exceed
 - explain, report, and history calls now follow the same token-bound effective policy as document execution on authenticated services
 - Go unit coverage via `go test ./...`
@@ -29,9 +34,14 @@ go run ./cmd/aetherctl --base-url http://127.0.0.1:3000 --token-file ./pilot-ope
 go run ./cmd/aetherctl --base-url http://127.0.0.1:3000 --token-file ./pilot-operator.token coordination-diff --left asof:5 --right current
 go run ./cmd/aetherctl --base-url http://127.0.0.1:3000 run --file ./document.aether
 go run ./cmd/aetherctl --base-url http://127.0.0.1:3000 run --file ./document.aether --capabilities executor --visibilities ops
-go run ./cmd/aetherctl --base-url http://127.0.0.1:3000 explain --tuple-id 7 --capabilities executor
+go run ./cmd/aetherctl --base-url http://127.0.0.1:3000 explain --trace-handle <64-hex-handle> --verify-replay --capabilities executor
 go run ./cmd/aetherctl --base-url http://127.0.0.1:3000 --token-file ./pilot-operator.token tui --refresh 2s
 ```
+
+Semantic CLI and TUI commands preflight the service capability set from
+`/v1/status`. They fail closed when trace handles, namespace schema refs, append
+receipts, or structured errors are unavailable, and never retry explanation by
+tuple ID.
 
 `aetherctl tui` is the live pilot operations entrance. It is intentionally narrow:
 

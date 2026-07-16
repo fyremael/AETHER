@@ -1,30 +1,35 @@
 use aether_api::{
     coordination_pilot_dsl, coordination_pilot_seed_history, http_router, http_router_with_options,
-    http_router_with_partitioned_options, http_router_with_postgres_namespaces,
-    http_router_with_sqlite_namespaces, AppendRequest, AuditEntry, AuditLogResponse, AuthScope,
+    http_router_with_partitioned_options, http_router_with_postgres_namespaces_and_tls,
+    http_router_with_sqlite_namespaces, ActivateSchemaRequest, AppendAdmissionRequest,
+    AppendDryRunResponse, AppendReceipt, AppendRequest, AuditEntry, AuditLogResponse, AuthScope,
     AuthorityPartitionConfig, CoordinationCut, CoordinationDeltaReport,
     CoordinationDeltaReportRequest, CoordinationPilotReport, CoordinationPilotReportRequest,
     ExplainTupleRequest, FederatedExplainReport, FederatedRunDocumentRequest,
     GetArtifactReferenceRequest, HealthResponse, HistoryResponse, HttpAccessToken, HttpAuthConfig,
-    HttpKernelOptions, ImportedFactQueryRequest, InMemoryKernelService, KernelService, NamespaceId,
+    HttpKernelOptions, HttpResourceLimits, ImportedFactQueryRequest, InMemoryKernelService,
+    KernelService, NamespaceId, NamespaceSchemaRevision, PagedHistoryResponse, PagedTraceResponse,
     ParseDocumentRequest, ParseDocumentResponse, PartitionAppendRequest, PartitionStatusResponse,
     PilotAuthConfig, PilotServiceConfig, PilotTokenConfig, PromoteReplicaRequest,
-    RegisterArtifactReferenceRequest, RegisterVectorRecordRequest, ReplicaConfig, ReplicaRole,
-    ReplicatedAuthorityPartitionService, RunDocumentRequest, RunDocumentResponse,
+    RegisterArtifactReferenceRequest, RegisterSchemaRequest, RegisterVectorRecordRequest,
+    ReplicaConfig, ReplicaRole, ReplicatedAuthorityPartitionService, ResolveTraceHandleRequest,
+    RunDocumentRequest, RunDocumentResponse, SchemaCatalogResponse, SchemaCompatibility,
     SearchVectorsRequest, SearchVectorsResponse, ServiceMode, ServiceStatusResponse,
-    SqliteKernelService, VectorFactProjection, VectorMetric, AETHER_NAMESPACE_HEADER,
-    COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
+    SqliteKernelService, StructuredErrorResponse, VectorFactProjection, VectorMetric,
+    AETHER_NAMESPACE_HEADER, AETHER_REQUEST_ID_HEADER, COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
+    COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
 use aether_ast::{
     AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PartitionCut,
     PartitionId, PolicyContext, PolicyEnvelope, PredicateId, PredicateRef, ReplicaId, Value,
 };
+use aether_schema::{AttributeClass, AttributeSchema, Schema, ValueType};
 use reqwest::Client;
 use std::collections::BTreeMap;
 use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(1);
@@ -40,6 +45,13 @@ async fn http_service_exposes_health_and_history() {
         .await
         .expect("health request");
     assert!(health.status().is_success());
+    let request_id = health
+        .headers()
+        .get(AETHER_REQUEST_ID_HEADER)
+        .expect("health request id")
+        .to_str()
+        .expect("request id header");
+    assert_request_id(request_id);
     assert_eq!(
         health
             .json::<HealthResponse>()
@@ -76,6 +88,362 @@ async fn http_service_exposes_health_and_history() {
         25
     );
 
+    server.abort();
+}
+
+#[tokio::test]
+async fn http_framework_failures_use_the_structured_error_contract() {
+    let (base_url, server) = spawn_server(InMemoryKernelService::new()).await;
+    let client = Client::new();
+
+    for response in [
+        client
+            .post(format!("{base_url}/v1/append"))
+            .header("content-type", "application/json")
+            .body("{")
+            .send()
+            .await
+            .expect("invalid JSON response"),
+        client
+            .get(format!("{base_url}/v1/not-a-route"))
+            .send()
+            .await
+            .expect("missing route response"),
+    ] {
+        assert!(response.status().is_client_error());
+        let request_id = response
+            .headers()
+            .get(AETHER_REQUEST_ID_HEADER)
+            .expect("framework error request id")
+            .to_str()
+            .expect("request id header")
+            .to_owned();
+        let body = response
+            .json::<StructuredErrorResponse>()
+            .await
+            .expect("framework structured error");
+        assert_eq!(body.request_id, request_id);
+        assert!(!body.code.is_empty());
+        assert!(!body.error.is_empty());
+        assert_eq!(body.details, serde_json::json!({}));
+    }
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn resource_limits_are_typed_audited_and_leave_authority_unchanged() {
+    let audit = TestAuditPath::new("resource-limits");
+    let limits = HttpResourceLimits {
+        max_request_body_bytes: 256,
+        max_document_bytes: 8_192,
+        max_document_rules: 0,
+        max_page_size: 2,
+        requests_per_minute: 100,
+        ..HttpResourceLimits::default()
+    };
+    let options = HttpKernelOptions::new()
+        .with_audit_log_path(audit.path().to_path_buf())
+        .with_resource_limits(limits);
+    let (base_url, server) = spawn_server_with_options(InMemoryKernelService::new(), options).await;
+    let client = Client::new();
+
+    let status = client
+        .get(format!("{base_url}/v1/status"))
+        .send()
+        .await
+        .expect("resource status")
+        .json::<ServiceStatusResponse>()
+        .await
+        .expect("resource status body");
+    assert_eq!(status.resource_controls.max_request_body_bytes, 256);
+    assert_eq!(status.resource_controls.max_document_rules, 0);
+    assert_eq!(
+        status.resource_controls.cancellation_semantics,
+        "cancel_before_start_complete_after_start"
+    );
+
+    let oversized = client
+        .post(format!("{base_url}/v1/documents/run"))
+        .json(&serde_json::json!({ "dsl": "x".repeat(1_024) }))
+        .send()
+        .await
+        .expect("oversized request");
+    assert_eq!(oversized.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(
+        oversized
+            .json::<StructuredErrorResponse>()
+            .await
+            .expect("oversized structured error")
+            .code,
+        "request_body_too_large"
+    );
+
+    let limited_document = r#"
+schema v1 {
+}
+predicates {
+  seed(Entity)
+  ready(Entity)
+}
+rules {
+  ready(x) <- seed(x)
+}
+facts {
+  seed(entity(1))
+}
+query current {
+  current
+  goal ready(x)
+  keep x
+}
+"#;
+    let rule_limited = client
+        .post(format!("{base_url}/v1/documents/run"))
+        .json(&RunDocumentRequest {
+            dsl: limited_document.into(),
+            policy_context: None,
+        })
+        .send()
+        .await
+        .expect("rule-limited request");
+    assert_eq!(
+        rule_limited.status(),
+        reqwest::StatusCode::PAYLOAD_TOO_LARGE
+    );
+    let error = rule_limited
+        .json::<StructuredErrorResponse>()
+        .await
+        .expect("rule limit error");
+    assert_eq!(error.code, "resource_limit_exceeded");
+    assert_eq!(error.details["resource"], "document_rules");
+
+    let history = client
+        .get(format!("{base_url}/v1/history"))
+        .send()
+        .await
+        .expect("history after rejected documents")
+        .json::<HistoryResponse>()
+        .await
+        .expect("history response");
+    assert!(history.datoms.is_empty());
+    let persisted = read_audit_entries(audit.path());
+    assert!(persisted.iter().any(|entry| {
+        entry.path == "/v1/documents/run"
+            && entry.status == reqwest::StatusCode::PAYLOAD_TOO_LARGE.as_u16()
+    }));
+    assert!(persisted.iter().any(|entry| {
+        entry.path == "/v1/documents/run"
+            && entry
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("request body declared"))
+    }));
+
+    stop_server(server).await;
+}
+
+#[tokio::test]
+async fn pagination_and_rate_limits_are_namespace_scoped() {
+    let audit = TestAuditPath::new("rate-limit");
+    let limits = HttpResourceLimits {
+        max_page_size: 2,
+        requests_per_minute: 1,
+        ..HttpResourceLimits::default()
+    };
+    let options = HttpKernelOptions::new()
+        .with_audit_log_path(audit.path().to_path_buf())
+        .with_resource_limits(limits);
+    let (base_url, server) = spawn_server_with_options(InMemoryKernelService::new(), options).await;
+    let client = Client::new();
+
+    let first = client
+        .get(format!("{base_url}/v1/history/page?offset=0&limit=2"))
+        .send()
+        .await
+        .expect("first paged request");
+    assert!(first.status().is_success());
+    let page = first
+        .json::<PagedHistoryResponse>()
+        .await
+        .expect("paged history");
+    assert_eq!(page.page.total, 0);
+
+    let limited = client
+        .get(format!("{base_url}/v1/history"))
+        .send()
+        .await
+        .expect("rate-limited request");
+    assert_eq!(limited.status(), reqwest::StatusCode::TOO_MANY_REQUESTS);
+    assert!(limited.headers().contains_key("retry-after"));
+    let error = limited
+        .json::<StructuredErrorResponse>()
+        .await
+        .expect("rate limit error");
+    assert_eq!(error.code, "rate_limit_exceeded");
+
+    let persisted = read_audit_entries(audit.path());
+    assert!(persisted.iter().any(|entry| {
+        entry.path == "/v1/history"
+            && entry.status == reqwest::StatusCode::TOO_MANY_REQUESTS.as_u16()
+    }));
+    stop_server(server).await;
+}
+
+#[tokio::test]
+async fn http_schema_admission_contract_is_structured_and_idempotent() {
+    let (base_url, server) = spawn_server(InMemoryKernelService::new()).await;
+    let client = Client::new();
+    let mut schema = Schema::new("http-strict-v1");
+    schema
+        .register_attribute(AttributeSchema {
+            id: AttributeId::new(1),
+            name: "task.status".into(),
+            class: AttributeClass::ScalarLww,
+            value_type: ValueType::String,
+        })
+        .expect("register test attribute");
+    let registered = client
+        .post(format!("{base_url}/v1/schema/register"))
+        .json(&RegisterSchemaRequest {
+            schema,
+            predecessor: None,
+            compatibility: SchemaCompatibility::Exact,
+        })
+        .send()
+        .await
+        .expect("register schema")
+        .json::<NamespaceSchemaRevision>()
+        .await
+        .expect("registered schema response");
+    let active = client
+        .post(format!("{base_url}/v1/schema/activate"))
+        .json(&ActivateSchemaRequest {
+            schema_ref: registered.schema_ref.clone(),
+            expected_active: None,
+        })
+        .send()
+        .await
+        .expect("activate schema")
+        .json::<NamespaceSchemaRevision>()
+        .await
+        .expect("active schema response");
+    let catalog = client
+        .get(format!("{base_url}/v1/schema"))
+        .send()
+        .await
+        .expect("schema catalog")
+        .json::<SchemaCatalogResponse>()
+        .await
+        .expect("schema catalog response");
+    assert_eq!(
+        catalog.active.expect("active schema").schema_ref,
+        active.schema_ref
+    );
+    assert_eq!(catalog.baselines.len(), 1);
+
+    let datom = Datom {
+        entity: EntityId::new(1),
+        attribute: AttributeId::new(1),
+        value: Value::String("ready".into()),
+        op: OperationKind::Assert,
+        element: ElementId::new(1),
+        replica: ReplicaId::new(1),
+        causal_context: Default::default(),
+        provenance: DatomProvenance {
+            author_principal: "http-test".into(),
+            agent_id: "integration".into(),
+            tool_id: "reqwest".into(),
+            session_id: "schema-admission".into(),
+            source_ref: Default::default(),
+            parent_datom_ids: Vec::new(),
+            confidence: 1.0,
+            trust_domain: "test".into(),
+            schema_version: active.schema_ref.version.clone(),
+        },
+        policy: None,
+    };
+    let mut request = AppendAdmissionRequest {
+        schema_ref: Some(active.schema_ref.clone()),
+        expected_cut: None,
+        idempotency_key: Some("http-idempotency".into()),
+        datoms: vec![datom],
+        principal: None,
+    };
+    let dry_run = client
+        .post(format!("{base_url}/v1/append/dry-run"))
+        .json(&request)
+        .send()
+        .await
+        .expect("append dry run")
+        .json::<AppendDryRunResponse>()
+        .await
+        .expect("dry run response");
+    assert!(dry_run.valid);
+    request.expected_cut = dry_run.current_cut;
+    let receipt = client
+        .post(format!("{base_url}/v1/append"))
+        .json(&request)
+        .send()
+        .await
+        .expect("append")
+        .json::<AppendReceipt>()
+        .await
+        .expect("append receipt");
+    let replay = client
+        .post(format!("{base_url}/v1/append"))
+        .json(&request)
+        .send()
+        .await
+        .expect("append replay")
+        .json::<AppendReceipt>()
+        .await
+        .expect("append replay receipt");
+    assert!(replay.idempotent_replay);
+    assert_eq!(receipt.batch_id, replay.batch_id);
+
+    let mut wrong = request;
+    wrong.idempotency_key = None;
+    wrong.expected_cut = Some(receipt.committed_cut.clone());
+    wrong.schema_ref.as_mut().expect("schema ref").digest.0 = "wrong".into();
+    let response = client
+        .post(format!("{base_url}/v1/append"))
+        .json(&wrong)
+        .send()
+        .await
+        .expect("wrong schema response");
+    assert_eq!(response.status(), reqwest::StatusCode::CONFLICT);
+    let request_id = response
+        .headers()
+        .get(AETHER_REQUEST_ID_HEADER)
+        .expect("error request id")
+        .to_str()
+        .expect("request id header")
+        .to_string();
+    assert_request_id(&request_id);
+    let body = response
+        .json::<StructuredErrorResponse>()
+        .await
+        .expect("structured error");
+    assert_eq!(body.code, "schema_mismatch");
+    assert_eq!(body.request_id, request_id);
+    assert!(!body.error.is_empty());
+    assert_eq!(
+        body.details["expected_schema_ref"],
+        serde_json::to_value(&active.schema_ref).expect("expected schema ref JSON")
+    );
+    assert_eq!(body.details["provided_schema_ref"]["digest"], "wrong");
+
+    let receipts = client
+        .get(format!("{base_url}/v1/append/receipts"))
+        .send()
+        .await
+        .expect("append receipts")
+        .json::<Vec<AppendReceipt>>()
+        .await
+        .expect("append receipt list");
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0].batch_id, receipt.batch_id);
     server.abort();
 }
 
@@ -189,7 +557,58 @@ async fn http_service_runs_documents_and_explains_tuples() {
     );
 
     let tuple_id = current_rows[0].tuple_id.expect("tuple id");
+    let handle = current_authorized
+        .execution
+        .as_ref()
+        .expect("execution receipt")
+        .trace_handles
+        .iter()
+        .find(|binding| binding.local_tuple_id == tuple_id)
+        .expect("trace handle")
+        .handle
+        .clone();
     let explain = client
+        .post(format!("{base_url}/v1/explanations/resolve"))
+        .json(&ResolveTraceHandleRequest {
+            handle: handle.clone(),
+            policy_context: None,
+            verify_replay: true,
+        })
+        .send()
+        .await
+        .expect("explain request");
+    assert!(explain.status().is_success());
+    let trace = explain
+        .json::<aether_api::ResolveTraceHandleResponse>()
+        .await
+        .expect("explain response")
+        .record
+        .trace;
+    assert!(!trace.tuples.is_empty());
+
+    let trace_page = client
+        .post(format!(
+            "{base_url}/v1/explanations/resolve/page?offset=0&limit=1"
+        ))
+        .json(&ResolveTraceHandleRequest {
+            handle,
+            policy_context: None,
+            verify_replay: true,
+        })
+        .send()
+        .await
+        .expect("paged explain request");
+    assert!(trace_page.status().is_success());
+    let trace_page = trace_page
+        .json::<PagedTraceResponse>()
+        .await
+        .expect("paged explain response");
+    assert_eq!(trace_page.tuples.len(), 1);
+    assert_eq!(trace_page.page.limit, 1);
+    assert!(trace_page.digests_verified);
+    assert!(trace_page.replay_verified);
+
+    let ambiguous = client
         .post(format!("{base_url}/v1/explain/tuple"))
         .json(&ExplainTupleRequest {
             tuple_id,
@@ -197,14 +616,22 @@ async fn http_service_runs_documents_and_explains_tuples() {
         })
         .send()
         .await
-        .expect("explain request");
-    assert!(explain.status().is_success());
-    let trace = explain
-        .json::<aether_api::ExplainTupleResponse>()
+        .expect("legacy tuple explain request");
+    assert_eq!(ambiguous.status(), reqwest::StatusCode::CONFLICT);
+    let request_id = ambiguous
+        .headers()
+        .get(AETHER_REQUEST_ID_HEADER)
+        .expect("legacy error request id")
+        .to_str()
+        .expect("request id header")
+        .to_string();
+    let ambiguous = ambiguous
+        .json::<StructuredErrorResponse>()
         .await
-        .expect("explain response")
-        .trace;
-    assert!(!trace.tuples.is_empty());
+        .expect("legacy tuple error body");
+    assert_eq!(ambiguous.code, "ambiguous_tuple_reference");
+    assert_eq!(ambiguous.request_id, request_id);
+    assert_eq!(ambiguous.details, serde_json::json!({}));
 
     let stale = run_document(
         &client,
@@ -494,25 +921,52 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
         .await
         .expect("authorized run request");
     assert!(current.status().is_success());
-    let current_rows = current
+    let current_response = current
         .json::<RunDocumentResponse>()
         .await
-        .expect("current response")
+        .expect("current response");
+    let current_rows = current_response
         .query
+        .as_ref()
         .expect("current query result")
-        .rows;
+        .rows
+        .clone();
+    let tuple_id = current_rows[0].tuple_id.expect("tuple id");
+    let handle = current_response
+        .execution
+        .as_ref()
+        .expect("execution receipt")
+        .trace_handles
+        .iter()
+        .find(|binding| binding.local_tuple_id == tuple_id)
+        .expect("trace handle")
+        .handle
+        .clone();
 
     let explain = client
-        .post(format!("{base_url}/v1/explain/tuple"))
+        .post(format!("{base_url}/v1/explanations/resolve"))
         .bearer_auth("pilot-operator-token")
-        .json(&ExplainTupleRequest {
-            tuple_id: current_rows[0].tuple_id.expect("tuple id"),
+        .json(&ResolveTraceHandleRequest {
+            handle,
             policy_context: None,
+            verify_replay: true,
         })
         .send()
         .await
         .expect("authorized explain request");
     assert!(explain.status().is_success());
+
+    let legacy_explain = client
+        .post(format!("{base_url}/v1/explain/tuple"))
+        .bearer_auth("pilot-operator-token")
+        .json(&ExplainTupleRequest {
+            tuple_id,
+            policy_context: None,
+        })
+        .send()
+        .await
+        .expect("legacy explain telemetry request");
+    assert_eq!(legacy_explain.status(), reqwest::StatusCode::CONFLICT);
 
     let audit_response = client
         .get(format!("{base_url}/v1/audit"))
@@ -538,6 +992,7 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
             && entry.status == reqwest::StatusCode::FORBIDDEN.as_u16()
             && entry.context.datom_count == Some(25)
             && entry.context.last_element == Some(25)
+            && entry.context.schema_ref_omitted
     }));
     assert!(audit_entries.iter().any(|entry| {
         entry.principal == "pilot-operator"
@@ -557,18 +1012,27 @@ async fn authenticated_http_service_enforces_scopes_and_records_audit_entries() 
     }));
     assert!(audit_entries.iter().any(|entry| {
         entry.principal == "pilot-operator"
-            && entry.path == "/v1/explain/tuple"
+            && entry.path == "/v1/explanations/resolve"
             && entry.status == reqwest::StatusCode::OK.as_u16()
             && entry.context.tuple_id == Some(current_rows[0].tuple_id.expect("tuple id").0)
             && entry.context.trace_tuple_count.is_some()
     }));
+    assert!(audit_entries.iter().any(|entry| {
+        entry.principal == "pilot-operator"
+            && entry.path == "/v1/explain/tuple"
+            && entry.status == reqwest::StatusCode::CONFLICT.as_u16()
+            && entry.context.legacy_endpoint
+    }));
 
-    let audit_contents =
-        std::fs::read_to_string(audit.path()).expect("read persisted audit log contents");
-    assert!(audit_contents.contains("\"path\":\"/v1/append\""));
-    assert!(audit_contents.contains("\"path\":\"/v1/documents/run\""));
-    assert!(audit_contents.contains("\"temporal_view\":\"current\""));
-    assert!(audit_contents.contains("\"query_goal\":\"execution_authorized(t, worker, epoch)\""));
+    wait_for_audit_contents(
+        audit.path(),
+        &[
+            "\"path\":\"/v1/append\"",
+            "\"path\":\"/v1/documents/run\"",
+            "\"temporal_view\":\"current\"",
+            "\"query_goal\":\"execution_authorized(t, worker, epoch)\"",
+        ],
+    );
 
     stop_server(server).await;
 }
@@ -710,6 +1174,8 @@ async fn http_service_exposes_status_and_supports_auth_reload() {
         schema_version: "test-schema-v1".into(),
         service_mode: ServiceMode::SingleNode,
         bind_addr: "127.0.0.1:0".into(),
+        http_transport: aether_api::PilotHttpTransportConfig::default(),
+        concurrency: aether_api::PilotConcurrencyConfig::default(),
         database_path: Some(database_path.clone()),
         storage: None,
         audit_log_path: Some(audit_path.clone()),
@@ -740,7 +1206,7 @@ async fn http_service_exposes_status_and_supports_auth_reload() {
                     principal: "query-client".into(),
                     principal_id: Some("principal:query-client".into()),
                     token_id: Some("token:query-client".into()),
-                    scopes: vec![AuthScope::Query],
+                    scopes: vec![AuthScope::Query, AuthScope::Explain],
                     policy_context: None,
                     token: Some("pilot-query-token".into()),
                     token_env: None,
@@ -786,11 +1252,39 @@ async fn http_service_exposes_status_and_supports_auth_reload() {
     assert_eq!(status.service_mode, ServiceMode::SingleNode);
     assert_eq!(status.config_version, "test-config-v1");
     assert_eq!(status.schema_version, "test-schema-v1");
+    assert!(status.supports_required_client_contract());
+    assert!(status.supports("capability_negotiation_v1"));
     assert_eq!(status.principals.len(), 2);
     assert!(status
         .principals
         .iter()
         .any(|principal| principal.token_id == "token:query-client" && !principal.revoked));
+
+    let proof_run = run_document_authorized(
+        &client,
+        &base_url,
+        "pilot-query-token",
+        policy_document_dsl(),
+    )
+    .await;
+    let proof_handle = proof_run
+        .execution
+        .expect("execution receipt")
+        .trace_handles[0]
+        .handle
+        .clone();
+    let before_reload = client
+        .post(format!("{base_url}/v1/explanations/resolve"))
+        .bearer_auth("pilot-query-token")
+        .json(&ResolveTraceHandleRequest {
+            handle: proof_handle.clone(),
+            policy_context: None,
+            verify_replay: false,
+        })
+        .send()
+        .await
+        .expect("resolve before reload");
+    assert!(before_reload.status().is_success());
 
     config.config_version = "test-config-v2".into();
     config.auth.revoked_token_ids = vec!["token:query-client".into()];
@@ -833,6 +1327,31 @@ async fn http_service_exposes_status_and_supports_auth_reload() {
         .await
         .expect("revoked token request");
     assert_eq!(revoked.status(), reqwest::StatusCode::FORBIDDEN);
+
+    let revoked_resolution = client
+        .post(format!("{base_url}/v1/explanations/resolve"))
+        .bearer_auth("pilot-query-token")
+        .json(&ResolveTraceHandleRequest {
+            handle: proof_handle.clone(),
+            policy_context: None,
+            verify_replay: false,
+        })
+        .send()
+        .await
+        .expect("revoked proof resolution");
+    assert_eq!(revoked_resolution.status(), reqwest::StatusCode::FORBIDDEN);
+    let still_immutable = client
+        .post(format!("{base_url}/v1/explanations/resolve"))
+        .bearer_auth("pilot-operator-token")
+        .json(&ResolveTraceHandleRequest {
+            handle: proof_handle,
+            policy_context: None,
+            verify_replay: true,
+        })
+        .send()
+        .await
+        .expect("resolve retained proof as operator");
+    assert!(still_immutable.status().is_success());
 
     stop_server(server).await;
 }
@@ -1512,6 +2031,7 @@ async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
             bind_addr: None,
             effective_namespace: None,
             service_mode: ServiceMode::Partitioned,
+            transport: aether_api::ServiceTransportStatus::default(),
             storage: aether_api::ServiceStatusStorage {
                 database_path: None,
                 sidecar_path: None,
@@ -1520,9 +2040,11 @@ async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
                 ..Default::default()
             },
             active_namespace_count: 1,
+            capabilities: aether_api::status::capability_flags(),
             namespaces: Vec::new(),
             principals: Vec::new(),
             replicas: Vec::new(),
+            resource_controls: Default::default(),
         });
     let (base_url, server) =
         spawn_partitioned_server_with_options(InMemoryKernelService::new(), partitioned, options)
@@ -1543,6 +2065,7 @@ async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
                 partition: PartitionId::new(partition),
                 leader_epoch: None,
                 datoms,
+                ..Default::default()
             })
             .send()
             .await
@@ -1637,6 +2160,33 @@ async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
             Value::String("worker-a".into())
         ]
     );
+    let federated_handle = federated
+        .run
+        .execution
+        .as_ref()
+        .expect("federated execution receipt")
+        .trace_handles
+        .first()
+        .expect("federated trace handle")
+        .handle
+        .clone();
+    let resolved = client
+        .post(format!("{base_url}/v1/explanations/resolve"))
+        .bearer_auth("pilot-operator-token")
+        .json(&ResolveTraceHandleRequest {
+            handle: federated_handle,
+            policy_context: None,
+            verify_replay: true,
+        })
+        .send()
+        .await
+        .expect("resolve federated trace request");
+    assert!(resolved.status().is_success());
+    let resolved = resolved
+        .json::<aether_api::ResolveTraceHandleResponse>()
+        .await
+        .expect("resolve federated trace response");
+    assert!(resolved.replay_verified);
 
     let report = client
         .post(format!("{base_url}/v1/federated/report"))
@@ -1701,6 +2251,7 @@ async fn partitioned_http_service_exposes_replication_and_federated_surfaces() {
             partition: PartitionId::new("authority"),
             leader_epoch: Some(aether_api::LeaderEpoch::new(1)),
             datoms: vec![partition_owner_datom(1, "worker-b", 4, None)],
+            ..Default::default()
         })
         .send()
         .await
@@ -1950,16 +2501,27 @@ async fn authenticated_http_service_persists_semantic_audit_context_across_resta
                 ),
             )
             .await;
-            let tuple_id = current.query.expect("current query result").rows[0]
+            let tuple_id = current.query.as_ref().expect("current query result").rows[0]
                 .tuple_id
                 .expect("tuple id");
+            let handle = current
+                .execution
+                .as_ref()
+                .expect("execution receipt")
+                .trace_handles
+                .iter()
+                .find(|binding| binding.local_tuple_id == tuple_id)
+                .expect("trace handle")
+                .handle
+                .clone();
 
             let explain = client
-                .post(format!("{base_url}/v1/explain/tuple"))
+                .post(format!("{base_url}/v1/explanations/resolve"))
                 .bearer_auth("pilot-operator-token")
-                .json(&ExplainTupleRequest {
-                    tuple_id,
+                .json(&ResolveTraceHandleRequest {
+                    handle,
                     policy_context: None,
+                    verify_replay: true,
                 })
                 .send()
                 .await
@@ -2011,7 +2573,7 @@ async fn authenticated_http_service_persists_semantic_audit_context_across_resta
         .collect::<Vec<_>>();
     let explain_entries = persisted
         .iter()
-        .filter(|entry| entry.path == "/v1/explain/tuple")
+        .filter(|entry| entry.path == "/v1/explanations/resolve")
         .collect::<Vec<_>>();
 
     assert!(run_entries.len() >= 4);
@@ -2621,8 +3183,21 @@ async fn spawn_postgres_namespace_server(
         .expect("bind postgres namespace test listener");
     let address = listener.local_addr().expect("listener address");
     let server = tokio::spawn(async move {
-        let router =
-            http_router_with_postgres_namespaces(database_url, schema, sidecar_path, options);
+        let tls = std::env::var("AETHER_POSTGRES_TLS_CA")
+            .ok()
+            .map(|ca| aether_storage::PostgresTlsConfig {
+                ca_certificate_paths: vec![ca.into()],
+                disable_system_roots: true,
+                ..Default::default()
+            })
+            .unwrap_or_default();
+        let router = http_router_with_postgres_namespaces_and_tls(
+            database_url,
+            schema,
+            sidecar_path,
+            tls,
+            options,
+        );
         axum::serve(listener, router)
             .await
             .expect("serve postgres namespace http kernel");
@@ -2786,6 +3361,11 @@ fn postgres_test_url() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn assert_request_id(request_id: &str) {
+    assert_eq!(request_id.len(), 32);
+    assert!(request_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
+}
+
 fn unique_namespace_id(prefix: &str) -> NamespaceId {
     let unique = NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed);
     let nanos = SystemTime::now()
@@ -2805,12 +3385,33 @@ fn unique_postgres_schema(prefix: &str) -> String {
 }
 
 fn read_audit_entries(path: &Path) -> Vec<AuditEntry> {
+    // Audit persistence is intentionally handled by a bounded writer so slow
+    // disk I/O cannot hold the request/state lock. Give the writer a short,
+    // bounded drain window before inspecting the durable file.
+    std::thread::sleep(std::time::Duration::from_millis(50));
     std::fs::read_to_string(path)
         .expect("read audit log")
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).expect("parse audit entry"))
         .collect()
+}
+
+fn wait_for_audit_contents(path: &Path, expected: &[&str]) -> String {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let contents = std::fs::read_to_string(path).unwrap_or_default();
+        if expected.iter().all(|needle| contents.contains(needle)) {
+            return contents;
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "audit log did not contain {expected:?} before the bounded persistence timeout; \
+                 observed contents: {contents}"
+            );
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn replicated_partition_service(root: &Path) -> ReplicatedAuthorityPartitionService {

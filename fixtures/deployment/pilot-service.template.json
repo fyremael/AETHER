@@ -3,6 +3,14 @@
   "schema_version": "v1",
   "service_mode": "single_node",
   "bind_addr": "127.0.0.1:3000",
+  "http_transport": {
+    "mode": "loopback_plaintext"
+  },
+  "concurrency": {
+    "namespace_workers": 8,
+    "namespace_queue": 64,
+    "audit_queue": 1024
+  },
   "database_path": "../data/coordination.sqlite",
   "audit_log_path": "../logs/audit.jsonl",
   "auth": {

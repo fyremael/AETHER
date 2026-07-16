@@ -2,6 +2,12 @@
 
 This document describes the hardened deployment path for the current AETHER pilot service.
 
+The packaged pilot enforces the fixed defaults documented in
+[`RESOURCE_CONTROL_CONTRACT.md`](RESOURCE_CONTROL_CONTRACT.md). Confirm those
+values through `GET /v1/status` after startup. Non-loopback deployments must
+apply an equal or stricter body/rate policy at the trusted HTTPS ingress and
+must prevent direct access to the plaintext backend listener.
+
 The goal is not full platform ops maturity. The goal is a repeatable, packageable, single-node service deployment with durable storage, policy-bound auth, secret-backed token handling, and CI-built artifacts.
 
 ## What Changed
@@ -40,6 +46,8 @@ The config defines:
 - schema version
 - service mode
 - bind address
+- HTTP transport boundary (`loopback_plaintext` or `trusted_tls_ingress`)
+- bounded namespace worker, queue, and audit-writer capacities
 - either the legacy SQLite `database_path` or the Service v2 tagged `storage` object
 - audit log path
 - one or more auth principals
@@ -61,12 +69,63 @@ Service v2 storage examples:
   "kind": "postgres",
   "database_url_env": "AETHER_DATABASE_URL",
   "schema": "aether",
-  "sidecar_path": "../data/sidecars.sqlite"
+  "sidecar_path": "../data/sidecars.sqlite",
+  "tls": {
+    "mode": "verify_full",
+    "ca_certificate_paths": ["../secrets/postgres-ca.pem"],
+    "client_certificate_path": "../secrets/aether-client.pem",
+    "client_private_key_path": "../secrets/aether-client-key.pem",
+    "disable_system_roots": true
+  }
 }
 ```
 
 SQLite remains the package default. Postgres is journal-first only; sidecar
 catalogs remain local SQLite files in this slice.
+
+`verify_full` is the Postgres default and cannot downgrade. `verify_ca` is an
+explicit weaker mode for deployments that cannot match a DNS name. Plaintext
+requires `development_plaintext` and is accepted only for literal loopback or
+Unix-socket development endpoints. Client certificate and key must be supplied
+together. TLS status exposes only mode, CA count, client-certificate presence,
+and system-root use.
+
+The default HTTP transport is:
+
+```json
+{ "mode": "loopback_plaintext" }
+```
+
+It rejects non-loopback binds. To place AETHER behind a TLS-terminating ingress,
+declare the boundary explicitly:
+
+```json
+{
+  "mode": "trusted_tls_ingress",
+  "external_https_origin": "https://aether.example.com",
+  "ingress": "production-edge-gateway"
+}
+```
+
+The ingress must block direct client access to the backend HTTP listener.
+Native TLS is not claimed by the current Rust HTTP binary.
+
+Synchronous kernel and storage operations run on a bounded executor. The
+package defaults are:
+
+```json
+{
+  "namespace_workers": 8,
+  "namespace_queue": 64,
+  "audit_queue": 1024
+}
+```
+
+These values live under `concurrency`. When worker plus queue capacity is
+exhausted, AETHER returns `503 namespace_busy` with `Retry-After`. Operations
+remain serialized inside one namespace but can proceed concurrently across
+namespaces. Audit disk writes use the bounded single-writer queue; an overload
+is recorded as `audit_write_failed` in the in-memory audit surface.
 
 For Postgres deployments, restore discipline belongs to the database operator:
 export and restore the configured journal schema with normal Postgres tooling,

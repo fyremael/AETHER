@@ -141,36 +141,6 @@ function Invoke-Step([string]$Label, [string]$Command, [string[]]$Arguments) {
     }
 }
 
-function Invoke-StepWithRetry(
-    [string]$Label,
-    [string]$Command,
-    [string[]]$Arguments,
-    [int]$Retries = 1
-) {
-    $attempt = 0
-    while ($true) {
-        try {
-            Invoke-Step $Label $Command $Arguments
-            return
-        } catch {
-            if ($attempt -ge $Retries) {
-                throw
-            }
-            $attempt += 1
-            $retryLabel = "$Label retry $attempt"
-            Write-Host ""
-            Write-Host "[$retryLabel]" -ForegroundColor Yellow
-            Write-Host $_.Exception.Message
-            Add-TranscriptLine("## $retryLabel")
-            Add-TranscriptLine("")
-            Add-TranscriptLine($_.Exception.Message)
-            Add-TranscriptLine("Retrying once because release-mode microbenchmarks can produce transient single-sample drift on a busy host.")
-            Add-TranscriptLine("")
-            Start-Sleep -Seconds 2
-        }
-    }
-}
-
 Write-Host ""
 Write-Host "AETHER Pilot Launch Validation"
 Write-Host "=============================="
@@ -218,8 +188,8 @@ $failureMessage = $null
 try {
     Invoke-Step "Pilot report" $cargo.Source @("run", "-p", "aether_api", "--example", "pilot_coordination_report", "--release")
     Invoke-Step "Performance report" $pwsh.Source @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $repoRoot "scripts/run-performance-report.ps1"), "-Suite", "full_stack", "-HostManifestPath", (Resolve-Path $HostManifestPath).Path)
-    Invoke-StepWithRetry "Core drift" $pwsh.Source @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $repoRoot "scripts/run-performance-drift.ps1"), "-Suite", "core_kernel", "-HostManifestPath", (Resolve-Path $HostManifestPath).Path, "-BaselinePath", $coreBaseline.Path)
-    Invoke-StepWithRetry "Service drift" $pwsh.Source @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $repoRoot "scripts/run-performance-drift.ps1"), "-Suite", "service_in_process", "-HostManifestPath", (Resolve-Path $HostManifestPath).Path, "-BaselinePath", $serviceBaseline.Path)
+    Invoke-Step "Core drift" $pwsh.Source @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $repoRoot "scripts/run-performance-drift.ps1"), "-Suite", "core_kernel", "-HostManifestPath", (Resolve-Path $HostManifestPath).Path, "-BaselinePath", $coreBaseline.Path)
+    Invoke-Step "Service drift" $pwsh.Source @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $repoRoot "scripts/run-performance-drift.ps1"), "-Suite", "service_in_process", "-HostManifestPath", (Resolve-Path $HostManifestPath).Path, "-BaselinePath", $serviceBaseline.Path)
     Invoke-Step "Release API tests" $cargo.Source @("test", "-p", "aether_api", "--release")
     Invoke-Step "Pilot soak suite" $cargo.Source @("test", "-p", "aether_api", "--test", "pilot_soak", "--release", "--", "--ignored", "--nocapture")
     Invoke-Step "Performance stress suite" $cargo.Source @("test", "-p", "aether_api", "--test", "performance_stress", "--release", "--", "--ignored", "--nocapture")

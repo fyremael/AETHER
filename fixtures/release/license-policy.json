@@ -1,0 +1,43 @@
+{
+  "schema_version": "aether.license-policy.v1",
+  "allowed_spdx_expressions": [
+    "0BSD",
+    "0BSD OR MIT OR Apache-2.0",
+    "(MIT OR Apache-2.0) AND Unicode-3.0",
+    "Apache-2.0",
+    "Apache-2.0 AND ISC",
+    "Apache-2.0 OR BSL-1.0",
+    "Apache-2.0 OR BSL-1.0 OR MIT",
+    "Apache-2.0 OR ISC OR MIT",
+    "Apache-2.0 OR MIT",
+    "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+    "BSD-2-Clause",
+    "BSD-2-Clause OR Apache-2.0 OR MIT",
+    "BSD-3-Clause",
+    "BSD-3-Clause AND MIT",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT AND BSD-3-Clause",
+    "MIT OR Apache-2.0",
+    "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
+    "MIT OR Apache-2.0 OR Zlib",
+    "MIT OR Zlib OR Apache-2.0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense OR MIT",
+    "Zlib",
+    "Zlib OR Apache-2.0 OR MIT"
+  ],
+  "denied_spdx_identifiers": ["AGPL-1.0", "AGPL-3.0"],
+  "allow_unknown": false,
+  "exceptions": [],
+  "unknown_component_exceptions": [
+    {
+      "purl": "pkg:golang/github.com/mattn/go-localereader@v0.0.1",
+      "reason": "Upstream module contains no license file; retained as a visible beta exception pending replacement or upstream clarification.",
+      "owner": "security",
+      "expires_at": "2026-10-01T00:00:00Z"
+    }
+  ]
+}

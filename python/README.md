@@ -2,6 +2,11 @@
 
 This directory now contains the first real AETHER Python SDK surface.
 
+Client preflight requires `resource_limits_v1` and `pagination_v1`. Use
+`history_page`, `run_document_page`, and `resolve_trace_handle_page` for bounded
+results; do not fall back to an unbounded or tuple-ID endpoint after a typed
+limit failure.
+
 Scope for Python in v1:
 
 - fixture builders
@@ -12,6 +17,11 @@ Scope for Python in v1:
 Implemented today:
 
 - `aether_sdk.AetherClient`, a broader HTTP client for the stable Rust service boundary
+
+Call `client.require_capabilities(...)` before semantic operations. The notebook
+helper does this automatically for the current trace-handle, schema-ref,
+append-receipt, and structured-error contracts. Explanation never falls back to
+a tuple ID; use the execution receipt's trace handle.
 - typed request and data models in `aether_sdk.models`
 - fixture builders for datoms, policy contexts, artifacts, and vectors in `aether_sdk.fixtures`
 - Colab-friendly onboarding notebooks in `python/notebooks/` over the authenticated pilot boundary

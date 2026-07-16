@@ -544,10 +544,57 @@ function Invoke-AdminPack {
                 }
                 Assert-StatusCode $appendOne @(200) "first packaged append"
 
+                $schemaBeforeBackup = Invoke-JsonRequest -Method "GET" -Url "$baseUrl/v1/schema" -Token $token -Body $null
+                Assert-StatusCode $schemaBeforeBackup @(200) "/v1/schema before backup"
+                if (-not $schemaBeforeBackup.Body.active.schema_ref.digest) {
+                    throw "active schema digest was missing before backup"
+                }
+                $receiptsBeforeBackup = Invoke-JsonRequest -Method "GET" -Url "$baseUrl/v1/append/receipts" -Token $token -Body $null
+                Assert-StatusCode $receiptsBeforeBackup @(200) "/v1/append/receipts before backup"
+                if ($receiptsBeforeBackup.Body.Count -ne 1) {
+                    throw "expected one append receipt before backup, found $($receiptsBeforeBackup.Body.Count)"
+                }
+
                 $historyAfterFirstAppend = Invoke-JsonRequest -Method "GET" -Url "$baseUrl/v1/history" -Token $token -Body $null
                 Assert-StatusCode $historyAfterFirstAppend @(200) "/v1/history after first append"
                 if ($historyAfterFirstAppend.Body.datoms.Count -ne 1) {
                     throw "expected one datom after first append, found $($historyAfterFirstAppend.Body.datoms.Count)"
+                }
+
+                $proofRun = Invoke-JsonRequest -Method "POST" -Url "$baseUrl/v1/documents/run" -Token $token -Body @{
+                    dsl = @'
+schema proof_backup_v1 {
+  attr attribute_1: ScalarLWW<String>
+}
+
+predicates {
+  source(Entity)
+  derived(Entity)
+}
+
+facts {
+  source(entity(1))
+}
+
+rules {
+  derived(x) <- source(x)
+}
+
+materialize {
+  derived
+}
+
+query {
+  current
+  goal derived(x)
+  keep x
+}
+'@
+                }
+                Assert-StatusCode $proofRun @(200) "proof execution before backup"
+                $proofHandle = $proofRun.Body.execution.trace_handles[0].handle
+                if (-not $proofHandle) {
+                    throw "proof execution did not return a trace handle"
                 }
 
                 Stop-ServiceProcess $serviceHandle
@@ -620,10 +667,12 @@ function Invoke-AdminPack {
                 $restoredToken = (Get-Content -Path $packageTokenPath -Raw).Trim()
                 $candidateTokens = @($restoredToken, $newToken, $oldToken) | Where-Object { $_ } | Select-Object -Unique
                 $restoredHistory = $null
+                $restoredAuthorizedToken = $null
                 foreach ($candidate in $candidateTokens) {
                     $attempt = Invoke-JsonRequest -Method "GET" -Url "$baseUrl/v1/history" -Token $candidate -Body $null
                     if ($attempt.StatusCode -eq 200) {
                         $restoredHistory = $attempt
+                        $restoredAuthorizedToken = $candidate
                         break
                     }
                 }
@@ -633,10 +682,28 @@ function Invoke-AdminPack {
                 if ($restoredHistory.Body.datoms.Count -ne 1) {
                     throw "expected one datom after restore/restart, found $($restoredHistory.Body.datoms.Count)"
                 }
+                $restoredSchema = Invoke-JsonRequest -Method "GET" -Url "$baseUrl/v1/schema" -Token $restoredAuthorizedToken -Body $null
+                Assert-StatusCode $restoredSchema @(200) "/v1/schema after restore"
+                if ($restoredSchema.Body.active.schema_ref.digest -ne $schemaBeforeBackup.Body.active.schema_ref.digest) {
+                    throw "restored active schema digest does not match the snapshot"
+                }
+                $restoredReceipts = Invoke-JsonRequest -Method "GET" -Url "$baseUrl/v1/append/receipts" -Token $restoredAuthorizedToken -Body $null
+                Assert-StatusCode $restoredReceipts @(200) "/v1/append/receipts after restore"
+                if ($restoredReceipts.Body.Count -ne 1 -or $restoredReceipts.Body[0].batch_id -ne $receiptsBeforeBackup.Body[0].batch_id) {
+                    throw "restored append receipts do not match the snapshot"
+                }
+                $restoredProof = Invoke-JsonRequest -Method "POST" -Url "$baseUrl/v1/explanations/resolve" -Token $restoredAuthorizedToken -Body @{
+                    handle = $proofHandle
+                    verify_replay = $true
+                }
+                Assert-StatusCode $restoredProof @(200) "trace handle after backup/restore"
+                if (-not $restoredProof.Body.replay_verified) {
+                    throw "restored trace handle did not pass replay verification"
+                }
 
                 [pscustomobject]@{
                     ArtifactPath = $build.OutputPath
-                    Notes = "built package, expanded zip, rotated auth, and verified backup/restore via packaged restart"
+                    Notes = "built package, expanded zip, rotated auth, and verified journal, schema, append-receipt, and execution-handle backup/restore via packaged restart"
                 }
             } finally {
                 Stop-ServiceProcess $serviceHandle

@@ -1,0 +1,144 @@
+name: Reusable Exact Candidate Evidence
+
+on:
+  workflow_call:
+    inputs:
+      candidate_sha:
+        description: Full candidate commit SHA
+        required: true
+        type: string
+      candidate_ref:
+        description: Exact candidate ref or tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+jobs:
+  exact-candidate-evidence:
+    name: Exact candidate evidence
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout exact candidate detached
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.26.5"
+          cache-dependency-path: go/go.sum
+
+      - name: Install Rust toolchain and quality components
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.86.0 --profile minimal --component rustfmt --component clippy
+          rustup default 1.86.0
+
+      - name: Install pinned release evidence dependencies
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check -r requirements-release.txt
+
+      - name: Verify immutable candidate identity
+        id: candidate
+        shell: pwsh
+        run: |
+          $head = (git rev-parse HEAD).Trim()
+          $tree = (git rev-parse "HEAD^{tree}").Trim()
+          $dirty = git status --porcelain --untracked-files=all
+          if ($head -ne "${{ inputs.candidate_sha }}") { throw "HEAD $head does not match candidate" }
+          if ($dirty) { throw "candidate checkout is dirty" }
+          "tree_sha=$tree" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Capture exact gate outcomes
+        shell: pwsh
+        env:
+          AETHER_WORKFLOW_FILE: .github/workflows/reusable-exact-candidate-evidence.yml
+          AETHER_JOB_ID: exact-candidate-evidence
+          CARGO_BUILD_JOBS: "1"
+        run: |
+          python scripts/release_evidence.py capture `
+            --official `
+            --enforce `
+            --ref "${{ inputs.candidate_ref }}" `
+            --run-id "${{ github.run_id }}" `
+            --attempt "${{ github.run_attempt }}" `
+            --runner Windows `
+            --host github-windows-latest `
+            --output-dir artifacts/release/exact-candidate
+
+      - name: Build candidate package once
+        shell: pwsh
+        run: ./scripts/build-pilot-package.ps1
+
+      - name: Generate strict candidate SBOM and license evidence
+        shell: pwsh
+        run: |
+          python scripts/supply_chain.py generate `
+            --candidate-sha "${{ inputs.candidate_sha }}" `
+            --package-zip artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip `
+            --out-dir artifacts/release/supply-chain
+
+      - name: Attest exact package provenance
+        id: package-attestation
+        uses: actions/attest@f6bf1532d7d6793fce74eac584813a8eee607999 # v4
+        with:
+          subject-path: artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip
+
+      - name: Attest assembled-package SBOM
+        uses: actions/attest@f6bf1532d7d6793fce74eac584813a8eee607999 # v4
+        with:
+          subject-path: artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip
+          sbom-path: artifacts/release/supply-chain/aether-package.cdx.json
+
+      - name: Assemble and independently verify immutable bundle
+        shell: pwsh
+        run: |
+          $package = "artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip"
+          $packageSha = (Get-FileHash -Algorithm SHA256 $package).Hash.ToLowerInvariant()
+          python scripts/release_evidence.py assemble `
+            --evidence-dir artifacts/release/exact-candidate `
+            --package $package `
+            --package-attestation-sha256 $packageSha `
+            --sbom artifacts/release/supply-chain/aether-rust.cdx.json `
+            --sbom artifacts/release/supply-chain/aether-go.cdx.json `
+            --sbom artifacts/release/supply-chain/aether-package.cdx.json `
+            --subject rust-sbom=artifacts/release/supply-chain/aether-rust.cdx.json `
+            --subject go-sbom=artifacts/release/supply-chain/aether-go.cdx.json `
+            --subject assembled-package-sbom=artifacts/release/supply-chain/aether-package.cdx.json `
+            --subject license-scan=artifacts/release/supply-chain/supply-chain-summary.json `
+            --subject package-provenance="${{ steps.package-attestation.outputs.bundle-path }}" `
+            --output-dir artifacts/release/bundles
+          $bundle = Get-ChildItem artifacts/release/bundles/aether-release-evidence-*.zip | Select-Object -First 1
+          python scripts/verify_release_evidence.py $bundle.FullName `
+            --expected-commit-sha "${{ inputs.candidate_sha }}" `
+            --expected-tree-sha "${{ steps.candidate.outputs.tree_sha }}" `
+            --expected-ref "${{ inputs.candidate_ref }}" `
+            --require-official `
+            --out artifacts/release/verified-verdict.json
+
+      - name: Upload SHA-named evidence bundle
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aether-release-evidence-${{ inputs.candidate_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/release/exact-candidate
+            artifacts/release/supply-chain
+            artifacts/release/bundles/aether-release-evidence-*.zip
+            artifacts/release/verified-verdict.json
+          if-no-files-found: error

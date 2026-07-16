@@ -2,6 +2,12 @@
 
 This playbook is the operator-facing companion to [PILOT_DEPLOYMENT.md](./PILOT_DEPLOYMENT.md).
 
+Resource saturation is fail-closed. Use
+[`RESOURCE_CONTROL_CONTRACT.md`](RESOURCE_CONTROL_CONTRACT.md) for the exact
+limits and cancellation contract. Do not blindly retry `429`, `503`, or `504`:
+honor `Retry-After`, inspect the namespace-scoped audit entries, and determine
+whether the workload needs pagination or should be rejected.
+
 It describes the safe, repeatable motions for:
 
 - first deployment
@@ -44,6 +50,16 @@ The current scope is still a single-node pilot service. The goal is disciplined 
    ```text
    powershell -ExecutionPolicy Bypass -File scripts/run-pilot-launch-validation.ps1
    ```
+
+Before semantic traffic or report collection, confirm `/v1/status` advertises
+`trace_handles_v1`, `namespace_schema_ref_v1`, `append_receipts_v1`, and
+`structured_errors_v1`. A missing flag is client/server skew and must fail the
+operation; do not retry explanation with a tuple ID.
+
+During the compatibility transition, inspect `/v1/audit` for
+`context.legacy_endpoint` and `context.schema_ref_omitted`. Those fields are the
+removal evidence for the sunset gates in `API_CLIENT_MIGRATION.md`, not optional
+diagnostics.
 
 ## Token Rotation Playbook
 
@@ -96,6 +112,12 @@ If the bind or storage paths changed, restart the service instead of reloading a
 
 3. Preserve the generated snapshot directory with the release evidence.
 
+The helper snapshots the journal (including namespace schema revisions,
+activation state, append receipts, and baseline/migration records), sidecar catalog, execution metadata database
+(`*.executions.sqlite`), their SQLite WAL/SHM companions, audit log, config,
+and token files. A trace handle is durable only when its execution database is
+restored with the journal cut that produced it.
+
 To restore:
 
 1. Stop the service.
@@ -110,7 +132,9 @@ To restore:
    - `/health`
    - `/v1/status`
    - authenticated query
-   - authenticated explain
+   - active schema digest and baseline status via `/v1/schema`
+   - pre-snapshot batch identity via `/v1/append/receipts`
+   - resolution of a pre-snapshot trace handle with replay verification
    - audit append
 
 ## External Secret-Manager Playbook
@@ -163,6 +187,7 @@ Avoid commands that print banners, prompts, or status lines to stdout.
 4. Snapshot:
    - `data/coordination.sqlite`
    - adjacent sidecar catalog
+   - adjacent execution metadata database
    - `logs/audit.jsonl`
    - current config files
 5. Replace:

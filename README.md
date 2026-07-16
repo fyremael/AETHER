@@ -2,11 +2,18 @@
 
 [![CI](https://github.com/fyremael/AETHER/actions/workflows/ci.yml/badge.svg)](https://github.com/fyremael/AETHER/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-pages-0f766e)](https://fyremael.github.io/AETHER/)
-[![Rust 1.78+](https://img.shields.io/badge/rust-1.78%2B-93450a?logo=rust)](https://www.rust-lang.org/)
+[![Rust 1.86+](https://img.shields.io/badge/rust-1.86%2B-93450a?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-4b5563)](./LICENSE-MIT)
 
-AETHER is a full-v1 single-node semantic kernel with a launch-ready
-design-partner pilot for agentic coordination.
+AETHER's current release boundary is:
+
+> Controlled single-node alpha with a real Rust semantic kernel, limited to one
+> visibility domain, trusted appenders, and explicitly supported deployment
+> boundaries.
+
+Policy-aware closure and commercial-beta qualification are reopened under the
+[July 2026 comprehensive audit](./docs/COMPREHENSIVE_AUDIT_2026-07-09.md) and
+[binding remediation programme](./docs/REMEDIATION_PROGRAMME.md).
 
 The easiest way to understand it is as the fabric underneath a governed shared
 workspace for agents and operators. In the current ML-facing support exemplar,

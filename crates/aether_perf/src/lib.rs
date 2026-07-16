@@ -1,13 +1,25 @@
+use aether_http::*;
+use aether_partition::*;
+use aether_pilot::*;
+
+pub mod sidecar {
+    pub use aether_sidecar::*;
+}
+pub mod status {
+    pub use aether_http::status::*;
+}
+
 use crate::{
     build_coordination_delta_report, build_coordination_pilot_report,
     coordination_pilot_seed_history, http_router_with_options, ApiError, AppendRequest, AuthScope,
     AuthorityPartitionConfig, CoordinationCut, CoordinationDeltaReportRequest,
-    CoordinationPilotReportRequest, CurrentStateRequest, ExplainTupleRequest,
-    FederatedHistoryRequest, FederatedRunDocumentRequest, HealthResponse, HttpAuthConfig,
-    HttpKernelOptions, ImportedFactQueryRequest, InMemoryKernelService, KernelService, LeaderEpoch,
+    CoordinationPilotReportRequest, CurrentStateRequest, FederatedHistoryRequest,
+    FederatedRunDocumentRequest, HealthResponse, HttpAuthConfig, HttpKernelOptions,
+    ImportedFactQueryRequest, InMemoryKernelService, KernelService, LeaderEpoch,
     PartitionAppendRequest, PromoteReplicaRequest, ReplicaConfig, ReplicaRole,
-    ReplicatedAuthorityPartitionService, RunDocumentRequest, ServiceMode, ServiceStatusResponse,
-    ServiceStatusStorage, SqliteKernelService, COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
+    ReplicatedAuthorityPartitionService, ResolveTraceHandleRequest, RunDocumentRequest,
+    ServiceMode, ServiceStatusResponse, ServiceStatusStorage, SqliteKernelService, TraceHandle,
+    COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
 };
 use aether_ast::{
     Atom, AttributeId, Datom, DatomProvenance, DerivationTrace, ElementId, EntityId, FederatedCut,
@@ -328,6 +340,8 @@ pub struct LatencyStats {
     pub mean: Duration,
     pub min: Duration,
     pub max: Duration,
+    #[serde(default)]
+    pub sample_durations_ns: Vec<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -401,6 +415,41 @@ impl Default for PerfDriftBudget {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PerfVerdictPolicy {
+    pub policy_version: String,
+    pub samples_per_workload: usize,
+    pub latency_statistic: String,
+    pub budgets: PerfDriftBudget,
+    pub pass_severities: Vec<DriftSeverity>,
+}
+
+impl PerfVerdictPolicy {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.policy_version.trim().is_empty() {
+            return Err("performance verdict policy version must not be empty".into());
+        }
+        if self.samples_per_workload < 3 {
+            return Err("performance verdict policy requires at least three samples".into());
+        }
+        if self.latency_statistic != "arithmetic_mean" {
+            return Err("only the arithmetic_mean latency statistic is supported".into());
+        }
+        if self.pass_severities.is_empty()
+            || self.pass_severities.contains(&DriftSeverity::Fail)
+            || self
+                .pass_severities
+                .contains(&DriftSeverity::MissingBaseline)
+        {
+            return Err(
+                "pass severities must be non-empty and cannot include fail or missing_baseline"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DriftSeverity {
@@ -462,6 +511,10 @@ pub struct PerfDriftReport {
     pub footprints: Vec<PerfFootprintDrift>,
     pub overall: DriftSeverity,
     pub observed_overall: DriftSeverity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verdict_policy_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verdict_statistic: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -569,7 +622,7 @@ struct HttpFixture {
     runtime: Runtime,
     router: axum::Router,
     token: String,
-    explain_tuple_id: TupleId,
+    explain_handle: TraceHandle,
     history_datoms: usize,
     coordination_rows: usize,
     delta_changed_rows: usize,
@@ -1547,10 +1600,10 @@ fn build_http_fixture() -> Result<HttpFixture, ApiError> {
     })?;
 
     let report = build_coordination_pilot_report(&mut service)?;
-    let explain_tuple_id = report
+    let explain_handle = report
         .current_authorized
         .iter()
-        .find_map(|row| row.tuple_id)
+        .find_map(|row| row.trace_handle.clone())
         .ok_or_else(|| {
             ApiError::Validation(
                 "coordination pilot seed did not produce an explainable authorization tuple".into(),
@@ -1595,14 +1648,17 @@ fn build_http_fixture() -> Result<HttpFixture, ApiError> {
             build_version: env!("CARGO_PKG_VERSION").into(),
             config_version: "pilot-v1".into(),
             schema_version: "v1".into(),
+            capabilities: crate::status::capability_flags(),
             bind_addr: Some("127.0.0.1:3000".into()),
             effective_namespace: None,
             service_mode: ServiceMode::SingleNode,
+            transport: crate::ServiceTransportStatus::default(),
             storage: ServiceStatusStorage::default(),
             active_namespace_count: 1,
             namespaces: Vec::new(),
             principals: Vec::new(),
             replicas: Vec::new(),
+            resource_controls: Default::default(),
         });
     let runtime = RuntimeBuilder::new_current_thread()
         .enable_all()
@@ -1615,7 +1671,7 @@ fn build_http_fixture() -> Result<HttpFixture, ApiError> {
         runtime,
         router: http_router_with_options(service, options),
         token,
-        explain_tuple_id,
+        explain_handle,
         history_datoms: history.len(),
         coordination_rows,
         delta_changed_rows,
@@ -1846,19 +1902,21 @@ fn benchmark_http_explain_tuple_impl(
                 "tuples",
             )],
             notes: vec![
-                "authenticated in-process POST /v1/explain/tuple over the pilot router".into(),
+                "authenticated in-process POST /v1/explanations/resolve over the pilot router"
+                    .into(),
             ],
             samples,
             iterations_per_sample: 1,
         },
         observer,
         move || {
-            http_post_json::<ExplainTupleRequest, crate::ExplainTupleResponse>(
+            http_post_json::<ResolveTraceHandleRequest, crate::ResolveTraceHandleResponse>(
                 &fixture,
-                "/v1/explain/tuple",
-                &ExplainTupleRequest {
-                    tuple_id: fixture.explain_tuple_id,
+                "/v1/explanations/resolve",
+                &ResolveTraceHandleRequest {
+                    handle: fixture.explain_handle.clone(),
                     policy_context: None,
+                    verify_replay: false,
                 },
             )
         },
@@ -2068,16 +2126,18 @@ fn build_replicated_partition_fixture() -> Result<ReplicatedPartitionFixture, Ap
     })?;
     let guard = TempDirGuard { path: root.clone() };
     let configs = replicated_partition_configs();
-    let mut service = ReplicatedAuthorityPartitionService::open(&root, configs.clone())?;
+    let service = ReplicatedAuthorityPartitionService::open(&root, configs.clone())?;
     service.append_partition(PartitionAppendRequest {
         partition: PartitionId::new("readiness"),
         leader_epoch: None,
         datoms: vec![partition_status_datom(1, "ready", 1)],
+        ..Default::default()
     })?;
     service.append_partition(PartitionAppendRequest {
         partition: PartitionId::new("authority"),
         leader_epoch: None,
         datoms: vec![partition_owner_datom(1, "worker-a", 3)],
+        ..Default::default()
     })?;
 
     Ok(ReplicatedPartitionFixture {
@@ -2206,12 +2266,13 @@ fn benchmark_replicated_leader_append_impl(
         observer,
         move || {
             let cloned = clone_replicated_fixture_root(&fixture.root)?;
-            let mut service =
+            let service =
                 ReplicatedAuthorityPartitionService::open(&cloned.path, fixture.configs.clone())?;
             service.append_partition(PartitionAppendRequest {
                 partition: fixture.partition.clone(),
                 leader_epoch: None,
                 datoms: fixture.leader_append_datoms.clone(),
+                ..Default::default()
             })
         },
     )
@@ -2243,12 +2304,13 @@ fn benchmark_replicated_follower_replay_impl(
         observer,
         move || {
             let cloned = clone_replicated_fixture_root(&fixture.root)?;
-            let mut service =
+            let service =
                 ReplicatedAuthorityPartitionService::open(&cloned.path, fixture.configs.clone())?;
             service.append_partition(PartitionAppendRequest {
                 partition: fixture.partition.clone(),
                 leader_epoch: None,
                 datoms: fixture.leader_append_datoms.clone(),
+                ..Default::default()
             })?;
             let status = service.partition_status()?;
             let authority = status
@@ -2337,7 +2399,7 @@ fn benchmark_replicated_federated_report_impl(
         observer,
         move || {
             let cloned = clone_replicated_fixture_root(&fixture.root)?;
-            let mut service =
+            let service =
                 ReplicatedAuthorityPartitionService::open(&cloned.path, fixture.configs.clone())?;
             service.build_federated_explain_report(fixture.federated_run_request.clone())
         },
@@ -2371,7 +2433,7 @@ fn benchmark_replicated_manual_promotion_impl(
         observer,
         move || {
             let cloned = clone_replicated_fixture_root(&fixture.root)?;
-            let mut service =
+            let service =
                 ReplicatedAuthorityPartitionService::open(&cloned.path, fixture.configs.clone())?;
             service.promote_replica(PromoteReplicaRequest {
                 partition: fixture.partition.clone(),
@@ -2411,7 +2473,7 @@ fn benchmark_replicated_stale_append_impl(
         observer,
         move || {
             let cloned = clone_replicated_fixture_root(&fixture.root)?;
-            let mut service =
+            let service =
                 ReplicatedAuthorityPartitionService::open(&cloned.path, fixture.configs.clone())?;
             let _ = service.promote_replica(PromoteReplicaRequest {
                 partition: fixture.partition.clone(),
@@ -2421,6 +2483,7 @@ fn benchmark_replicated_stale_append_impl(
                 partition: fixture.partition.clone(),
                 leader_epoch: Some(fixture.stale_epoch.clone()),
                 datoms: fixture.leader_append_datoms.clone(),
+                ..Default::default()
             }) {
                 Ok(_) => Err(ApiError::Validation(
                     "stale leader append benchmark unexpectedly succeeded".into(),
@@ -3023,6 +3086,8 @@ fn compare_reports_internal(
         footprints,
         overall,
         observed_overall,
+        verdict_policy_version: None,
+        verdict_statistic: None,
     }
 }
 
@@ -3037,6 +3102,12 @@ pub fn render_markdown_drift_report(report: &PerfDriftReport) -> String {
     }
     if let Some(host_manifest_id) = &report.host_manifest_id {
         let _ = writeln!(output, "- Host: `{host_manifest_id}`");
+    }
+    if let Some(policy_version) = &report.verdict_policy_version {
+        let _ = writeln!(output, "- Verdict policy: `{policy_version}`");
+    }
+    if let Some(statistic) = &report.verdict_statistic {
+        let _ = writeln!(output, "- Verdict statistic: `{statistic}`");
     }
     let _ = writeln!(
         output,
@@ -3736,6 +3807,10 @@ where
             mean,
             min,
             max,
+            sample_durations_ns: durations
+                .iter()
+                .map(|duration| u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX))
+                .collect(),
         },
         throughput_per_second,
         metrics: plan.metrics,
@@ -4099,10 +4174,11 @@ fn unique_temp_dir(prefix: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        baseline_from_bundle, build_matrix_report, build_trend_index, collect_host_snapshot,
-        compare_perf_bundle_to_baseline, compare_perf_reports, DriftSeverity, FootprintEstimate,
-        LatencyStats, PerfBaseline, PerfDriftBudget, PerfHostManifest, PerfHostSnapshot,
-        PerfMeasurement, PerfReport, PerfRunBundle, PerfRunMetadata, PerfSuiteId,
+        baseline_from_bundle, benchmark_append, build_matrix_report, build_trend_index,
+        collect_host_snapshot, compare_perf_bundle_to_baseline, compare_perf_reports,
+        DriftSeverity, FootprintEstimate, LatencyStats, PerfBaseline, PerfDriftBudget,
+        PerfHostManifest, PerfHostSnapshot, PerfMeasurement, PerfReport, PerfRunBundle,
+        PerfRunMetadata, PerfSuiteId, PerfVerdictPolicy,
     };
     use std::time::Duration;
 
@@ -4128,6 +4204,7 @@ mod tests {
                         mean: Duration::from_millis(3),
                         min: Duration::from_millis(2),
                         max: Duration::from_millis(4),
+                        sample_durations_ns: Vec::new(),
                     },
                     throughput_per_second: 50_000.0,
                     metrics: Vec::new(),
@@ -4156,6 +4233,7 @@ mod tests {
                     mean: Duration::from_millis(5),
                     min: Duration::from_millis(4),
                     max: Duration::from_millis(6),
+                    sample_durations_ns: Vec::new(),
                 },
                 throughput_per_second: 35_000.0,
                 metrics: Vec::new(),
@@ -4211,6 +4289,7 @@ mod tests {
                     mean: Duration::from_millis(3),
                     min: Duration::from_millis(2),
                     max: Duration::from_millis(4),
+                    sample_durations_ns: Vec::new(),
                 },
                 throughput_per_second: 300_000.0,
                 metrics: Vec::new(),
@@ -4330,6 +4409,29 @@ mod tests {
         assert!(measurement.latest_vs_baseline_delta_pct.unwrap() > 9.0);
     }
 
+    #[test]
+    fn tracked_verdict_policy_is_predeclared_and_samples_are_recorded() {
+        let policy: PerfVerdictPolicy = serde_json::from_str(include_str!(
+            "../../../fixtures/performance/verdict-policy.json"
+        ))
+        .expect("tracked performance verdict policy");
+        policy.validate().expect("valid verdict policy");
+        assert_eq!(policy.samples_per_workload, 5);
+        assert_eq!(
+            policy.pass_severities,
+            vec![DriftSeverity::Ok, DriftSeverity::Warn]
+        );
+
+        let measurement = benchmark_append(1, 3).expect("sampled append benchmark");
+        assert_eq!(measurement.latency.samples, 3);
+        assert_eq!(measurement.latency.sample_durations_ns.len(), 3);
+        assert!(measurement
+            .latency
+            .sample_durations_ns
+            .iter()
+            .all(|sample| *sample > 0));
+    }
+
     fn fake_bundle(host_id: &str, suite_id: PerfSuiteId) -> PerfRunBundle {
         let host_snapshot = collect_host_snapshot();
         PerfRunBundle {
@@ -4370,6 +4472,7 @@ mod tests {
                         mean: Duration::from_millis(1),
                         min: Duration::from_millis(1),
                         max: Duration::from_millis(1),
+                        sample_durations_ns: Vec::new(),
                     },
                     throughput_per_second: 10_000.0,
                     metrics: Vec::new(),

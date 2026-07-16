@@ -22,6 +22,7 @@ from aether_sdk import (  # noqa: E402
     make_datom,
     make_policy,
     make_policy_context,
+    make_provenance,
     make_vector_record,
     value_string,
 )
@@ -65,6 +66,14 @@ class AetherHttpClientIntegrationTest(unittest.TestCase):
         client = AetherClient(self._base_url)
 
         self.assertEqual(client.health()["status"], "ok")
+        client.require_capabilities(
+            "trace_handles_v1",
+            "namespace_schema_ref_v1",
+            "append_receipts_v1",
+            "structured_errors_v1",
+            "resource_limits_v1",
+            "pagination_v1",
+        )
 
         document = """
 schema v1 {
@@ -98,11 +107,28 @@ query current_cut {
             run_response["query"]["rows"][0]["values"],
             [{"Entity": 1}],
         )
+        trace_handle = run_response["execution"]["trace_handles"][0]["handle"]
+        resolved_trace = client.resolve_trace_handle(
+            trace_handle,
+            verify_replay=True,
+        )
+        self.assertTrue(resolved_trace["digests_verified"])
+        self.assertTrue(resolved_trace["replay_verified"])
+        trace_page = client.resolve_trace_handle_page(
+            trace_handle,
+            limit=1,
+            verify_replay=True,
+        )
+        self.assertEqual(len(trace_page["tuples"]), 1)
+        self.assertEqual(trace_page["page"]["limit"], 1)
+        query_page = client.run_document_page(document, limit=1)
+        self.assertEqual(len(query_page["response"]["query"]["rows"]), 1)
         named_query = client.run_named_query(document, query_name="current_cut")
         self.assertEqual(
             [row["values"] for row in named_query["rows"]],
             [[{"Entity": 1}]],
         )
+        self.assertIn("trace_handle", named_query["rows"][0])
 
         policy_document = """
 schema {
@@ -135,7 +161,7 @@ query current_cut {
   keep t
 }
 """
-        client.append(
+        first_append = client.append(
             [
                 make_datom(
                     entity=1,
@@ -151,6 +177,20 @@ query current_cut {
                     policy=make_policy(capability="executor"),
                 ),
             ]
+        )
+        self.assertFalse(first_append["idempotent_replay"])
+        self.assertTrue(first_append["schema_ref_was_implicit"])
+        schema_ref = first_append["schema_ref"]
+        history_page = client.history_page(limit=1)
+        self.assertEqual(len(history_page["datoms"]), 1)
+        self.assertEqual(history_page["page"]["total"], 1)
+        strict_provenance = make_provenance(
+            author_principal="python-client",
+            agent_id="integration-test",
+            tool_id="aether-sdk",
+            session_id="http-client-test",
+            trust_domain="test",
+            schema_version=schema_ref["version"],
         )
 
         default_policy_run = client.run_document(policy_document)
@@ -168,7 +208,7 @@ query current_cut {
             [[{"Entity": 1}], [{"Entity": 2}], [{"Entity": 3}]],
         )
 
-        client.append(
+        second_append = client.append(
             [
                 make_datom(
                     entity=1,
@@ -176,8 +216,12 @@ query current_cut {
                     value=value_string("sidecar-anchor-1"),
                     element=3,
                     op="Annotate",
+                    provenance=strict_provenance,
                 ),
-            ]
+            ],
+            schema_ref=schema_ref,
+            expected_cut=first_append["committed_cut"],
+            idempotency_key="python-sidecar-anchor-1",
         )
 
         client.register_artifact_reference(
@@ -202,8 +246,12 @@ query current_cut {
                     value=value_string("sidecar-anchor-2"),
                     element=4,
                     op="Annotate",
+                    provenance=strict_provenance,
                 )
-            ]
+            ],
+            schema_ref=schema_ref,
+            expected_cut=second_append["committed_cut"],
+            idempotency_key="python-sidecar-anchor-2",
         )
         client.register_vector_record(
             record=make_vector_record(
@@ -221,7 +269,9 @@ query current_cut {
             embedding=[0.9, 0.1, 0.0],
         )
 
-        with self.assertRaisesRegex(Exception, "policy denied"):
+        # Hidden and nonexistent sidecar records intentionally share one
+        # public error shape under policy-scoped lookup.
+        with self.assertRaisesRegex(Exception, "does not contain artifact"):
             client.get_artifact_reference(
                 sidecar_id="semantic-memory",
                 artifact_id="doc-1",
@@ -271,6 +321,33 @@ query current_cut {
         self.assertEqual(error_context.exception.status_code, 400)
         self.assertIn("invalid section header", error_context.exception.message.lower())
         self.assertIsNotNone(error_context.exception.payload)
+        self.assertEqual(error_context.exception.code, "parse_error")
+        self.assertRegex(error_context.exception.request_id or "", r"^[0-9a-f]{32}$")
+        self.assertEqual(error_context.exception.details, {})
+
+    def test_client_capability_and_active_schema_helpers_fail_closed(self) -> None:
+        class OldServerClient(AetherClient):
+            def status(self) -> dict[str, object]:
+                return {"capabilities": ["trace_handles_v1"]}
+
+            def schema_catalog(self) -> dict[str, object]:
+                return {"revisions": [], "baselines": []}
+
+        client = OldServerClient("http://127.0.0.1:1")
+        with self.assertRaises(AetherApiError) as capability_error:
+            client.require_capabilities("trace_handles_v1", "structured_errors_v1")
+        self.assertEqual(capability_error.exception.code, "capability_required")
+        self.assertEqual(
+            capability_error.exception.details,
+            {
+                "available": ["trace_handles_v1"],
+                "missing": ["structured_errors_v1"],
+            },
+        )
+
+        with self.assertRaises(AetherApiError) as schema_error:
+            client.active_schema_ref()
+        self.assertEqual(schema_error.exception.code, "active_schema_required")
 
     @staticmethod
     def _free_port() -> int:

@@ -36,10 +36,15 @@ func TestStructuredErrorsPreserveMessageAndPayload(t *testing.T) {
 	t.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Aether-Request-Id", "header-request-id")
 		w.WriteHeader(http.StatusForbidden)
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error":  "policy denied for explain",
-			"reason": "visibility mismatch",
+			"error":      "policy denied for explain",
+			"code":       "insufficient_policy",
+			"request_id": "body-request-id",
+			"details": map[string]any{
+				"reason": "visibility mismatch",
+			},
 		})
 	}))
 	defer server.Close()
@@ -64,8 +69,56 @@ func TestStructuredErrorsPreserveMessageAndPayload(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected structured payload, got %#v", apiErr.Payload)
 	}
-	if payload["reason"] != "visibility mismatch" {
+	if apiErr.Code != "insufficient_policy" || apiErr.RequestID != "body-request-id" {
+		t.Fatalf("structured identity was not preserved: %#v", apiErr)
+	}
+	if apiErr.Details["reason"] != "visibility mismatch" {
+		t.Fatalf("unexpected details %#v", apiErr.Details)
+	}
+	if payload["code"] != "insufficient_policy" {
 		t.Fatalf("unexpected structured payload %#v", payload)
+	}
+}
+
+func TestStatusCapabilityNegotiation(t *testing.T) {
+	status := ServiceStatusResponse{Capabilities: []string{"trace_handles_v1", "structured_errors_v1"}}
+	if !status.Supports("trace_handles_v1") {
+		t.Fatal("expected trace handle capability")
+	}
+	if status.Supports("unknown") {
+		t.Fatal("unexpected unknown capability")
+	}
+}
+
+func TestRequireCapabilitiesFailsClosed(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(ServiceStatusResponse{
+			Capabilities: []string{"trace_handles_v1"},
+		})
+	}))
+	defer server.Close()
+
+	err := New(server.URL, "").RequireCapabilities(
+		context.Background(),
+		"trace_handles_v1",
+		"structured_errors_v1",
+	)
+	apiErr, ok := err.(*Error)
+	if !ok || apiErr.Code != "capability_required" || apiErr.StatusCode != http.StatusUpgradeRequired {
+		t.Fatalf("expected typed capability failure, got %#v", err)
+	}
+}
+
+func TestActiveSchemaRefRequiresAnActiveRevision(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(SchemaCatalogResponse{})
+	}))
+	defer server.Close()
+
+	_, err := New(server.URL, "").ActiveSchemaRef(context.Background())
+	apiErr, ok := err.(*Error)
+	if !ok || apiErr.Code != "active_schema_required" {
+		t.Fatalf("expected active schema failure, got %#v", err)
 	}
 }
 
@@ -327,43 +380,55 @@ func TestHistoryAuditAndExplainDecodeTypedModels(t *testing.T) {
 					},
 				},
 			})
-		case "/v1/explain/tuple":
-			var request ExplainTupleRequest
+		case "/v1/explanations/resolve":
+			var request ResolveTraceHandleRequest
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				t.Fatalf("decode explain request: %v", err)
 			}
 			if request.PolicyContext == nil || len(request.PolicyContext.Capabilities) != 1 {
 				t.Fatalf("expected explain policy context, got %#v", request.PolicyContext)
 			}
+			if request.Handle != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || !request.VerifyReplay {
+				t.Fatalf("unexpected trace resolution request: %#v", request)
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"trace": map[string]any{
-					"root": 7,
-					"tuples": []map[string]any{
-						{
-							"tuple": map[string]any{
-								"id":        7,
-								"predicate": 42,
-								"values": []map[string]any{
-									{"Entity": 1},
-									{"String": "worker-b"},
+				"record": map[string]any{
+					"handle":         request.Handle,
+					"execution_id":   "execution-a",
+					"local_tuple_id": 7,
+					"tuple_digest":   "tuple-digest",
+					"trace_digest":   "trace-digest",
+					"trace": map[string]any{
+						"root": 7,
+						"tuples": []map[string]any{
+							{
+								"tuple": map[string]any{
+									"id":        7,
+									"predicate": 42,
+									"values": []map[string]any{
+										{"Entity": 1},
+										{"String": "worker-b"},
+									},
 								},
-							},
-							"metadata": map[string]any{
-								"rule_id":          5,
-								"predicate_id":     42,
-								"stratum":          0,
-								"scc_id":           0,
-								"iteration":        1,
-								"parent_tuple_ids": []uint64{3},
-								"source_datom_ids": []uint64{9},
-								"imported_cuts":    []any{},
-							},
-							"policy": map[string]any{
-								"capabilities": []string{"executor"},
+								"metadata": map[string]any{
+									"rule_id":          5,
+									"predicate_id":     42,
+									"stratum":          0,
+									"scc_id":           0,
+									"iteration":        1,
+									"parent_tuple_ids": []uint64{3},
+									"source_datom_ids": []uint64{9},
+									"imported_cuts":    []any{},
+								},
+								"policy": map[string]any{
+									"capabilities": []string{"executor"},
+								},
 							},
 						},
 					},
 				},
+				"digests_verified": true,
+				"replay_verified":  true,
 			})
 		default:
 			t.Fatalf("unexpected path %q", r.URL.Path)
@@ -395,16 +460,16 @@ func TestHistoryAuditAndExplainDecodeTypedModels(t *testing.T) {
 		t.Fatalf("unexpected audit selected report %#v", audit.Entries[0].Context.SelectedReport)
 	}
 
-	explain, err := api.ExplainTupleWithPolicy(context.Background(), 7, &PolicyContext{
+	explain, err := api.ResolveTraceHandleWithPolicy(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &PolicyContext{
 		Capabilities: []string{"executor"},
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("explain failed: %v", err)
 	}
-	if explain.Trace.Root != 7 || len(explain.Trace.Tuples) != 1 {
+	if explain.Record.Trace.Root != 7 || len(explain.Record.Trace.Tuples) != 1 || !explain.ReplayVerified {
 		t.Fatalf("unexpected explain response %#v", explain)
 	}
-	if explain.Trace.Tuples[0].Policy == nil || len(explain.Trace.Tuples[0].Policy.Capabilities) != 1 {
-		t.Fatalf("expected policy on trace tuple: %#v", explain.Trace.Tuples[0])
+	if explain.Record.Trace.Tuples[0].Policy == nil || len(explain.Record.Trace.Tuples[0].Policy.Capabilities) != 1 {
+		t.Fatalf("expected policy on trace tuple: %#v", explain.Record.Trace.Tuples[0])
 	}
 }
