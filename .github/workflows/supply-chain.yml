@@ -53,7 +53,7 @@ jobs:
 
       - name: Attest package provenance
         if: github.event_name != 'pull_request'
-        uses: actions/attest@f6bf1532d7d6793fce74eac584813a8eee607999 # v4
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
           subject-path: artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip
 
@@ -182,7 +182,7 @@ jobs:
 
       - name: Attest generated SBOMs
         if: github.event_name != 'pull_request'
-        uses: actions/attest@f6bf1532d7d6793fce74eac584813a8eee607999 # v4
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
           subject-path: artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip
           sbom-path: artifacts/release/supply-chain/aether-package.cdx.json
