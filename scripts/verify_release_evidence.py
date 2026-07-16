@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import re
 import shutil
@@ -190,6 +191,26 @@ def github_api(endpoint: str) -> Any:
     return run_json_command(["gh", "api", endpoint])
 
 
+def github_artifact_archive(repository: str, artifact_id: int) -> bytes:
+    command = ["gh", "api", f"repos/{repository}/actions/artifacts/{artifact_id}/zip"]
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise evidence.EvidenceError(f"official artifact download unavailable: {exc}") from exc
+    require(
+        completed.returncode == 0,
+        "official artifact download failed: "
+        + (completed.stderr.decode("utf-8", errors="replace").strip() or "unknown error"),
+    )
+    return completed.stdout
+
+
 def verify_attestation(command: list[str]) -> Any:
     return run_json_command(command)
 
@@ -214,12 +235,15 @@ def expected_artifact_name(
 
 
 def verify_github_outcome(
+    bundle: Path,
     workflow: dict[str, Any],
     candidate: dict[str, Any],
     policy: dict[str, Any],
     *,
     api: Callable[[str], Any] = github_api,
+    download_artifact: Callable[[str, int], bytes] = github_artifact_archive,
 ) -> None:
+    require(bundle.is_file() and bundle.suffix.lower() == ".zip", "official evidence input must be an immutable ZIP bundle")
     repository = policy["official_repository"]
     run_id = workflow["run_id"]
     attempt = workflow["attempt"]
@@ -262,9 +286,38 @@ def verify_github_outcome(
     artifact = matching_artifacts[0]
     require(artifact.get("expired") is False, "official evidence artifact is expired")
     require(isinstance(artifact.get("size_in_bytes"), int) and artifact["size_in_bytes"] > 0, "official evidence artifact is empty")
+    require(isinstance(artifact.get("id"), int), "official evidence artifact ID is missing")
+    artifact_digest = str(artifact.get("digest", ""))
+    require(
+        artifact_digest.startswith("sha256:")
+        and bool(SHA64.fullmatch(artifact_digest.removeprefix("sha256:"))),
+        "official evidence artifact digest is missing or invalid",
+    )
     artifact_sha = artifact.get("workflow_run", {}).get("head_sha")
     if artifact_sha is not None:
         require(artifact_sha == candidate["commit_sha"], "official artifact belongs to a different candidate")
+
+    archive_bytes = download_artifact(repository, artifact["id"])
+    require(len(archive_bytes) == artifact["size_in_bytes"], "downloaded official artifact byte size mismatch")
+    require(
+        evidence.sha256_bytes(archive_bytes) == artifact_digest.removeprefix("sha256:"),
+        "downloaded official artifact digest mismatch",
+    )
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            files = [item for item in archive.infolist() if not item.is_dir()]
+            require(len(files) == 1, "official artifact must contain exactly one evidence bundle")
+            item = files[0]
+            evidence.safe_bundle_relative(item.filename)
+            require(Path(item.filename).name == bundle.name, "official artifact contains the wrong bundle name")
+            require(item.file_size == bundle.stat().st_size, "official artifact bundle byte size mismatch")
+            archived_bundle = archive.read(item)
+    except zipfile.BadZipFile as exc:
+        raise evidence.EvidenceError("downloaded official artifact is not a valid ZIP") from exc
+    require(
+        evidence.sha256_bytes(archived_bundle) == evidence.sha256_file(bundle),
+        "official artifact does not contain the exact input evidence bundle",
+    )
 
 
 def verify_package_provenance(
@@ -452,7 +505,7 @@ def verify_bundle(
                 candidate,
                 policy,
             )
-            verify_github_outcome(workflow, candidate, policy)
+            verify_github_outcome(bundle, workflow, candidate, policy)
         verdict, blockers = evidence.compute_verdict(
             policy,
             envelopes,

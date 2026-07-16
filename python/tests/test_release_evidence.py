@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import importlib.util
 import json
 import shutil
@@ -257,6 +258,10 @@ class ReleaseEvidenceTests(unittest.TestCase):
     def test_official_run_job_and_artifact_are_bound_to_github_outcomes(self) -> None:
         workflow = self._official_workflow()
         repository = self.policy["official_repository"]
+        artifact_buffer = io.BytesIO()
+        with zipfile.ZipFile(artifact_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(self.bundle.name, self.bundle.read_bytes())
+        artifact_archive = artifact_buffer.getvalue()
         responses = {
             f"repos/{repository}/actions/runs/42/attempts/1": {
                 "id": 42,
@@ -277,28 +282,49 @@ class ReleaseEvidenceTests(unittest.TestCase):
             f"repos/{repository}/actions/runs/42/artifacts?per_page=100": {
                 "artifacts": [
                     {
+                        "id": 1234,
                         "name": workflow["artifact_name"],
                         "expired": False,
-                        "size_in_bytes": 1024,
+                        "size_in_bytes": len(artifact_archive),
+                        "digest": f"sha256:{self.evidence.sha256_bytes(artifact_archive)}",
                         "workflow_run": {"head_sha": self.candidate["commit_sha"]},
                     }
                 ]
             },
         }
         self.verify.verify_github_outcome(
+            self.bundle,
             workflow,
             self.candidate,
             self.policy,
             api=responses.__getitem__,
+            download_artifact=lambda _repository, _artifact_id: artifact_archive,
         )
 
         arbitrary = self._official_workflow(run_id="999")
         with self.assertRaisesRegex(ValueError, "does not exist"):
             self.verify.verify_github_outcome(
+                self.bundle,
                 arbitrary,
                 self.candidate,
                 self.policy,
                 api=lambda _endpoint: responses[f"repos/{repository}/actions/runs/42/attempts/1"],
+                download_artifact=lambda _repository, _artifact_id: artifact_archive,
+            )
+
+        forged = self.root / "forged" / self.bundle.name
+        forged.parent.mkdir()
+        forged_bytes = bytearray(self.bundle.read_bytes())
+        forged_bytes[-1] ^= 1
+        forged.write_bytes(forged_bytes)
+        with self.assertRaisesRegex(ValueError, "exact input evidence bundle"):
+            self.verify.verify_github_outcome(
+                forged,
+                workflow,
+                self.candidate,
+                self.policy,
+                api=responses.__getitem__,
+                download_artifact=lambda _repository, _artifact_id: artifact_archive,
             )
 
     def test_package_provenance_is_cryptographically_bound_to_run_and_candidate(self) -> None:

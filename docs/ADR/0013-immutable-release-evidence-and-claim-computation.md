@@ -70,7 +70,9 @@ GitHub-hosted runner, run ID, and attempt. The reusable signer workflow and
 calling workflow are separate policy identities. The verifier also reads the
 GitHub Actions API to require the exact producer job to have completed
 successfully and the SHA/run/attempt-named artifact to exist, be non-empty, and
-be unexpired.
+be unexpired. It downloads that artifact by immutable artifact ID, checks the
+GitHub artifact digest, and requires its sole payload to be byte-identical to
+the verifier's input evidence bundle.
 
 The producer uploads the immutable bundle before a separate dependent verifier
 job downloads it. This ordering lets the verifier inspect a completed producer
