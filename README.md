@@ -333,7 +333,7 @@ cargo test
 python -m unittest discover python/tests -v
 (cd go && go test ./...)
 cargo build -p aether_api --bin aether_pilot_service --release
-powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1
+powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1 -CandidatePackageZip artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip
 ```
 
 WSL verification uses the same workspace and the same commands via the Linux toolchain.

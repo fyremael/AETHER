@@ -1,6 +1,6 @@
 {
   "schema_version": "aether.release-gate-policy.v1",
-  "policy_id": "commercial-beta-r7-v1",
+  "policy_id": "commercial-beta-r8-v1",
   "claim_stage": "commercial_beta_candidate",
   "official_repository": "fyremael/AETHER",
   "official_workflow": ".github/workflows/reusable-exact-candidate-evidence.yml",
@@ -13,6 +13,14 @@
   "allowed_official_hosts": ["github-windows-latest"],
   "allowed_observed_statuses": ["passed", "failed", "error", "skipped"],
   "validity_hours": 24,
+  "capacity_acceptance": {
+    "node_class": "M",
+    "minimum_board_size": 1024,
+    "minimum_mixed_operator_concurrency": 32,
+    "minimum_durable_replay_size": 10000,
+    "maximum_target_p95_latency_ms": 2000.0,
+    "maximum_target_replay_seconds": 60.0
+  },
   "non_waivable_gate_ids": [
     "semantic.policy_noninterference",
     "semantic.trace_handle_identity",
@@ -209,8 +217,13 @@
         "fixtures/release/gate-policy.json",
         "schemas/release",
         "scripts/release_evidence.py",
+        "scripts/release_subjects.py",
+        "scripts/release_qualification.py",
+        "scripts/commercial_beta_promotion.py",
         "scripts/verify_release_evidence.py",
-        "python/tests/test_release_evidence.py"
+        "python/tests/test_release_evidence.py",
+        "python/tests/test_release_subjects.py",
+        "python/tests/test_commercial_beta_promotion.py"
       ]
     }
   ],
@@ -231,6 +244,7 @@
     "soak",
     "capacity",
     "pages-deployment",
-    "package-provenance"
+    "package-provenance",
+    "customer-workflow"
   ]
 }

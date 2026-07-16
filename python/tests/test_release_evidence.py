@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import io
 import importlib.util
 import json
@@ -16,6 +17,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EVIDENCE_SCRIPT = REPO_ROOT / "scripts" / "release_evidence.py"
 VERIFY_SCRIPT = REPO_ROOT / "scripts" / "verify_release_evidence.py"
+SUBJECT_SCRIPT = REPO_ROOT / "scripts" / "release_subjects.py"
 
 
 def load_modules():
@@ -24,6 +26,11 @@ def load_modules():
     evidence_module = importlib.util.module_from_spec(evidence_spec)
     sys.modules["release_evidence"] = evidence_module
     evidence_spec.loader.exec_module(evidence_module)
+    subject_spec = importlib.util.spec_from_file_location("release_subjects", SUBJECT_SCRIPT)
+    assert subject_spec and subject_spec.loader
+    subject_module = importlib.util.module_from_spec(subject_spec)
+    sys.modules["release_subjects"] = subject_module
+    subject_spec.loader.exec_module(subject_module)
     verify_spec = importlib.util.spec_from_file_location("verify_release_evidence", VERIFY_SCRIPT)
     assert verify_spec and verify_spec.loader
     verify_module = importlib.util.module_from_spec(verify_spec)
@@ -160,6 +167,18 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.assertEqual(self.evidence.canonical_bytes(left), self.evidence.canonical_bytes(right))
         self.assertEqual(left["computed_verdict"], "blocked")
         self.assertIn("local/diagnostic", " ".join(left["blockers"]))
+        self.assertIn("required bundle subject missing", " ".join(left["blockers"]))
+
+    def test_rejects_duplicated_bundle_subject_catalog_entry(self) -> None:
+        extracted = self._extract()
+        manifest_path = extracted / "bundle-manifest.json"
+        manifest = self.evidence.load_json(manifest_path)
+        manifest["subjects"].append(dict(manifest["subjects"][0]))
+        manifest["bundle_id"] = self.evidence.identity_digest(manifest, "bundle_id")
+        self.evidence.write_canonical_json(manifest_path, manifest)
+        duplicated = self._repack(extracted, "duplicated-subject.zip")
+        with self.assertRaisesRegex(ValueError, "duplicate bundle subject"):
+            self.verify.verify_bundle(duplicated, now=self.now)
 
     def test_rejects_latest_stale_sha_tree_and_dirty_candidate(self) -> None:
         latest = self.root / "latest.zip"
@@ -263,6 +282,9 @@ class ReleaseEvidenceTests(unittest.TestCase):
             archive.writestr(self.bundle.name, self.bundle.read_bytes())
         artifact_archive = artifact_buffer.getvalue()
         responses = {
+            f"repos/{repository}/git/ref/heads/main": {
+                "object": {"sha": self.candidate["commit_sha"]}
+            },
             f"repos/{repository}/actions/runs/42/attempts/1": {
                 "id": 42,
                 "run_attempt": 1,
@@ -301,6 +323,18 @@ class ReleaseEvidenceTests(unittest.TestCase):
             download_artifact=lambda _repository, _artifact_id: artifact_archive,
         )
 
+        advanced = dict(responses)
+        advanced[f"repos/{repository}/git/ref/heads/main"] = {"object": {"sha": "f" * 40}}
+        with self.assertRaisesRegex(ValueError, "protected main advanced"):
+            self.verify.verify_github_outcome(
+                self.bundle,
+                workflow,
+                self.candidate,
+                self.policy,
+                api=advanced.__getitem__,
+                download_artifact=lambda _repository, _artifact_id: artifact_archive,
+            )
+
         arbitrary = self._official_workflow(run_id="999")
         with self.assertRaisesRegex(ValueError, "does not exist"):
             self.verify.verify_github_outcome(
@@ -308,7 +342,11 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 arbitrary,
                 self.candidate,
                 self.policy,
-                api=lambda _endpoint: responses[f"repos/{repository}/actions/runs/42/attempts/1"],
+                api=lambda endpoint: (
+                    responses[f"repos/{repository}/git/ref/heads/main"]
+                    if endpoint.endswith("/git/ref/heads/main")
+                    else responses[f"repos/{repository}/actions/runs/42/attempts/1"]
+                ),
                 download_artifact=lambda _repository, _artifact_id: artifact_archive,
             )
 
@@ -369,11 +407,17 @@ class ReleaseEvidenceTests(unittest.TestCase):
             seen_commands.append(command)
             return verification
 
-        attestation = self.root / "package-provenance.jsonl"
-        attestation.write_text("signed bundle placeholder", encoding="utf-8")
+        provenance_subject = {
+            "observation": {
+                "details": {
+                    "attestation_bundle_base64": base64.b64encode(b"signed bundle placeholder").decode("ascii"),
+                    "attestation_bundle_sha256": self.evidence.sha256_bytes(b"signed bundle placeholder"),
+                }
+            }
+        }
         self.verify.verify_package_provenance(
             self.package,
-            attestation,
+            provenance_subject,
             workflow,
             self.candidate,
             self.policy,
@@ -387,7 +431,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exact official run"):
             self.verify.verify_package_provenance(
                 self.package,
-                attestation,
+                provenance_subject,
                 workflow,
                 self.candidate,
                 self.policy,

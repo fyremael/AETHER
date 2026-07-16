@@ -45,14 +45,25 @@ R1-R4.
 ## Official capture
 
 `.github/workflows/reusable-exact-candidate-evidence.yml` is invoked by Release
-Readiness with an explicit full SHA and ref. It checks out detached with
-persisted credentials disabled, checks HEAD/tree/clean state, runs every gate,
-builds the package once, attests it, assembles the SHA/run/attempt-named bundle,
-and uploads it. A separate dependent job downloads that immutable artifact and
-verifies the included provenance signature plus the live GitHub run, completed
-producer job, exact artifact digest and bundle bytes, candidate, ref, and
-GitHub-hosted runner before it uploads the canonical verdict. A declared run ID,
-host, or artifact name is not evidence.
+Readiness with an explicit full SHA and protected `main` ref. Before the
+reusable job starts, Release Readiness validates exact successful CI, Supply
+Chain, Pages, and Capacity run IDs; downloads their artifacts by immutable ID;
+matches API size and SHA-256; and tests the exact Supply Chain package bytes.
+Capacity qualification consumes the SHA/run/attempt-named report while its
+`latest` copy remains navigation-only. Operational readiness emits a
+candidate/run/package-bound manifest; the qualification artifact retains all
+nine named raw outputs, and independent verification re-hashes their exact
+copied bytes against that manifest. Release Readiness then emits candidate-bound
+semantic subject envelopes. The reusable job
+checks out detached with persisted credentials disabled, checks
+HEAD/tree/clean state, runs every gate, attests the already-tested canonical
+package, adds the provenance subject, assembles the SHA/run/attempt-named
+bundle, and uploads it. A separate dependent job downloads that immutable
+artifact and verifies the included provenance signature plus the live GitHub
+run, completed producer and prerequisite jobs, redownloaded prerequisite and
+final artifact digests and bytes, subject semantics, candidate, ref, and
+GitHub-hosted runner before it uploads the canonical verdict. A declared run
+ID, host, artifact name, or present subject file is not evidence.
 
 Release Readiness places both the reusable evidence job and the operational
 readiness job behind a dedicated `release` environment approval. The hosted
@@ -60,9 +71,14 @@ environment permits only `main`; a branch or unapproved run cannot become an
 official candidate merely by invoking the reusable workflow.
 
 Download the immutable artifact by its full name. Do not feed a file or path
-containing `latest` to the verifier. For promotion, also pass
-`--require-official`; once R5 subjects exist, promotion additionally passes
-`--require-passed`.
+containing `latest` to the verifier. For promotion, pass `--require-official`
+and `--require-passed`. A fresh detached checkout must independently
+redownload the artifact by ID and produce verdict bytes identical to the
+dependent workflow verdict before a beta promotion record is generated.
+
+`scripts/commercial_beta_promotion.py` is the only promotion-record generator.
+It consumes both verdict files and immutable bundle/verdict artifact receipts.
+The commercial ledger cannot author successful outcomes.
 
 ## Failure and waiver rules
 

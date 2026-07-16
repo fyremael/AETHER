@@ -2,9 +2,23 @@ name: Release Readiness
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
+    inputs:
+      ci_run_id:
+        description: Successful CI run ID for this exact protected main SHA
+        required: true
+        type: string
+      supply_chain_run_id:
+        description: Successful Supply Chain run ID for this exact protected main SHA
+        required: true
+        type: string
+      pages_run_id:
+        description: Successful Pages run ID for this exact protected main SHA
+        required: true
+        type: string
+      capacity_run_id:
+        description: Successful Capacity Planning run ID for this exact protected main SHA
+        required: true
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,31 +30,26 @@ concurrency:
 permissions:
   actions: read
   contents: read
-  id-token: write
-  attestations: write
-  artifact-metadata: write
 
 jobs:
   protected-release-approval:
     name: Protected release approval
     runs-on: ubuntu-latest
     environment: release
+    permissions:
+      contents: read
 
     steps:
       - name: Record protected approval boundary
         run: echo "release environment approval granted for $GITHUB_SHA"
 
-  exact-candidate-evidence:
-    needs: protected-release-approval
-    uses: ./.github/workflows/reusable-exact-candidate-evidence.yml
-    with:
-      candidate_sha: ${{ github.sha }}
-      candidate_ref: ${{ github.ref }}
-
   release-readiness:
     name: Release Readiness (Windows)
     runs-on: windows-latest
     needs: protected-release-approval
+    permissions:
+      actions: read
+      contents: read
 
     steps:
       - name: Checkout
@@ -65,6 +74,29 @@ jobs:
       - name: Install pinned release evidence dependencies
         run: python -m pip install --disable-pip-version-check -r requirements-release.txt
 
+      - name: Download and verify exact prerequisite artifacts
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          SUPPLY_CHAIN_RUN_ID: ${{ inputs.supply_chain_run_id }}
+          PAGES_RUN_ID: ${{ inputs.pages_run_id }}
+          CAPACITY_RUN_ID: ${{ inputs.capacity_run_id }}
+        run: |
+          $tree = (git rev-parse "HEAD^{tree}").Trim()
+          $candidateRepository = (git config --get remote.origin.url).Trim()
+          python scripts/release_qualification.py fetch-inputs `
+            --repository "${{ github.repository }}" `
+            --candidate-repository $candidateRepository `
+            --candidate-sha "${{ github.sha }}" `
+            --candidate-tree-sha $tree `
+            --candidate-ref "refs/heads/main" `
+            --ci-run-id $env:CI_RUN_ID `
+            --supply-chain-run-id $env:SUPPLY_CHAIN_RUN_ID `
+            --pages-run-id $env:PAGES_RUN_ID `
+            --capacity-run-id $env:CAPACITY_RUN_ID `
+            --output-dir artifacts/release/qualification-inputs
+
       - name: Seed CI host baselines
         shell: pwsh
         run: |
@@ -73,7 +105,47 @@ jobs:
 
       - name: Run release-readiness suite
         shell: pwsh
-        run: ./scripts/run-release-readiness.ps1 -HostManifestPath fixtures/performance/hosts/github-windows-latest.json
+        run: |
+          $package = Get-ChildItem artifacts/release/qualification-inputs -Recurse -Filter "aether-pilot-service-windows-x86_64.zip"
+          if ($package.Count -ne 1) { throw "canonical package is missing or ambiguous" }
+          ./scripts/run-release-readiness.ps1 `
+            -HostManifestPath fixtures/performance/hosts/github-windows-latest.json `
+            -CandidatePackageZip $package.FullName `
+            -CandidateSha "${{ github.sha }}" `
+            -CandidateRef "refs/heads/main" `
+            -EvidenceManifestPath "artifacts/qa/release-readiness/release-readiness-evidence-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}.json" `
+            -CommercialBetaCandidate
+
+      - name: Build candidate-bound release subjects
+        shell: pwsh
+        run: |
+          $tree = (git rev-parse "HEAD^{tree}").Trim()
+          $candidateRepository = (git config --get remote.origin.url).Trim()
+          $package = Get-ChildItem artifacts/release/qualification-inputs -Recurse -Filter "aether-pilot-service-windows-x86_64.zip"
+          if ($package.Count -ne 1) { throw "canonical package is missing or ambiguous" }
+          python scripts/release_qualification.py build-subjects `
+            --repository "${{ github.repository }}" `
+            --candidate-repository $candidateRepository `
+            --candidate-sha "${{ github.sha }}" `
+            --candidate-tree-sha $tree `
+            --candidate-ref "refs/heads/main" `
+            --input-dir artifacts/release/qualification-inputs `
+            --readiness-manifest "artifacts/qa/release-readiness/release-readiness-evidence-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}.json" `
+            --package $package.FullName `
+            --output-dir artifacts/release/qualification-subjects `
+            --readiness-output-dir artifacts/release/qualification-readiness `
+            --run-id "${{ github.run_id }}" `
+            --attempt "${{ github.run_attempt }}"
+
+      - name: Upload exact qualification inputs and subjects
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-qualification-subjects-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/release/qualification-inputs
+            artifacts/release/qualification-subjects
+            artifacts/release/qualification-readiness
+          if-no-files-found: error
 
       - name: Upload release-readiness artifacts
         if: always()
@@ -98,3 +170,19 @@ jobs:
           } else {
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Release-readiness summary was not generated."
           }
+
+  exact-candidate-evidence:
+    needs:
+      - protected-release-approval
+      - release-readiness
+    uses: ./.github/workflows/reusable-exact-candidate-evidence.yml
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    with:
+      candidate_sha: ${{ github.sha }}
+      candidate_ref: refs/heads/main
+      qualification_subject_artifact: release-qualification-subjects-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}

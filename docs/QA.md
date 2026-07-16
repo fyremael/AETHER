@@ -128,7 +128,7 @@ double-click scripts/run-release-readiness.cmd
 or:
 
 ```bash
-powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1
+powershell -ExecutionPolicy Bypass -File scripts/run-release-readiness.ps1 -CandidatePackageZip <canonical-package-zip>
 ```
 
 For a stricter beta-candidate run that fails on incomplete Service v2

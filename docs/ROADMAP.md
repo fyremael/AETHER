@@ -33,10 +33,13 @@ closed until its scheduled Postgres parity and performance matrix are captured
 by the immutable R4 evidence pipeline. Execution-scoped trace handles and
 transactional namespace-schema append admission are now implemented locally;
 the R4 schemas, runner, deterministic bundler, cryptographic/API-bound verifier,
-policy-only ledger, negative suite, and two-stage reusable workflow are
-implemented locally. The active
-dependency is one official independently verified candidate run, followed by
-the R5 subjects that its computed beta verdict correctly reports as missing.
+policy-only ledger, candidate-bound subject envelopes, canonical-package
+qualification flow, promotion-record validator, negative suite, and two-stage
+reusable workflow are implemented locally. Independent P0/P1 review of the
+focused qualification implementation is complete. The active dependency is
+merge, followed by one protected `main` candidate whose exact CI, Supply Chain,
+Pages, Capacity, operational-readiness, bundle, dependent-verdict, and fresh
+independent-verdict outcomes all pass.
 
 The roadmap is no longer about proving the kernel can exist. Its immediate job
 is to repair the correctness and claim boundaries before widening resumes.
@@ -125,6 +128,12 @@ Focus:
 - obtain exact-SHA hosted evidence from the implemented CycloneDX,
   vulnerability/license/code/secret gates and verify package/SBOM attestations
   plus repository protection settings
+- keep the successful Supply Chain artifact as the canonical package; never
+  rebuild candidate bytes inside Release Readiness
+- promote commercial beta only from a generated immutable record whose official
+  and independent verdict bytes are identical and passed
+- keep GA at `0/4` until support/incident posture, multi-platform distribution,
+  signed promotion, and distributed-truth qualification pass separately
 
 ### 6. Product legibility and design-partner packaging
 
