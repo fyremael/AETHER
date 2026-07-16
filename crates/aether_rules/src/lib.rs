@@ -271,12 +271,30 @@ impl ScopedRuleCompiler for DefaultRuleCompiler {
         program: &RuleProgram,
         scope: PolicyScope,
     ) -> Result<ScopedProgram, CompileError> {
+        let declared_fact_predicates = program
+            .facts
+            .iter()
+            .map(|fact| fact.predicate.id)
+            .collect::<IndexSet<_>>();
         let mut projected = program.clone();
         projected
             .facts
             .retain(|fact| scope.allows(fact.policy.as_ref()));
+        let visible_fact_predicates = projected
+            .facts
+            .iter()
+            .map(|fact| fact.predicate.id)
+            .collect::<IndexSet<_>>();
+        let empty_extensional_predicates = declared_fact_predicates
+            .difference(&visible_fact_predicates)
+            .copied()
+            .collect();
         let compiled = self.compile(schema, &projected)?;
-        Ok(ScopedProgram::from_scoped_compilation(compiled, scope))
+        Ok(ScopedProgram::from_scoped_compilation(
+            compiled,
+            scope,
+            empty_extensional_predicates,
+        ))
     }
 }
 

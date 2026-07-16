@@ -1,5 +1,5 @@
 use aether_ast::{
-    policy_allows, Datom, DerivationTrace, ElementId, ExplainSpec, ExplainTarget, NamedExplainSpec,
+    Datom, DerivationTrace, ElementId, ExplainSpec, ExplainTarget, NamedExplainSpec,
     NamedQuerySpec, PhaseGraph, PlanExplanation, PolicyContext, PolicyScope, QueryResult,
     QuerySpec, RuleProgram, TemporalView, Term, TupleId,
 };
@@ -8,8 +8,7 @@ use aether_plan::CompiledProgram;
 use aether_resolver::{ResolveError, ResolvedState};
 use aether_rules::{DefaultDslParser, DefaultRuleCompiler, DslParser, ParseError, RuleCompiler};
 use aether_runtime::{
-    execute_scoped_query, DerivedSet, EvaluationBundle, RuleRuntime, RuntimeError, RuntimeLimits,
-    SemiNaiveRuntime,
+    execute_scoped_query, DerivedSet, EvaluationBundle, RuntimeError, RuntimeLimits,
 };
 use aether_schema::Schema;
 use aether_storage::{InMemoryJournal, Journal, JournalError, PostgresJournal, SqliteJournal};
@@ -61,6 +60,7 @@ pub use execution::{
     ContentDigest, ExecutionId, ExecutionManifest, ExecutionReceipt, FederatedExecutionSource,
     FederationManifest, JournalCut, ResolveTraceHandleRequest, ResolveTraceHandleResponse,
     SchemaRef, TraceHandle, TraceHandleBinding, TraceRecord, DEFAULT_EXECUTION_RETENTION,
+    DEFAULT_TRACE_TOMBSTONE_RETENTION,
 };
 pub use namespace::NamespaceId;
 
@@ -357,39 +357,6 @@ impl<J: Journal, S: SidecarFederation> KernelServiceCore<J, S> {
     }
 }
 
-fn filter_derived_set(derived: &DerivedSet, policy_context: Option<&PolicyContext>) -> DerivedSet {
-    let tuples = derived
-        .tuples
-        .iter()
-        .filter(|tuple| policy_allows(policy_context, tuple.policy.as_ref()))
-        .cloned()
-        .collect::<Vec<_>>();
-    let visible_ids = tuples
-        .iter()
-        .map(|tuple| tuple.tuple.id)
-        .collect::<std::collections::BTreeSet<_>>();
-    let predicate_index = derived
-        .predicate_index
-        .iter()
-        .map(|(predicate, tuple_ids)| {
-            (
-                *predicate,
-                tuple_ids
-                    .iter()
-                    .copied()
-                    .filter(|tuple_id| visible_ids.contains(tuple_id))
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .collect();
-
-    DerivedSet {
-        tuples,
-        iterations: derived.iterations.clone(),
-        predicate_index,
-    }
-}
-
 fn assert_trace_visible(trace: &DerivationTrace, scope: &PolicyScope) -> Result<(), ApiError> {
     if trace
         .tuples
@@ -594,9 +561,28 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         &mut self,
         request: EvaluateProgramRequest,
     ) -> Result<EvaluateProgramResponse, ApiError> {
-        let derived = SemiNaiveRuntime.evaluate(&request.state, &request.program)?;
+        let EvaluateProgramRequest {
+            schema,
+            datoms,
+            view,
+            program,
+            policy_context,
+        } = request;
+        let datoms = match datoms {
+            Some(datoms) => datoms,
+            None => self.journal.history()?,
+        };
+        let scope = PolicyScope::from_optional(policy_context);
+        let builder = ScopedEvaluationBuilder::new_in_namespace(
+            self.namespace.as_str(),
+            &schema,
+            &datoms,
+            &program,
+            scope,
+        )?;
+        let (_, evaluation) = builder.evaluate_with_key(view)?;
         Ok(EvaluateProgramResponse {
-            derived: filter_derived_set(&derived, request.policy_context.as_ref()),
+            derived: evaluation.derived().clone(),
         })
     }
 
@@ -878,8 +864,12 @@ pub struct CompileProgramResponse {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EvaluateProgramRequest {
-    pub state: ResolvedState,
-    pub program: CompiledProgram,
+    pub schema: Schema,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub datoms: Option<Vec<Datom>>,
+    #[serde(default)]
+    pub view: TemporalView,
+    pub program: RuleProgram,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy_context: Option<PolicyContext>,
 }

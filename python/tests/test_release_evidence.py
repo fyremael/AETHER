@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import importlib.util
 import json
 import shutil
@@ -136,6 +137,23 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.evidence.deterministic_zip(extracted, output)
         return output
 
+    def _official_workflow(self, *, run_id: str = "42") -> dict:
+        attempt = 1
+        return {
+            "workflow_file": self.policy["official_workflow"],
+            "run_id": run_id,
+            "attempt": attempt,
+            "job_id": self.policy["official_job"],
+            "runner": "Windows",
+            "host": "github-windows-latest",
+            "repository": self.policy["official_repository"],
+            "artifact_name": (
+                f"{self.policy['official_artifact_prefix']}-{self.candidate['commit_sha']}-"
+                f"{run_id}-{attempt}"
+            ),
+            "tool_versions": {"test": "1"},
+        }
+
     def test_valid_bundle_verdict_is_byte_stable_and_diagnostic(self) -> None:
         left = self.verify.verify_bundle(self.bundle, now=self.now)
         right = self.verify.verify_bundle(self.bundle, now=self.now)
@@ -228,17 +246,153 @@ class ReleaseEvidenceTests(unittest.TestCase):
         policy["gates"][0]["status"] = "ready"
         with self.assertRaisesRegex(ValueError, "authored"):
             self.evidence.validate_policy(policy)
-        workflow = dict(self.workflow)
-        workflow.update(
-            {
-                "workflow_file": self.policy["official_workflow"],
-                "job_id": self.policy["official_job"],
-                "run_id": "declared-only",
-                "runner": "Windows",
-            }
-        )
+        workflow = self._official_workflow(run_id="declared-only")
         with self.assertRaisesRegex(ValueError, "without a successful run"):
             self.verify.verify_official_workflow(workflow, self.policy)
+
+        workflow = self._official_workflow()
+        workflow["host"] = "self-asserted-host"
+        with self.assertRaisesRegex(ValueError, "official host"):
+            self.verify.verify_official_workflow(workflow, self.policy)
+
+    def test_official_run_job_and_artifact_are_bound_to_github_outcomes(self) -> None:
+        workflow = self._official_workflow()
+        repository = self.policy["official_repository"]
+        artifact_buffer = io.BytesIO()
+        with zipfile.ZipFile(artifact_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(self.bundle.name, self.bundle.read_bytes())
+        artifact_archive = artifact_buffer.getvalue()
+        responses = {
+            f"repos/{repository}/actions/runs/42/attempts/1": {
+                "id": 42,
+                "run_attempt": 1,
+                "head_sha": self.candidate["commit_sha"],
+                "repository": {"full_name": repository},
+                "path": self.policy["official_caller_workflow"],
+            },
+            f"repos/{repository}/actions/runs/42/attempts/1/jobs?per_page=100": {
+                "jobs": [
+                    {
+                        "name": f"release / {self.policy['official_job_name']}",
+                        "status": "completed",
+                        "conclusion": "success",
+                    }
+                ]
+            },
+            f"repos/{repository}/actions/runs/42/artifacts?per_page=100": {
+                "artifacts": [
+                    {
+                        "id": 1234,
+                        "name": workflow["artifact_name"],
+                        "expired": False,
+                        "size_in_bytes": len(artifact_archive),
+                        "digest": f"sha256:{self.evidence.sha256_bytes(artifact_archive)}",
+                        "workflow_run": {"head_sha": self.candidate["commit_sha"]},
+                    }
+                ]
+            },
+        }
+        self.verify.verify_github_outcome(
+            self.bundle,
+            workflow,
+            self.candidate,
+            self.policy,
+            api=responses.__getitem__,
+            download_artifact=lambda _repository, _artifact_id: artifact_archive,
+        )
+
+        arbitrary = self._official_workflow(run_id="999")
+        with self.assertRaisesRegex(ValueError, "does not exist"):
+            self.verify.verify_github_outcome(
+                self.bundle,
+                arbitrary,
+                self.candidate,
+                self.policy,
+                api=lambda _endpoint: responses[f"repos/{repository}/actions/runs/42/attempts/1"],
+                download_artifact=lambda _repository, _artifact_id: artifact_archive,
+            )
+
+        forged = self.root / "forged" / self.bundle.name
+        forged.parent.mkdir()
+        forged_bytes = bytearray(self.bundle.read_bytes())
+        forged_bytes[-1] ^= 1
+        forged.write_bytes(forged_bytes)
+        with self.assertRaisesRegex(ValueError, "exact input evidence bundle"):
+            self.verify.verify_github_outcome(
+                forged,
+                workflow,
+                self.candidate,
+                self.policy,
+                api=responses.__getitem__,
+                download_artifact=lambda _repository, _artifact_id: artifact_archive,
+            )
+
+    def test_package_provenance_is_cryptographically_bound_to_run_and_candidate(self) -> None:
+        workflow = self._official_workflow()
+        repository = self.policy["official_repository"]
+        repository_uri = f"https://github.com/{repository}"
+        certificate = {
+            "sourceRepositoryURI": repository_uri,
+            "sourceRepositoryDigest": self.candidate["commit_sha"],
+            "sourceRepositoryRef": self.candidate["ref"],
+            "githubWorkflowRepository": repository,
+            "githubWorkflowSHA": self.candidate["commit_sha"],
+            "githubWorkflowRef": self.candidate["ref"],
+            "buildSignerURI": (
+                f"{repository_uri}/{self.policy['official_attestation_workflow']}@"
+                f"{self.candidate['ref']}"
+            ),
+            "buildSignerDigest": self.candidate["commit_sha"],
+            "runInvocationURI": f"{repository_uri}/actions/runs/42/attempts/1",
+            "runnerEnvironment": "github-hosted",
+        }
+        verification = [
+            {
+                "verificationResult": {
+                    "signature": {"certificate": certificate},
+                    "statement": {
+                        "predicateType": "https://slsa.dev/provenance/v1",
+                        "subject": [
+                            {
+                                "digest": {
+                                    "sha256": self.evidence.sha256_file(self.package)
+                                }
+                            }
+                        ],
+                    },
+                }
+            }
+        ]
+        seen_commands = []
+
+        def accepted(command: list[str]):
+            seen_commands.append(command)
+            return verification
+
+        attestation = self.root / "package-provenance.jsonl"
+        attestation.write_text("signed bundle placeholder", encoding="utf-8")
+        self.verify.verify_package_provenance(
+            self.package,
+            attestation,
+            workflow,
+            self.candidate,
+            self.policy,
+            runner=accepted,
+        )
+        self.assertIn("--deny-self-hosted-runners", seen_commands[0])
+        self.assertIn("--source-digest", seen_commands[0])
+        self.assertIn("--signer-digest", seen_commands[0])
+
+        certificate["runInvocationURI"] = f"{repository_uri}/actions/runs/404/attempts/1"
+        with self.assertRaisesRegex(ValueError, "exact official run"):
+            self.verify.verify_package_provenance(
+                self.package,
+                attestation,
+                workflow,
+                self.candidate,
+                self.policy,
+                runner=lambda _command: verification,
+            )
 
     def test_rejects_wrong_host_suite_baseline_threshold_capacity_and_pages_sha(self) -> None:
         gate = dict(self.policy["gates"][0])

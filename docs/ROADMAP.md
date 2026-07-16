@@ -22,7 +22,7 @@ The active external claim during remediation is:
 | `M0` | Complete | Rust substrate core exists |
 | `M1` | Complete | Deterministic resolver core exists |
 | `M2` | Complete | Rule compiler and planning exist |
-| `M3` | Reopened for policy-aware execution | Recursive runtime, stratified negation, provenance, and bounded aggregation work unrestricted; policy projection must move before compilation/evaluation |
+| `M3` | Implemented locally; qualification pending | Recursive runtime, stratified negation, provenance, and bounded aggregation execute inside policy-scoped replay and compilation, including the compatibility evaluator |
 | `M4` | Controlled-alpha boundary only | Authenticated service, reports, execution-scoped proof identity, schema-admitted writes, and a verified-TLS transport contract exist; hosted transport and immutable release evidence remain blocked |
 | `M5` | Complete for first boundary layer | Go shell and Python SDK are real, but still early ecosystems |
 
@@ -32,8 +32,9 @@ reports, and sidecar cuts. R1 remains evidence-pending rather than externally
 closed until its scheduled Postgres parity and performance matrix are captured
 by the immutable R4 evidence pipeline. Execution-scoped trace handles and
 transactional namespace-schema append admission are now implemented locally;
-the R4 schemas, runner, deterministic bundler, verifier, policy-only ledger,
-negative suite, and reusable workflow are implemented locally. The active
+the R4 schemas, runner, deterministic bundler, cryptographic/API-bound verifier,
+policy-only ledger, negative suite, and two-stage reusable workflow are
+implemented locally. The active
 dependency is one official independently verified candidate run, followed by
 the R5 subjects that its computed beta verdict correctly reports as missing.
 
@@ -154,7 +155,8 @@ If the team needs a practical ordering, use this one:
 2. `R1`: make policy semantic input and prove noninterference
 3. `R2`: execution-scoped handles implemented locally; immutable candidate evidence remains pending
 4. `R3`: transactional namespace-schema append admission implemented locally; immutable candidate evidence remains pending
-5. `R4`: immutable exact-candidate evidence implemented locally; official run and independent downloaded verification pending
+5. `R4`: immutable exact-candidate evidence implemented locally with signed
+   provenance and live run/job/artifact verification; first green official run pending
 6. `R5`: supply-chain, transport, concurrency isolation, capability-negotiated
    client migration, operational automation, and service resource controls are
    implemented locally; complete hosted exact-candidate evidence remains pending

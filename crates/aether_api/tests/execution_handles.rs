@@ -1,6 +1,7 @@
 use aether_api::{
-    execution::ExecutionError, AppendRequest, InMemoryKernelService, KernelService, NamespaceId,
-    ResolveTraceHandleRequest, RunDocumentRequest, SqliteKernelService, TraceHandle,
+    execution::{execution_catalog_path_for_journal, ExecutionError},
+    AppendRequest, InMemoryKernelService, KernelService, NamespaceId, ResolveTraceHandleRequest,
+    RunDocumentRequest, SqliteKernelService, TraceHandle,
 };
 use aether_ast::{
     AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PolicyContext,
@@ -64,7 +65,7 @@ fn tuple_ids_from_different_runs_resolve_through_distinct_correct_handles() {
 }
 
 #[test]
-fn equivalent_executions_share_internal_id_but_issue_fresh_opaque_handles() {
+fn equivalent_in_memory_executions_reuse_one_persisted_opaque_handle() {
     let mut service = InMemoryKernelService::new();
     let first = service
         .run_document(RunDocumentRequest {
@@ -82,7 +83,7 @@ fn equivalent_executions_share_internal_id_but_issue_fresh_opaque_handles() {
     let second = second.execution.expect("second receipt");
 
     assert_eq!(first.manifest.execution_id, second.manifest.execution_id);
-    assert_ne!(
+    assert_eq!(
         first.trace_handles[0].handle,
         second.trace_handles[0].handle
     );
@@ -155,6 +156,60 @@ fn sqlite_execution_handles_survive_service_restart() {
         .tuples
         .iter()
         .any(|tuple| { tuple.tuple.values == vec![Value::Entity(EntityId::new(11))] }));
+}
+
+#[test]
+fn equivalent_sqlite_executions_reuse_one_trace_row_across_restart() {
+    let temp = TestDbPath::new("execution-reuse");
+    let first_handle = {
+        let mut service = SqliteKernelService::open(temp.path()).expect("open sqlite service");
+        let mut handles = Vec::new();
+        for _ in 0..128 {
+            handles.push(
+                service
+                    .run_document(RunDocumentRequest {
+                        dsl: fact_document(17, false),
+                        policy_context: None,
+                    })
+                    .expect("run equivalent durable execution")
+                    .execution
+                    .expect("execution receipt")
+                    .trace_handles[0]
+                    .handle
+                    .clone(),
+            );
+        }
+        assert!(handles.windows(2).all(|pair| pair[0] == pair[1]));
+        handles[0].clone()
+    };
+
+    let catalog = execution_catalog_path_for_journal(temp.path());
+    let connection = rusqlite::Connection::open(&catalog).expect("open execution catalog");
+    let executions: i64 = connection
+        .query_row("SELECT COUNT(*) FROM execution_records", [], |row| {
+            row.get(0)
+        })
+        .expect("count executions");
+    let traces: i64 = connection
+        .query_row("SELECT COUNT(*) FROM trace_records", [], |row| row.get(0))
+        .expect("count traces");
+    assert_eq!(executions, 1);
+    assert_eq!(traces, 1);
+    drop(connection);
+
+    let mut reopened = SqliteKernelService::open(temp.path()).expect("reopen sqlite service");
+    let reopened_handle = reopened
+        .run_document(RunDocumentRequest {
+            dsl: fact_document(17, false),
+            policy_context: None,
+        })
+        .expect("rerun equivalent execution after restart")
+        .execution
+        .expect("execution receipt")
+        .trace_handles[0]
+        .handle
+        .clone();
+    assert_eq!(reopened_handle, first_handle);
 }
 
 #[test]

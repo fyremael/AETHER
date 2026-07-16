@@ -12,7 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fmt,
     path::{Path, PathBuf},
     str::FromStr,
@@ -21,6 +21,7 @@ use std::{
 use thiserror::Error;
 
 pub const DEFAULT_EXECUTION_RETENTION: usize = 1_024;
+pub const DEFAULT_TRACE_TOMBSTONE_RETENTION: usize = 65_536;
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -186,6 +187,10 @@ pub trait ExecutionStore: fmt::Debug + Send {
         &self,
         execution_id: &ExecutionId,
     ) -> Result<Option<StoredExecution>, ExecutionStoreError>;
+    fn traces_for_execution(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<Vec<TraceRecord>, ExecutionStoreError>;
     fn put_trace(&mut self, trace: TraceRecord) -> Result<(), ExecutionStoreError>;
     fn trace(&self, handle: &TraceHandle) -> Result<TraceRecord, ExecutionStoreError>;
     fn expire_execution(&mut self, execution_id: &ExecutionId) -> Result<(), ExecutionStoreError>;
@@ -196,7 +201,9 @@ pub struct InMemoryExecutionStore {
     executions: BTreeMap<ExecutionId, StoredExecution>,
     traces: BTreeMap<TraceHandle, TraceRecord>,
     expired_handles: BTreeSet<TraceHandle>,
+    expired_handle_order: VecDeque<TraceHandle>,
     max_executions: usize,
+    max_expired_handles: usize,
 }
 
 impl Default for InMemoryExecutionStore {
@@ -205,7 +212,22 @@ impl Default for InMemoryExecutionStore {
             executions: BTreeMap::new(),
             traces: BTreeMap::new(),
             expired_handles: BTreeSet::new(),
+            expired_handle_order: VecDeque::new(),
             max_executions: DEFAULT_EXECUTION_RETENTION,
+            max_expired_handles: DEFAULT_TRACE_TOMBSTONE_RETENTION,
+        }
+    }
+}
+
+impl InMemoryExecutionStore {
+    fn tombstone(&mut self, handle: TraceHandle) {
+        if self.expired_handles.insert(handle.clone()) {
+            self.expired_handle_order.push_back(handle);
+        }
+        while self.expired_handle_order.len() > self.max_expired_handles {
+            if let Some(expired) = self.expired_handle_order.pop_front() {
+                self.expired_handles.remove(&expired);
+            }
         }
     }
 }
@@ -239,6 +261,18 @@ impl ExecutionStore for InMemoryExecutionStore {
         Ok(self.executions.get(execution_id).cloned())
     }
 
+    fn traces_for_execution(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<Vec<TraceRecord>, ExecutionStoreError> {
+        Ok(self
+            .traces
+            .values()
+            .filter(|trace| &trace.execution_id == execution_id)
+            .cloned()
+            .collect())
+    }
+
     fn put_trace(&mut self, trace: TraceRecord) -> Result<(), ExecutionStoreError> {
         if self.traces.contains_key(&trace.handle) || self.expired_handles.contains(&trace.handle) {
             return Err(ExecutionStoreError::DuplicateTraceHandle);
@@ -268,7 +302,7 @@ impl ExecutionStore for InMemoryExecutionStore {
             .collect::<Vec<_>>();
         for handle in handles {
             self.traces.remove(&handle);
-            self.expired_handles.insert(handle);
+            self.tombstone(handle);
         }
         Ok(())
     }
@@ -278,6 +312,7 @@ pub struct SqliteExecutionStore {
     connection: Connection,
     path: PathBuf,
     max_executions: usize,
+    max_expired_handles: usize,
 }
 
 impl fmt::Debug for SqliteExecutionStore {
@@ -286,6 +321,7 @@ impl fmt::Debug for SqliteExecutionStore {
             .debug_struct("SqliteExecutionStore")
             .field("path", &self.path)
             .field("max_executions", &self.max_executions)
+            .field("max_expired_handles", &self.max_expired_handles)
             .finish()
     }
 }
@@ -323,7 +359,39 @@ impl SqliteExecutionStore {
             connection,
             path,
             max_executions: DEFAULT_EXECUTION_RETENTION,
+            max_expired_handles: DEFAULT_TRACE_TOMBSTONE_RETENTION,
         })
+    }
+
+    fn prune_expired_handles(&mut self) -> Result<(), ExecutionStoreError> {
+        loop {
+            let count: i64 = self.connection.query_row(
+                "SELECT COUNT(*) FROM expired_trace_handles",
+                [],
+                |row| row.get(0),
+            )?;
+            if usize::try_from(count).unwrap_or(usize::MAX) <= self.max_expired_handles {
+                return Ok(());
+            }
+            let oldest = self
+                .connection
+                .query_row(
+                    "SELECT handle FROM expired_trace_handles
+                     ORDER BY expired_at_ms ASC, handle ASC LIMIT 1",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            let Some(oldest) = oldest else {
+                return Err(ExecutionStoreError::Corrupted(
+                    "expired trace count was nonzero without an oldest row".into(),
+                ));
+            };
+            self.connection.execute(
+                "DELETE FROM expired_trace_handles WHERE handle = ?1",
+                params![oldest],
+            )?;
+        }
     }
 
     fn prune(&mut self) -> Result<(), ExecutionStoreError> {
@@ -384,6 +452,22 @@ impl ExecutionStore for SqliteExecutionStore {
         json.map(|json| serde_json::from_str(&json))
             .transpose()
             .map_err(ExecutionStoreError::from)
+    }
+
+    fn traces_for_execution(
+        &self,
+        execution_id: &ExecutionId,
+    ) -> Result<Vec<TraceRecord>, ExecutionStoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT record_json FROM trace_records
+             WHERE execution_id = ?1 ORDER BY handle ASC",
+        )?;
+        let rows = statement
+            .query_map(params![&execution_id.0], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .map(|json| serde_json::from_str(&json).map_err(ExecutionStoreError::from))
+            .collect()
     }
 
     fn put_trace(&mut self, trace: TraceRecord) -> Result<(), ExecutionStoreError> {
@@ -452,7 +536,7 @@ impl ExecutionStore for SqliteExecutionStore {
             params![&execution_id.0],
         )?;
         transaction.commit()?;
-        Ok(())
+        self.prune_expired_handles()
     }
 }
 
@@ -522,32 +606,58 @@ pub fn persist_execution(
         }
     };
 
+    let mut stored_traces = store.traces_for_execution(&execution_id)?.into_iter().fold(
+        BTreeMap::<TupleId, Vec<TraceRecord>>::new(),
+        |mut traces, trace| {
+            traces.entry(trace.local_tuple_id).or_default().push(trace);
+            traces
+        },
+    );
     let explainer = InMemoryExplainer::from_derived_set(derived);
     let mut trace_handles = Vec::with_capacity(derived.tuples.len());
     for tuple in &derived.tuples {
         let trace = explainer.explain_tuple(&tuple.tuple.id)?;
         let tuple_digest = digest_json(tuple)?;
         let trace_digest = digest_json(&trace)?;
-        let record = loop {
-            let handle = TraceHandle::generate();
-            let record = TraceRecord {
-                handle: handle.clone(),
-                execution_id: execution_id.clone(),
-                local_tuple_id: tuple.tuple.id,
-                tuple_digest: tuple_digest.clone(),
-                trace_digest: trace_digest.clone(),
-                trace: trace.clone(),
-            };
-            match store.put_trace(record.clone()) {
-                Ok(()) => break record,
-                Err(ExecutionStoreError::DuplicateTraceHandle) => continue,
-                Err(error) => return Err(error.into()),
+        let record = if let Some(records) = stored_traces.remove(&tuple.tuple.id) {
+            for record in &records {
+                if record.execution_id != execution_id
+                    || record.tuple_digest != tuple_digest
+                    || record.trace_digest != trace_digest
+                    || digest_json(&record.trace)? != record.trace_digest
+                {
+                    return Err(ExecutionError::CorruptedExecutionManifest);
+                }
+            }
+            records
+                .into_iter()
+                .next()
+                .ok_or(ExecutionError::CorruptedExecutionManifest)?
+        } else {
+            loop {
+                let handle = TraceHandle::generate();
+                let record = TraceRecord {
+                    handle: handle.clone(),
+                    execution_id: execution_id.clone(),
+                    local_tuple_id: tuple.tuple.id,
+                    tuple_digest: tuple_digest.clone(),
+                    trace_digest: trace_digest.clone(),
+                    trace: trace.clone(),
+                };
+                match store.put_trace(record.clone()) {
+                    Ok(()) => break record,
+                    Err(ExecutionStoreError::DuplicateTraceHandle) => continue,
+                    Err(error) => return Err(error.into()),
+                }
             }
         };
         trace_handles.push(TraceHandleBinding {
             local_tuple_id: tuple.tuple.id,
             handle: record.handle,
         });
+    }
+    if !stored_traces.is_empty() {
+        return Err(ExecutionError::CorruptedExecutionManifest);
     }
 
     Ok(ExecutionReceipt {
@@ -826,6 +936,74 @@ mod tests {
             sqlite.trace(&sqlite_handle),
             Err(ExecutionStoreError::ExpiredTraceHandle)
         ));
+        drop(sqlite);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn expired_handle_tombstones_are_bounded_in_memory_and_sqlite() {
+        let mut memory = InMemoryExecutionStore {
+            max_expired_handles: 2,
+            ..Default::default()
+        };
+        let mut memory_handles = Vec::new();
+        for id in ["execution-a", "execution-b", "execution-c"] {
+            let trace = trace_record(id);
+            memory_handles.push(trace.handle.clone());
+            memory
+                .put_execution(stored_execution(id, ENGINE_SEMANTICS_VERSION))
+                .expect("put memory execution");
+            memory.put_trace(trace).expect("put memory trace");
+            memory
+                .expire_execution(&ExecutionId(id.into()))
+                .expect("expire memory execution");
+        }
+        assert_eq!(memory.expired_handles.len(), 2);
+        assert!(matches!(
+            memory.trace(&memory_handles[0]),
+            Err(ExecutionStoreError::UnknownTraceHandle)
+        ));
+        for handle in &memory_handles[1..] {
+            assert!(matches!(
+                memory.trace(handle),
+                Err(ExecutionStoreError::ExpiredTraceHandle)
+            ));
+        }
+
+        let nonce = NEXT_TEST_PATH.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("aether-tombstones-{nonce}.sqlite"));
+        let mut sqlite = SqliteExecutionStore::open(&path).expect("open sqlite store");
+        sqlite.max_expired_handles = 2;
+        let mut sqlite_handles = Vec::new();
+        for id in ["execution-a", "execution-b", "execution-c"] {
+            let trace = trace_record(id);
+            sqlite_handles.push(trace.handle.clone());
+            sqlite
+                .put_execution(stored_execution(id, ENGINE_SEMANTICS_VERSION))
+                .expect("put sqlite execution");
+            sqlite.put_trace(trace).expect("put sqlite trace");
+            sqlite
+                .expire_execution(&ExecutionId(id.into()))
+                .expect("expire sqlite execution");
+        }
+        let tombstones: i64 = sqlite
+            .connection
+            .query_row("SELECT COUNT(*) FROM expired_trace_handles", [], |row| {
+                row.get(0)
+            })
+            .expect("count sqlite tombstones");
+        assert_eq!(tombstones, 2);
+        let (expired, unknown) =
+            sqlite_handles
+                .iter()
+                .fold((0, 0), |(expired, unknown), handle| {
+                    match sqlite.trace(handle) {
+                        Err(ExecutionStoreError::ExpiredTraceHandle) => (expired + 1, unknown),
+                        Err(ExecutionStoreError::UnknownTraceHandle) => (expired, unknown + 1),
+                        result => panic!("unexpected sqlite trace lookup result: {result:?}"),
+                    }
+                });
+        assert_eq!((expired, unknown), (2, 1));
         drop(sqlite);
         let _ = std::fs::remove_file(path);
     }

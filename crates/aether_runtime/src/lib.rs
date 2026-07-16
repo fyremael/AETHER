@@ -167,13 +167,27 @@ impl SemiNaiveRuntime {
         program: &CompiledProgram,
         limits: RuntimeLimits,
     ) -> Result<DerivedSet, RuntimeError> {
+        self.evaluate_with_limits_and_empty_relations(state, program, limits, &[])
+    }
+
+    fn evaluate_with_limits_and_empty_relations(
+        &self,
+        state: &ResolvedState,
+        program: &CompiledProgram,
+        limits: RuntimeLimits,
+        empty_extensional_predicates: &[PredicateId],
+    ) -> Result<DerivedSet, RuntimeError> {
         if program.plan_format_version != EXECUTABLE_PLAN_FORMAT_VERSION {
             return Err(RuntimeError::UnsupportedPlanFormat {
                 expected: EXECUTABLE_PLAN_FORMAT_VERSION,
                 actual: program.plan_format_version.clone(),
             });
         }
-        let extensional_rows = build_extensional_rows(state, program);
+        let extensional_rows = build_extensional_rows_with_empty_relations(
+            state,
+            program,
+            empty_extensional_predicates,
+        );
         let intensional_predicates: IndexSet<PredicateId> = program
             .rules
             .iter()
@@ -445,7 +459,12 @@ impl SemiNaiveRuntime {
             return Err(RuntimeError::PolicyScopeMismatch);
         }
 
-        let derived = self.evaluate_with_limits(snapshot.state(), program.compiled(), limits)?;
+        let derived = self.evaluate_with_limits_and_empty_relations(
+            snapshot.state(),
+            program.compiled(),
+            limits,
+            program.empty_extensional_predicates(),
+        )?;
         Ok(EvaluationBundle {
             snapshot,
             program,
@@ -461,7 +480,19 @@ pub fn execute_query(
     query: &QueryAst,
     policy_context: Option<&PolicyContext>,
 ) -> Result<QueryResult, RuntimeError> {
-    let extensional_rows = build_extensional_rows(state, program);
+    execute_query_with_empty_relations(state, program, derived, query, policy_context, &[])
+}
+
+fn execute_query_with_empty_relations(
+    state: &ResolvedState,
+    program: &CompiledProgram,
+    derived: &DerivedSet,
+    query: &QueryAst,
+    policy_context: Option<&PolicyContext>,
+    empty_extensional_predicates: &[PredicateId],
+) -> Result<QueryResult, RuntimeError> {
+    let extensional_rows =
+        build_extensional_rows_with_empty_relations(state, program, empty_extensional_predicates);
     let intensional_predicates: IndexSet<PredicateId> = program
         .rules
         .iter()
@@ -547,18 +578,20 @@ pub fn execute_scoped_query(
     evaluation: &EvaluationBundle,
     query: &QueryAst,
 ) -> Result<QueryResult, RuntimeError> {
-    execute_query(
+    execute_query_with_empty_relations(
         evaluation.snapshot().state(),
         evaluation.program().compiled(),
         evaluation.derived(),
         query,
         Some(evaluation.scope().context()),
+        evaluation.program().empty_extensional_predicates(),
     )
 }
 
-fn build_extensional_rows(
+fn build_extensional_rows_with_empty_relations(
     state: &ResolvedState,
     program: &CompiledProgram,
+    empty_extensional_predicates: &[PredicateId],
 ) -> IndexMap<PredicateId, Vec<RelationRow>> {
     let mut rows: IndexMap<PredicateId, Vec<RelationRow>> = IndexMap::new();
 
@@ -596,6 +629,10 @@ fn build_extensional_rows(
                     .unwrap_or_default(),
                 policy: fact.policy.clone(),
             });
+    }
+
+    for predicate in empty_extensional_predicates {
+        rows.entry(*predicate).or_default();
     }
 
     rows

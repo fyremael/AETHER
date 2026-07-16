@@ -27,7 +27,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -1900,16 +1900,18 @@ struct AuthenticatedPrincipal {
 
 #[derive(Clone)]
 struct AuditLog {
-    entries: Arc<Mutex<Vec<AuditEntry>>>,
+    entries: Arc<Mutex<VecDeque<AuditEntry>>>,
+    retention_limit: usize,
     path: Option<PathBuf>,
     writer: Option<mpsc::SyncSender<AuditEntry>>,
 }
 
 impl AuditLog {
     fn new(path: Option<PathBuf>, queue_limit: usize) -> Self {
-        let entries = Arc::new(Mutex::new(Vec::new()));
+        let retention_limit = queue_limit.max(1);
+        let entries = Arc::new(Mutex::new(VecDeque::with_capacity(retention_limit)));
         let writer = path.as_ref().map(|path| {
-            let (sender, receiver) = mpsc::sync_channel::<AuditEntry>(queue_limit.max(1));
+            let (sender, receiver) = mpsc::sync_channel::<AuditEntry>(retention_limit);
             let writer_path = path.clone();
             let writer_entries = Arc::clone(&entries);
             let spawn = std::thread::Builder::new()
@@ -1918,23 +1920,43 @@ impl AuditLog {
                     while let Ok(entry) = receiver.recv() {
                         if let Err(error) = append_audit_entry(&writer_path, &entry) {
                             if let Ok(mut entries) = writer_entries.lock() {
-                                entries.push(AuditEntry::audit_failure(&writer_path, &error));
+                                Self::push_retained(
+                                    &mut entries,
+                                    AuditEntry::audit_failure(&writer_path, &error),
+                                    retention_limit,
+                                );
                             }
                         }
                     }
                 });
             if let Err(error) = spawn {
                 if let Ok(mut entries) = entries.lock() {
-                    entries.push(AuditEntry::audit_failure(path, &error));
+                    Self::push_retained(
+                        &mut entries,
+                        AuditEntry::audit_failure(path, &error),
+                        retention_limit,
+                    );
                 }
             }
             sender
         });
         Self {
             entries,
+            retention_limit,
             path,
             writer,
         }
+    }
+
+    fn push_retained(
+        entries: &mut VecDeque<AuditEntry>,
+        entry: AuditEntry,
+        retention_limit: usize,
+    ) {
+        while entries.len() >= retention_limit {
+            entries.pop_front();
+        }
+        entries.push_back(entry);
     }
 
     fn record(&self, entry: AuditEntry) {
@@ -1942,7 +1964,7 @@ impl AuditLog {
             Ok(entries) => entries,
             Err(_) => return,
         };
-        entries.push(entry.clone());
+        Self::push_retained(&mut entries, entry.clone(), self.retention_limit);
         drop(entries);
 
         if let (Some(path), Some(writer)) = (&self.path, &self.writer) {
@@ -1952,10 +1974,11 @@ impl AuditLog {
                     mpsc::TrySendError::Disconnected(_) => "audit writer is unavailable",
                 };
                 if let Ok(mut entries) = self.entries.lock() {
-                    entries.push(AuditEntry::audit_failure(
-                        path,
-                        &std::io::Error::other(kind),
-                    ));
+                    Self::push_retained(
+                        &mut entries,
+                        AuditEntry::audit_failure(path, &std::io::Error::other(kind)),
+                        self.retention_limit,
+                    );
                 }
             }
         }
@@ -1964,7 +1987,7 @@ impl AuditLog {
     fn snapshot(&self) -> Result<Vec<AuditEntry>, HttpError> {
         self.entries
             .lock()
-            .map(|entries| entries.clone())
+            .map(|entries| entries.iter().cloned().collect())
             .map_err(|_| HttpError::LockPoisoned)
     }
 }
@@ -3766,6 +3789,7 @@ mod concurrency_tests {
         response::IntoResponse,
     };
     use std::{
+        collections::VecDeque,
         fs,
         path::PathBuf,
         sync::{mpsc, Arc, Mutex},
@@ -3803,7 +3827,8 @@ mod concurrency_tests {
         let (writer, receiver) = mpsc::sync_channel(1);
         writer.try_send(audit_entry()).expect("fill audit queue");
         let audit = AuditLog {
-            entries: Arc::new(Mutex::new(Vec::new())),
+            entries: Arc::new(Mutex::new(VecDeque::new())),
+            retention_limit: 2,
             path: Some(PathBuf::from("audit.jsonl")),
             writer: Some(writer),
         };
@@ -3817,6 +3842,21 @@ mod concurrency_tests {
                     .is_some_and(|detail| detail.contains("saturated"))
         }));
         drop(receiver);
+    }
+
+    #[test]
+    fn audit_memory_retention_remains_bounded_under_sustained_traffic() {
+        let audit = AuditLog::new(None, 32);
+        for timestamp_ms in 0..10_000 {
+            let mut entry = audit_entry();
+            entry.timestamp_ms = timestamp_ms;
+            audit.record(entry);
+        }
+
+        let entries = audit.snapshot().expect("bounded audit snapshot");
+        assert_eq!(entries.len(), 32);
+        assert_eq!(entries.first().map(|entry| entry.timestamp_ms), Some(9_968));
+        assert_eq!(entries.last().map(|entry| entry.timestamp_ms), Some(9_999));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

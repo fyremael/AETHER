@@ -26,7 +26,7 @@ from typing import Any, Iterable
 ENVELOPE_VERSION = "aether.release-evidence-envelope.v1"
 BUNDLE_VERSION = "aether.release-evidence-bundle.v1"
 POLICY_VERSION = "aether.release-gate-policy.v1"
-VERIFIER_VERSION = "aether-release-evidence-verifier-v1"
+VERIFIER_VERSION = "aether-release-evidence-verifier-v2"
 ALGORITHM = "sha256-canonical-json-v1"
 OBSERVED_STATUSES = {"passed", "failed", "error", "skipped"}
 NON_WAIVABLE_CORE = {
@@ -191,6 +191,8 @@ def workflow_identity(args: argparse.Namespace) -> dict[str, Any]:
     job_id = args.job_id or os.environ.get("AETHER_JOB_ID") or "local"
     runner = args.runner or os.environ.get("RUNNER_OS") or platform.system()
     host = args.host or os.environ.get("RUNNER_NAME") or platform.node() or "local"
+    repository = args.repository or os.environ.get("GITHUB_REPOSITORY") or "local"
+    artifact_name = args.artifact_name or os.environ.get("AETHER_ARTIFACT_NAME") or "local"
     return {
         "workflow_file": workflow_file,
         "run_id": str(run_id),
@@ -198,6 +200,8 @@ def workflow_identity(args: argparse.Namespace) -> dict[str, Any]:
         "job_id": job_id,
         "runner": runner,
         "host": host,
+        "repository": repository,
+        "artifact_name": artifact_name,
         "tool_versions": tool_versions(),
     }
 
@@ -208,6 +212,21 @@ def validate_policy(policy: dict[str, Any]) -> None:
     gates = policy.get("gates")
     if not isinstance(gates, list) or not gates:
         raise EvidenceError("gate policy requires a non-empty gates list")
+    required_identity = {
+        "official_repository": str,
+        "official_workflow": str,
+        "official_attestation_workflow": str,
+        "official_caller_workflow": str,
+        "official_job": str,
+        "official_job_name": str,
+        "official_artifact_prefix": str,
+        "allowed_official_runners": list,
+        "allowed_official_hosts": list,
+    }
+    for field, expected_type in required_identity.items():
+        value = policy.get(field)
+        if not isinstance(value, expected_type) or not value:
+            raise EvidenceError(f"gate policy requires non-empty {field}")
     seen: set[str] = set()
     for gate in gates:
         gate_id = gate.get("id")
@@ -361,8 +380,20 @@ def capture(args: argparse.Namespace) -> int:
             raise EvidenceError("official capture workflow does not match gate policy")
         if workflow["job_id"] != policy["official_job"]:
             raise EvidenceError("official capture job does not match gate policy")
-        if workflow["run_id"] == "local":
+        if not workflow["run_id"].isdigit():
             raise EvidenceError("official capture requires an immutable workflow run id")
+        if workflow["repository"] != policy["official_repository"]:
+            raise EvidenceError("official capture repository does not match gate policy")
+        if workflow["runner"] not in policy["allowed_official_runners"]:
+            raise EvidenceError("official capture runner does not match gate policy")
+        if workflow["host"] not in policy["allowed_official_hosts"]:
+            raise EvidenceError("official capture host does not match gate policy")
+        expected_artifact = (
+            f"{policy['official_artifact_prefix']}-{candidate['commit_sha']}-"
+            f"{workflow['run_id']}-{workflow['attempt']}"
+        )
+        if workflow["artifact_name"] != expected_artifact:
+            raise EvidenceError("official capture artifact name does not match candidate and run")
     run_component = safe_component(workflow["run_id"])
     output_root = Path(args.output_dir) if args.output_dir else (
         root
@@ -632,6 +663,8 @@ def build_parser() -> argparse.ArgumentParser:
     capture_parser.add_argument("--job-id")
     capture_parser.add_argument("--runner")
     capture_parser.add_argument("--host")
+    capture_parser.add_argument("--repository")
+    capture_parser.add_argument("--artifact-name")
     capture_parser.add_argument("--official", action="store_true")
     capture_parser.add_argument("--enforce", action="store_true")
     capture_parser.set_defaults(func=capture)

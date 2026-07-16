@@ -1,10 +1,16 @@
 {
   "schema_version": "aether.release-gate-policy.v1",
-  "policy_id": "commercial-beta-r6-v1",
+  "policy_id": "commercial-beta-r7-v1",
   "claim_stage": "commercial_beta_candidate",
+  "official_repository": "fyremael/AETHER",
   "official_workflow": ".github/workflows/reusable-exact-candidate-evidence.yml",
+  "official_attestation_workflow": ".github/workflows/reusable-exact-candidate-evidence.yml",
+  "official_caller_workflow": ".github/workflows/release-readiness.yml",
   "official_job": "exact-candidate-evidence",
+  "official_job_name": "Exact candidate evidence",
+  "official_artifact_prefix": "aether-release-evidence",
   "allowed_official_runners": ["Windows", "windows-latest"],
+  "allowed_official_hosts": ["github-windows-latest"],
   "allowed_observed_statuses": ["passed", "failed", "error", "skipped"],
   "validity_hours": 24,
   "non_waivable_gate_ids": [
