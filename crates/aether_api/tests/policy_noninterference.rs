@@ -1,11 +1,11 @@
 use aether_api::{
-    ApiError, AppendRequest, AsOfRequest, CurrentStateRequest, HistoryRequest,
-    InMemoryKernelService, KernelService, KernelServiceCore, RunDocumentRequest,
-    SqliteKernelService,
+    ApiError, AppendRequest, AsOfRequest, CurrentStateRequest, EvaluateProgramRequest,
+    HistoryRequest, InMemoryKernelService, KernelService, KernelServiceCore, ParseDocumentRequest,
+    RunDocumentRequest, SqliteKernelService,
 };
 use aether_ast::{
     AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PolicyContext,
-    PolicyEnvelope, ReplicaId, Value,
+    PolicyEnvelope, ReplicaId, TemporalView, Value,
 };
 use aether_resolver::{JournalDependencyKind, ResolveError, ResolvedState, ResolvedValue};
 use aether_schema::{AttributeClass, AttributeSchema, Schema, ValueType};
@@ -407,7 +407,7 @@ fn equal_visible_program_projections_have_byte_equal_semantics_and_metadata() {
         projected_receipt.manifest.execution_id,
         control_receipt.manifest.execution_id
     );
-    assert_ne!(
+    assert_eq!(
         projected_receipt.trace_handles[0].handle,
         control_receipt.trace_handles[0].handle
     );
@@ -452,6 +452,73 @@ fn equal_visible_program_projections_have_byte_equal_semantics_and_metadata() {
         .expect("privileged ready query")
         .rows
         .is_empty());
+}
+
+#[test]
+fn compatibility_evaluation_scopes_negation_and_aggregation_before_execution() {
+    let mut service = InMemoryKernelService::new();
+    let full = service
+        .parse_document(ParseDocumentRequest {
+            dsl: semantic_program(true),
+        })
+        .expect("parse mixed-policy compatibility program");
+    let control = service
+        .parse_document(ParseDocumentRequest {
+            dsl: semantic_program(false),
+        })
+        .expect("parse public control compatibility program");
+
+    let public = service
+        .evaluate_program(EvaluateProgramRequest {
+            schema: full.schema.clone(),
+            datoms: Some(Vec::new()),
+            view: TemporalView::Current,
+            program: full.program.clone(),
+            policy_context: None,
+        })
+        .expect("evaluate mixed-policy compatibility program publicly");
+    let public_control = service
+        .evaluate_program(EvaluateProgramRequest {
+            schema: control.schema,
+            datoms: Some(Vec::new()),
+            view: TemporalView::Current,
+            program: control.program,
+            policy_context: None,
+        })
+        .expect("evaluate explicit public compatibility control");
+    assert_eq!(public.derived, public_control.derived);
+    assert!(public
+        .derived
+        .tuples
+        .iter()
+        .any(|tuple| { tuple.tuple.values == vec![Value::Entity(EntityId::new(1))] }));
+    assert!(public.derived.tuples.iter().any(|tuple| {
+        tuple.tuple.values == vec![Value::U64(2), Value::U64(9), Value::U64(2), Value::U64(7)]
+    }));
+
+    let privileged = service
+        .evaluate_program(EvaluateProgramRequest {
+            schema: full.schema,
+            datoms: Some(Vec::new()),
+            view: TemporalView::Current,
+            program: full.program,
+            policy_context: Some(restricted_context()),
+        })
+        .expect("evaluate mixed-policy compatibility program with policy");
+    assert!(!privileged
+        .derived
+        .tuples
+        .iter()
+        .any(|tuple| { tuple.tuple.values == vec![Value::Entity(EntityId::new(1))] }));
+    assert!(privileged.derived.tuples.iter().any(|tuple| {
+        tuple.tuple.values
+            == vec![
+                Value::U64(3),
+                Value::U64(109),
+                Value::U64(2),
+                Value::U64(100),
+            ]
+    }));
 }
 
 fn current(service: &impl KernelService, policy_context: Option<PolicyContext>) -> ResolvedState {

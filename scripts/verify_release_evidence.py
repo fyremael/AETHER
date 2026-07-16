@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed offline verifier for AETHER immutable release evidence."""
+"""Fail-closed verifier for AETHER immutable release evidence."""
 
 from __future__ import annotations
 
@@ -7,12 +7,13 @@ import argparse
 import json
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import release_evidence as evidence
 
@@ -163,11 +164,176 @@ def verify_integrity_manifest(root: Path, manifest: dict[str, Any]) -> None:
     require(actual == declared, f"bundle files differ from integrity manifest: missing={sorted(declared-actual)}, extra={sorted(actual-declared)}")
 
 
+def run_json_command(command: list[str]) -> Any:
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise evidence.EvidenceError(f"external evidence verification unavailable: {exc}") from exc
+    require(
+        completed.returncode == 0,
+        f"external evidence verification failed: {completed.stderr.strip() or completed.stdout.strip()}",
+    )
+    try:
+        return json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise evidence.EvidenceError("external evidence verifier returned invalid JSON") from exc
+
+
+def github_api(endpoint: str) -> Any:
+    return run_json_command(["gh", "api", endpoint])
+
+
+def verify_attestation(command: list[str]) -> Any:
+    return run_json_command(command)
+
+
 def verify_official_workflow(workflow: dict[str, Any], policy: dict[str, Any]) -> None:
     require(workflow.get("workflow_file") == policy["official_workflow"], "official workflow mismatch")
     require(workflow.get("job_id") == policy["official_job"], "official job mismatch")
     require(str(workflow.get("run_id", "")).isdigit(), "an existing workflow declaration without a successful run is not evidence")
-    require(workflow.get("runner") in policy["allowed_official_runners"], "official runner/host is outside policy")
+    require(isinstance(workflow.get("attempt"), int) and workflow["attempt"] > 0, "invalid official workflow attempt")
+    require(workflow.get("repository") == policy["official_repository"], "official repository mismatch")
+    require(workflow.get("runner") in policy["allowed_official_runners"], "official runner is outside policy")
+    require(workflow.get("host") in policy["allowed_official_hosts"], "official host is outside policy")
+
+
+def expected_artifact_name(
+    workflow: dict[str, Any], candidate: dict[str, Any], policy: dict[str, Any]
+) -> str:
+    return (
+        f"{policy['official_artifact_prefix']}-{candidate['commit_sha']}-"
+        f"{workflow['run_id']}-{workflow['attempt']}"
+    )
+
+
+def verify_github_outcome(
+    workflow: dict[str, Any],
+    candidate: dict[str, Any],
+    policy: dict[str, Any],
+    *,
+    api: Callable[[str], Any] = github_api,
+) -> None:
+    repository = policy["official_repository"]
+    run_id = workflow["run_id"]
+    attempt = workflow["attempt"]
+    run = api(f"repos/{repository}/actions/runs/{run_id}/attempts/{attempt}")
+    require(run.get("id") == int(run_id), "declared GitHub run does not exist in the official repository")
+    require(run.get("run_attempt") == attempt, "GitHub run attempt mismatch")
+    require(run.get("head_sha") == candidate["commit_sha"], "GitHub run is for a different candidate")
+    require(
+        run.get("repository", {}).get("full_name") == repository,
+        "GitHub run repository mismatch",
+    )
+    workflow_path = str(run.get("path", ""))
+    require(
+        workflow_path == policy["official_caller_workflow"]
+        or workflow_path.startswith(f"{policy['official_caller_workflow']}@"),
+        "GitHub run used an unexpected caller workflow",
+    )
+
+    jobs = api(f"repos/{repository}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100")
+    expected_job = policy["official_job_name"]
+    matching_jobs = [
+        job
+        for job in jobs.get("jobs", [])
+        if job.get("name") == expected_job or str(job.get("name", "")).endswith(f" / {expected_job}")
+    ]
+    require(len(matching_jobs) == 1, "official producer job is missing or ambiguous")
+    require(
+        matching_jobs[0].get("status") == "completed"
+        and matching_jobs[0].get("conclusion") == "success",
+        "official producer job did not complete successfully",
+    )
+
+    artifact_name = expected_artifact_name(workflow, candidate, policy)
+    require(workflow.get("artifact_name") == artifact_name, "declared official artifact name mismatch")
+    artifacts = api(f"repos/{repository}/actions/runs/{run_id}/artifacts?per_page=100")
+    matching_artifacts = [
+        artifact for artifact in artifacts.get("artifacts", []) if artifact.get("name") == artifact_name
+    ]
+    require(len(matching_artifacts) == 1, "exact official evidence artifact is missing or ambiguous")
+    artifact = matching_artifacts[0]
+    require(artifact.get("expired") is False, "official evidence artifact is expired")
+    require(isinstance(artifact.get("size_in_bytes"), int) and artifact["size_in_bytes"] > 0, "official evidence artifact is empty")
+    artifact_sha = artifact.get("workflow_run", {}).get("head_sha")
+    if artifact_sha is not None:
+        require(artifact_sha == candidate["commit_sha"], "official artifact belongs to a different candidate")
+
+
+def verify_package_provenance(
+    package: Path,
+    attestation_bundle: Path,
+    workflow: dict[str, Any],
+    candidate: dict[str, Any],
+    policy: dict[str, Any],
+    *,
+    runner: Callable[[list[str]], Any] = verify_attestation,
+) -> None:
+    repository = policy["official_repository"]
+    signer_workflow = f"{repository}/{policy['official_attestation_workflow']}"
+    command = [
+        "gh",
+        "attestation",
+        "verify",
+        str(package),
+        "--repo",
+        repository,
+        "--bundle",
+        str(attestation_bundle),
+        "--signer-workflow",
+        signer_workflow,
+        "--signer-digest",
+        candidate["commit_sha"],
+        "--source-digest",
+        candidate["commit_sha"],
+        "--source-ref",
+        candidate["ref"],
+        "--deny-self-hosted-runners",
+        "--format",
+        "json",
+    ]
+    results = runner(command)
+    require(isinstance(results, list) and results, "package provenance verification returned no result")
+    package_digest = evidence.sha256_file(package)
+    expected_repository_uri = f"https://github.com/{repository}"
+    expected_signer_uri = (
+        f"{expected_repository_uri}/{policy['official_attestation_workflow']}@{candidate['ref']}"
+    )
+    expected_invocation = (
+        f"{expected_repository_uri}/actions/runs/{workflow['run_id']}/attempts/{workflow['attempt']}"
+    )
+    accepted = False
+    for result in results:
+        verification = result.get("verificationResult", {})
+        certificate = verification.get("signature", {}).get("certificate", {})
+        statement = verification.get("statement", {})
+        subjects = statement.get("subject", [])
+        if not any(subject.get("digest", {}).get("sha256") == package_digest for subject in subjects):
+            continue
+        checks = {
+            "source repository": certificate.get("sourceRepositoryURI") == expected_repository_uri,
+            "source digest": certificate.get("sourceRepositoryDigest") == candidate["commit_sha"],
+            "source ref": certificate.get("sourceRepositoryRef") == candidate["ref"],
+            "workflow repository": certificate.get("githubWorkflowRepository") == repository,
+            "workflow digest": certificate.get("githubWorkflowSHA") == candidate["commit_sha"],
+            "workflow ref": certificate.get("githubWorkflowRef") == candidate["ref"],
+            "signer URI": certificate.get("buildSignerURI") == expected_signer_uri,
+            "signer digest": certificate.get("buildSignerDigest") == candidate["commit_sha"],
+            "run invocation": certificate.get("runInvocationURI") == expected_invocation,
+            "runner environment": certificate.get("runnerEnvironment") == "github-hosted",
+            "predicate type": statement.get("predicateType") == "https://slsa.dev/provenance/v1",
+        }
+        if all(checks.values()):
+            accepted = True
+            break
+    require(accepted, "package provenance is not bound to the exact official run and candidate")
 
 
 def extract_bundle(bundle: Path, destination: Path) -> Path:
@@ -257,6 +423,7 @@ def verify_bundle(
         for item in manifest.get("sboms", []):
             verify_sbom(verify_descriptor(root, item, "SBOM"))
         available_subjects: set[str] = set()
+        subject_paths: dict[str, Path] = {}
         expected_subjects = set(policy.get("future_required_bundle_subjects", []))
         observed_subjects: set[str] = set()
         for subject in manifest.get("subjects", []):
@@ -266,11 +433,26 @@ def verify_bundle(
             observed_subjects.add(subject_id)
             require(subject.get("status") in {"present", "missing"}, f"invalid subject status: {subject_id}")
             if subject["status"] == "present":
-                verify_descriptor(root, subject.get("file", {}), f"bundle subject {subject_id}")
+                subject_paths[subject_id] = verify_descriptor(
+                    root, subject.get("file", {}), f"bundle subject {subject_id}"
+                )
                 available_subjects.add(subject_id)
             else:
                 require("file" not in subject, f"missing subject {subject_id} names a file")
         require(observed_subjects == expected_subjects, f"bundle subject catalog is incomplete: {sorted(expected_subjects-observed_subjects)}")
+        if official:
+            require(
+                "package-provenance" in subject_paths,
+                "official bundle is missing signed package provenance",
+            )
+            verify_package_provenance(
+                package_path,
+                subject_paths["package-provenance"],
+                workflow,
+                candidate,
+                policy,
+            )
+            verify_github_outcome(workflow, candidate, policy)
         verdict, blockers = evidence.compute_verdict(
             policy,
             envelopes,

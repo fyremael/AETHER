@@ -106,17 +106,26 @@ pub struct CompiledProgram {
 pub struct ScopedProgram {
     program: CompiledProgram,
     scope: PolicyScope,
+    empty_extensional_predicates: Vec<PredicateId>,
 }
 
 impl ScopedProgram {
     /// Constructs a scoped plan from compiler output and defensively enforces
     /// the scoped-fact invariant again at the type boundary.
     #[doc(hidden)]
-    pub fn from_scoped_compilation(mut program: CompiledProgram, scope: PolicyScope) -> Self {
+    pub fn from_scoped_compilation(
+        mut program: CompiledProgram,
+        scope: PolicyScope,
+        empty_extensional_predicates: Vec<PredicateId>,
+    ) -> Self {
         program
             .facts
             .retain(|fact| scope.allows(fact.policy.as_ref()));
-        Self { program, scope }
+        Self {
+            program,
+            scope,
+            empty_extensional_predicates,
+        }
     }
 
     pub fn compiled(&self) -> &CompiledProgram {
@@ -125,5 +134,9 @@ impl ScopedProgram {
 
     pub fn scope(&self) -> &PolicyScope {
         &self.scope
+    }
+
+    pub fn empty_extensional_predicates(&self) -> &[PredicateId] {
+        &self.empty_extensional_predicates
     }
 }

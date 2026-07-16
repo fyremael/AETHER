@@ -58,12 +58,23 @@ blockers, and verifier version. ZIP entry order, timestamps, and canonical JSON
 serialization are deterministic. A `latest` pointer may exist for navigation
 but is rejected as authoritative verifier input.
 
-The standard-library verifier operates offline except for later external
-attestation identity lookup. It independently re-hashes every included byte,
+The verifier independently re-hashes every included byte,
 recomputes envelope and bundle identities, enforces exact candidate/workflow/
 command/host/metric policy, exposes attempts, validates waivers, compares the
 package with its attested subject, recomputes the sorted blockers and verdict,
-and emits byte-stable canonical verdict JSON.
+and emits byte-stable canonical verdict JSON. Diagnostic bundle integrity can
+be checked locally. Official verification additionally uses `gh attestation
+verify` against the included provenance bundle and requires the certificate to
+bind the package digest, repository, commit, ref, reusable signer workflow,
+GitHub-hosted runner, run ID, and attempt. The reusable signer workflow and
+calling workflow are separate policy identities. The verifier also reads the
+GitHub Actions API to require the exact producer job to have completed
+successfully and the SHA/run/attempt-named artifact to exist, be non-empty, and
+be unexpired.
+
+The producer uploads the immutable bundle before a separate dependent verifier
+job downloads it. This ordering lets the verifier inspect a completed producer
+job and immutable artifact; a job cannot certify its own unfinished outcome.
 
 ## Waivers
 
@@ -102,6 +113,7 @@ bundle does not imply GA or generalized distributed-truth claims.
 `python/tests/test_release_evidence.py` covers clean deterministic verification
 and stale/dirty identity, missing/skipped/unknown status, byte tampering,
 future/expired evidence, hidden retries, authored outcomes, declaration-only
-workflows, wrong suite/baseline/threshold, Capacity nesting, Pages SHA drift,
+  workflows and hosts, invented run IDs, failed producer outcomes, signed
+  provenance identity, wrong suite/baseline/threshold, Capacity nesting, Pages SHA drift,
 invalid/non-waivable/cross-candidate waivers, incomplete SBOMs, and package
 attestation mismatch.

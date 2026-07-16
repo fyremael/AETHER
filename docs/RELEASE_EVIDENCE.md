@@ -47,8 +47,11 @@ R1-R4.
 `.github/workflows/reusable-exact-candidate-evidence.yml` is invoked by Release
 Readiness with an explicit full SHA and ref. It checks out detached with
 persisted credentials disabled, checks HEAD/tree/clean state, runs every gate,
-builds the package once, assembles the SHA/run/attempt-named bundle, verifies it
-independently, and uploads both bundle and canonical verdict.
+builds the package once, attests it, assembles the SHA/run/attempt-named bundle,
+and uploads it. A separate dependent job downloads that immutable artifact and
+verifies the included provenance signature plus the live GitHub run, completed
+producer job, exact artifact, candidate, ref, and GitHub-hosted runner before it
+uploads the canonical verdict. A declared run ID or host is not evidence.
 
 Release Readiness places both the reusable evidence job and the operational
 readiness job behind a dedicated `release` environment approval. The hosted

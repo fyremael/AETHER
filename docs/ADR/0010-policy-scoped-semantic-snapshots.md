@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted. Implementation is staged across the R1 remediation series.
+Accepted. The R1 implementation is complete locally; exact-candidate
+qualification remains pending.
 
 ## Context
 
@@ -82,6 +83,14 @@ compilation. Invisible facts cannot affect compiler success, predicate
 population, SCC construction, stratification, or executable planning. Rules are
 policy-neutral in the current DSL; if rule policies are introduced, rule
 projection must also precede safety checking and stratification.
+
+The compatibility evaluation API follows the same boundary. It accepts schema,
+an optional datom source, temporal view, source `RuleProgram`, and policy
+context; it does not accept an already-resolved unrestricted state and compiled
+plan for late filtering. Omitted datoms select journal history, while an
+explicit empty list is an empty database. If projection removes every fact for
+an extensional predicate, that predicate remains a valid empty relation so
+negation and aggregation observe the scoped semantics.
 
 The security-bearing runtime path consumes a policy-scoped resolved snapshot
 and a program compiled for the same scope. Semi-naive closure, recursion,

@@ -37,10 +37,13 @@ the derived execution store has its own lock.
 Audit memory and disk ownership are separated. Requests append to the in-memory
 ledger, then use `try_send` into a bounded single-writer queue. Slow or failed
 disk I/O never holds the entry lock. Saturation and writer loss create visible
-`audit_write_failed` entries instead of unbounded buffering.
+`audit_write_failed` entries instead of unbounded buffering. The in-memory
+ledger is a bounded FIFO using the configured audit limit; inserting beyond the
+limit evicts the oldest entry. The persisted JSONL remains the durable audit
+record and is subject to operator retention/rotation policy.
 
 The deployment defaults are eight workers, 64 queued namespace operations, and
-1,024 queued audit writes. They are explicit in package configuration and
+1,024 queued audit writes and retained in-memory entries. They are explicit in package configuration and
 cannot be changed by auth-only reload.
 
 ## Consequences
@@ -52,7 +55,7 @@ cannot be changed by auth-only reload.
 - Same-namespace and same-partition semantic mutation remains serialized.
 - Audit persistence is asynchronous; operators and tests that inspect the file
   directly must allow the bounded writer to drain. The API audit snapshot is
-  immediately updated in memory.
+  immediately updated in memory and exposes only the retained FIFO window.
 - The executor is intentionally process-wide and bounded. Per-namespace quotas
   and operation deadlines are added under R5.6.
 

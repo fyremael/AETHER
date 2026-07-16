@@ -21,8 +21,10 @@ journal prefix, schema, scoped compiled program, effective policy, ordered
 imported cuts and epochs, and the engine-semantics version. Equivalent scoped
 inputs therefore have the same internal identity.
 
-Each derived tuple is exposed through a freshly generated 256-bit random
-`TraceHandle`. The handle is an opaque locator. It contains no readable
+The first persistence of each derived tuple is exposed through a generated
+256-bit random `TraceHandle`. Equivalent re-execution of the same immutable
+execution and tuple reuses that persisted handle instead of minting another
+record. The handle is an opaque locator. It contains no readable
 namespace, policy, cut, tuple number, or digest and is not authorization by
 possession. Resolution first checks the request namespace and current policy
 against the immutable original execution policy. A revoked token or narrowed
@@ -48,8 +50,11 @@ services use a separate `<journal>.executions.sqlite` database. Postgres
 journal mode deliberately uses local SQLite execution metadata beside the
 configured sidecar path; it is derived proof metadata, not journal authority.
 The default bound is 1,024 immutable executions per store. Eviction removes
-the execution and trace records while retaining handle tombstones, so an old
-handle returns an explicit expired result and can never alias a later proof.
+the execution and trace records. Both stores retain at most 65,536 expired
+handle tombstones by default; retained tombstones return an explicit expired
+result, while a handle older than that bounded window returns unknown. The
+256-bit random namespace makes accidental reuse negligible, but the API does
+not claim indefinite expired-handle recall after tombstone eviction.
 
 SQLite journal, sidecar, execution-store, WAL/SHM companions, audit log,
 configuration, and token files form one package backup/restore set. Operators
@@ -69,7 +74,7 @@ proof.
 ## Cache And Record Lifecycle
 
 Execution records are content-addressed and immutable. Equivalent executions
-reuse the manifest but issue fresh external handles. Appends and promotions may
+reuse both the manifest and the tuple's persisted external handle. Appends and promotions may
 clear computation caches, but they do not mutate retained execution records.
 Corrupted manifests, corrupted trace digests, missing execution records, or an
 incompatible engine version fail closed. Rollback must preserve the execution

@@ -1,17 +1,17 @@
 use aether_api::{
     build_coordination_pilot_report_with_policy, coordination_pilot_dsl,
-    coordination_pilot_seed_history, ApiError, AppendRequest, CompileProgramRequest,
-    EvaluateProgramRequest, InMemoryKernelService, KernelService, RegisterArtifactReferenceRequest,
+    coordination_pilot_seed_history, ApiError, AppendRequest, EvaluateProgramRequest,
+    InMemoryKernelService, KernelService, RegisterArtifactReferenceRequest,
     RegisterVectorRecordRequest, ResolveTraceHandleRequest, RunDocumentRequest,
     SearchVectorsRequest, VectorFactProjection, VectorMetric, VectorRecordMetadata,
     COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT, COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
 };
 use aether_ast::{
     AttributeId, Datom, DatomProvenance, ElementId, EntityId, OperationKind, PolicyContext,
-    PolicyEnvelope, PredicateId, PredicateRef, ReplicaId, RuleAst, RuleId, RuleProgram, Term,
-    Value, Variable,
+    PolicyEnvelope, PredicateId, PredicateRef, ReplicaId, RuleAst, RuleId, RuleProgram,
+    TemporalView, Term, Value, Variable,
 };
-use aether_resolver::{MaterializedResolver, ResolvedState, Resolver};
+use aether_resolver::{MaterializedResolver, Resolver};
 use aether_schema::{AttributeClass, AttributeSchema, PredicateSignature, Schema, ValueType};
 use std::collections::BTreeMap;
 
@@ -459,18 +459,12 @@ fn semantic_closure_acceptance_covers_sidecar_policy_and_provenance() {
 
     let schema = sidecar_projection_schema();
     let program = sidecar_projection_program(protected_search.facts.clone());
-    let compiled = service
-        .compile_program(CompileProgramRequest {
-            schema: schema.clone(),
-            program,
-        })
-        .expect("compile sidecar projection program")
-        .program;
-
     let public_eval = service
         .evaluate_program(EvaluateProgramRequest {
-            state: ResolvedState::default(),
-            program: compiled.clone(),
+            schema: schema.clone(),
+            datoms: Some(Vec::new()),
+            view: TemporalView::Current,
+            program: program.clone(),
             policy_context: None,
         })
         .expect("evaluate sidecar projection publicly");
@@ -478,8 +472,10 @@ fn semantic_closure_acceptance_covers_sidecar_policy_and_provenance() {
 
     let protected_eval = service
         .evaluate_program(EvaluateProgramRequest {
-            state: ResolvedState::default(),
-            program: compiled,
+            schema,
+            datoms: Some(Vec::new()),
+            view: TemporalView::Current,
+            program,
             policy_context: Some(ops_context()),
         })
         .expect("evaluate sidecar projection with policy");

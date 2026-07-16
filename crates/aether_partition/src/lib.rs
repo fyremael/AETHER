@@ -3093,7 +3093,7 @@ mod tests {
     }
 
     #[test]
-    fn replicated_partition_service_reuses_identity_but_reissues_trace_handles() {
+    fn replicated_partition_service_reuses_identity_and_persisted_trace_handles() {
         let temp = TestPartitionDir::new("replicated-cache");
         let service = ReplicatedAuthorityPartitionService::open(
             temp.path(),
@@ -3182,7 +3182,7 @@ mod tests {
             first_receipt.manifest.execution_id,
             second_receipt.manifest.execution_id
         );
-        assert_ne!(
+        assert_eq!(
             first_receipt.trace_handles[0].handle,
             second_receipt.trace_handles[0].handle
         );

@@ -51,9 +51,14 @@ identity repair, and R3 transactional append-admission repair: normalized
 `PolicyScope`, cut-then-project scoped replay, dependency-closure
 certification, scoped program compilation, typed scoped runtime bundles, a
 central service evaluation path, federated/sidecar projection, and
-projection-local evaluation keys are implemented. Service evaluations now
-emit deterministic execution receipts and random opaque trace handles backed
-by bounded in-memory or SQLite execution stores. Resolution rechecks namespace
+projection-local evaluation keys are implemented. The compatibility evaluator
+now also accepts source datoms and a source rule program and scopes both before
+replay, compilation, negation, aggregation, or closure; it no longer filters an
+unrestricted result. Service evaluations emit deterministic execution receipts
+and persisted opaque trace handles backed by bounded in-memory or SQLite
+execution stores. Equivalent executions reuse the same tuple handle instead of
+growing trace storage; execution and expired-handle retention are both bounded.
+Resolution rechecks namespace
 and current policy, supports digest-checked replay, survives restart and
 backup/restore, and binds federated source cuts, epochs, prefix digests, and
 source execution IDs. Rust, HTTP, reports, Go, Python, the TUI, demos, and
@@ -74,10 +79,13 @@ R4's immutable evidence layer is also implemented locally. Versioned envelope,
 bundle, waiver, and gate-policy contracts now separate release requirements
 from observations. A standard-library runner captures clean commit/tree/ref,
 workflow/run/job, exact commands, inputs, attempts, outputs, and expiry; the
-offline verifier re-hashes every byte and recomputes a deterministic verdict.
+verifier re-hashes every byte and recomputes a deterministic verdict.
 The commercial ledger is policy-only and rejects authored outcomes. A reusable
-exact-candidate workflow builds one package and emits a SHA/run/attempt-named
-bundle. Official promotion still requires one protected exact-candidate run
+exact-candidate workflow builds one package, emits a SHA/run/attempt-named
+bundle, and delegates verification to a dependent job. Official verification
+now requires signed package provenance plus live GitHub run, successful
+producer-job, and immutable artifact outcomes; a numeric run declaration or
+declared host is insufficient. Official promotion still requires one protected exact-candidate run
 whose complete bundle verifies independently, so this does not widen the
 controlled-alpha claim.
 
@@ -218,9 +226,9 @@ Completed:
   synchronous kernel/storage work uses a bounded blocking executor; saturation
   returns structured `503 namespace_busy` with `Retry-After`, same-namespace
   order remains deterministic, and initialization is single-handle
-- replicated authority partitions now lock independently, while the audit file
-  path uses a bounded single-writer queue with visible backpressure instead of
-  holding the in-memory audit lock across slow I/O
+- replicated authority partitions now lock independently, while audit uses a
+  bounded in-memory FIFO plus a bounded single-writer queue with visible
+  backpressure instead of holding the in-memory audit lock across slow I/O
 - the HTTP boundary now publishes capability-negotiated trace-handle, schema-ref,
   append-receipt, and structured-error contracts; typed Rust helpers plus Go,
   Python, TUI, CLI report commands, and notebook preflights prevent silent
@@ -241,7 +249,8 @@ Still open:
 - official exact-candidate qualification of the locally green policy-scoped semantics
 - official exact-candidate qualification of durable, non-aliasing trace identity
 - a successful official exact-candidate workflow bundle and independently
-  downloaded verification; local tooling no longer trusts authored status or path existence
+  downloaded verification; local tooling no longer trusts authored status,
+  path existence, declared hosts, or numeric run IDs without GitHub outcomes
 - hosted confirmation that the new dependency/package supply-chain workflow,
   CodeQL, secret scanning, attestations, and protected repository controls pass
   for the exact candidate SHA

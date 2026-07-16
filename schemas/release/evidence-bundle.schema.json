@@ -71,7 +71,7 @@
       "additionalProperties": false,
       "required": ["version", "algorithm"],
       "properties": {
-        "version": { "const": "aether-release-evidence-verifier-v1" },
+        "version": { "const": "aether-release-evidence-verifier-v2" },
         "algorithm": { "const": "sha256-canonical-json-v1" }
       }
     }

@@ -29,8 +29,10 @@ ordinary feature backlog:
   performance characterization, and exact-candidate evidence are complete.
 - Service explanations now resolve opaque execution-scoped handles persisted
   beside the journal and re-check namespace and current policy authorization.
-  Retention is bounded to 1,024 executions by default; evicted handles return
-  an explicit expired result. Postgres journal mode currently keeps this
+  Retention is bounded to 1,024 executions and 65,536 expired-handle
+  tombstones by default. A retained tombstone returns expired; an older evicted
+  tombstone returns unknown. Equivalent executions reuse their persisted tuple
+  handles rather than adding trace rows. Postgres journal mode currently keeps this
   derived execution metadata in local SQLite, so operators must back up both
   stores at one operational cut.
 - Public append now validates the complete batch against one active namespace
@@ -40,8 +42,10 @@ ordinary feature backlog:
   are unsupported, and the compatibility release still permits omitted schema
   references to negotiate the active or conservative legacy-inferred schema.
 - The authored/path-based readiness defect is repaired locally: the ledger is
-  policy-only and the verifier computes from exact candidate/package outcomes.
-  The official workflow run and R5 evidence subjects remain outstanding.
+  policy-only, package provenance is cryptographically checked, and the
+  verifier requires live GitHub run, successful producer-job, and immutable
+  artifact outcomes for the exact candidate. The first green official workflow
+  run remains outstanding.
 
 ## Language And Runtime Scope
 
@@ -56,6 +60,9 @@ ordinary feature backlog:
 - Coordination semantics now cover heartbeats and execution outcomes in the pilot slice, but expiry still relies on explicit semantic state rather than clock-driven timeout windows or distributed failure detection.
 - HTTP authorization still uses coarse endpoint scopes. Tokens now bind policy before scoped snapshot construction, but the external noninterference claim remains pending exact-candidate evidence and scheduled Postgres parity.
 - Audit entries now capture effective policy decisions plus requested, granted, and effective semantic visibility, but they still do not capture full operator intent or semantic diffs between cuts.
+- The in-memory audit snapshot is a bounded FIFO tied to the configured audit
+  limit. Persisted JSONL is intentionally durable and still requires operator
+  retention/rotation; AETHER does not yet automate file archival.
 - Omitted append schema references and the legacy tuple explanation endpoint are
   compatibility-only paths with explicit audit telemetry. They remain callable
   until the evidence-gated sunset in `docs/API_CLIENT_MIGRATION.md`; first-party
@@ -76,8 +83,10 @@ ordinary feature backlog:
 - The accepted regression gate is still deliberately narrow: `core_kernel` and `service_in_process` on the canonical native Windows dev host are the tracked release baselines, while HTTP and replicated-partition suites remain observational until their variance is better understood.
 - The current measured default `M` envelope is conservative: it presently recommends `1,024` pilot-board tasks even though larger ladders run correctly, because operator/report latency degrades before replay or local storage become the limiting factor.
 - The new R4 verifier binds observations to clean commit/tree/ref identity,
-  exact commands, workflow attempts, output bytes, and package digest; authored
-  statuses, source-path existence, and `latest` inputs are rejected. An official
+  exact commands, workflow attempts, output bytes, package digest, signed
+  provenance certificate, successful producer job, and exact GitHub artifact;
+  authored statuses, declared-only runs/hosts, source-path existence, and
+  `latest` inputs are rejected. An official
   GitHub run and independently downloaded bundle are still required before this
   local implementation satisfies the evidence-integrity release gate.
 - The commercial release readiness ledger targets controlled design-partner
