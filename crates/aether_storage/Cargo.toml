@@ -12,7 +12,7 @@ native-tls = "=0.2.18"
 postgres-native-tls = "=0.5.3"
 postgres-protocol = "=0.6.12"
 postgres-types = "=0.2.14"
-rusqlite = { version = "=0.32.1", features = ["bundled"] }
+rusqlite = { version = "=0.40.1", features = ["bundled"] }
 serde.workspace = true
 serde_json = "1.0.133"
 sha2.workspace = true
