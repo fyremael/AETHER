@@ -3386,11 +3386,35 @@ fn unique_postgres_schema(prefix: &str) -> String {
 
 fn read_audit_entries(path: &Path) -> Vec<AuditEntry> {
     // Audit persistence is intentionally handled by a bounded writer so slow
-    // disk I/O cannot hold the request/state lock. Give the writer a short,
-    // bounded drain window before inspecting the durable file.
-    std::thread::sleep(std::time::Duration::from_millis(50));
-    std::fs::read_to_string(path)
-        .expect("read audit log")
+    // disk I/O cannot hold the request/state lock. Wait for the durable file to
+    // appear and become briefly quiescent rather than assuming one fixed sleep
+    // is enough on a loaded hosted runner.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut last_contents = None;
+    let mut stable_since = Instant::now();
+    let contents = loop {
+        match std::fs::read_to_string(path) {
+            Ok(contents) if !contents.trim().is_empty() => {
+                if last_contents.as_ref() == Some(&contents) {
+                    if stable_since.elapsed() >= Duration::from_millis(100) {
+                        break contents;
+                    }
+                } else {
+                    last_contents = Some(contents);
+                    stable_since = Instant::now();
+                }
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("read audit log: {error}"),
+        }
+        assert!(
+            Instant::now() < deadline,
+            "audit log did not become durable before the bounded persistence timeout"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    contents
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).expect("parse audit entry"))
