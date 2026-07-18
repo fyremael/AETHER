@@ -124,8 +124,12 @@ They now also include:
 
 The backup/restore pair treats the journal, sidecar catalog, and
 `*.executions.sqlite` proof metadata (including SQLite WAL/SHM companions) as
-one operational snapshot. The hardening drill resolves a pre-backup trace
-handle after restore and requests digest-checked replay.
+one quiesced operational snapshot. Both helpers require
+`-ConfirmServiceStopped` and refuse a reachable configured endpoint; backup
+also rejects a non-empty target so stale optional companion files cannot be
+carried into a new cut. The hardening drill proves those fail-closed contracts,
+then resolves a pre-backup trace handle after restore and requests
+digest-checked replay.
 
 That makes the packaged bundle self-contained for both the pilot service and the
 read-only operator cockpit.

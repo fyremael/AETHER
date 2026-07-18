@@ -8,7 +8,7 @@ use aether_resolver::{MaterializedResolver, Resolver};
 use aether_runtime::{DerivedSet, RuleRuntime, SemiNaiveRuntime};
 use aether_schema::Schema;
 use rand::{rngs::OsRng, RngCore};
-use rusqlite::{config::DbConfig, params, Connection, OptionalExtension};
+use rusqlite::{config::DbConfig, params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::{
@@ -491,7 +491,9 @@ impl ExecutionStore for SqliteExecutionStore {
         execution: Option<StoredExecution>,
         traces: Vec<TraceRecord>,
     ) -> Result<(), ExecutionStoreError> {
-        let transaction = self.connection.transaction()?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(execution) = execution {
             transaction.execute(
                 "INSERT OR IGNORE INTO execution_records (execution_id, created_at_ms, record_json)
@@ -509,6 +511,14 @@ impl ExecutionStore for SqliteExecutionStore {
                  VALUES (?1, ?2, ?3)",
             )?;
             for trace in traces {
+                let expired = transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM expired_trace_handles WHERE handle = ?1)",
+                    params![trace.handle.as_str()],
+                    |row| row.get::<_, bool>(0),
+                )?;
+                if expired {
+                    return Err(ExecutionStoreError::DuplicateTraceHandle);
+                }
                 let inserted = statement.execute(params![
                     trace.handle.as_str(),
                     &trace.execution_id.0,
@@ -557,7 +567,18 @@ impl ExecutionStore for SqliteExecutionStore {
     }
 
     fn put_trace(&mut self, trace: TraceRecord) -> Result<(), ExecutionStoreError> {
-        let inserted = self.connection.execute(
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let expired = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM expired_trace_handles WHERE handle = ?1)",
+            params![trace.handle.as_str()],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if expired {
+            return Err(ExecutionStoreError::DuplicateTraceHandle);
+        }
+        let inserted = transaction.execute(
             "INSERT OR IGNORE INTO trace_records (handle, execution_id, record_json)
              VALUES (?1, ?2, ?3)",
             params![
@@ -567,6 +588,7 @@ impl ExecutionStore for SqliteExecutionStore {
             ],
         )?;
         if inserted == 1 {
+            transaction.commit()?;
             Ok(())
         } else {
             Err(ExecutionStoreError::DuplicateTraceHandle)
@@ -1088,6 +1110,54 @@ mod tests {
             second
         );
         drop(reopened);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn sqlite_rejects_retained_tombstones_for_single_and_bundled_trace_inserts() {
+        let nonce = NEXT_TEST_PATH.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("aether-tombstone-collision-{nonce}.sqlite"));
+        let mut sqlite = SqliteExecutionStore::open(&path).expect("open sqlite store");
+        sqlite
+            .put_execution(stored_execution("execution-a", ENGINE_SEMANTICS_VERSION))
+            .expect("put expiring execution");
+        let expired_trace = trace_record("execution-a");
+        let expired_handle = expired_trace.handle.clone();
+        sqlite.put_trace(expired_trace).expect("put expiring trace");
+        sqlite
+            .expire_execution(&ExecutionId("execution-a".into()))
+            .expect("expire execution");
+
+        sqlite
+            .put_execution(stored_execution("execution-b", ENGINE_SEMANTICS_VERSION))
+            .expect("put replacement execution");
+        let single_collision = TraceRecord {
+            handle: expired_handle.clone(),
+            ..trace_record("execution-b")
+        };
+        assert!(matches!(
+            sqlite.put_trace(single_collision),
+            Err(ExecutionStoreError::DuplicateTraceHandle)
+        ));
+
+        let bundled_execution = stored_execution("execution-c", ENGINE_SEMANTICS_VERSION);
+        let bundled_collision = TraceRecord {
+            handle: expired_handle.clone(),
+            ..trace_record("execution-c")
+        };
+        assert!(matches!(
+            sqlite.put_execution_bundle(Some(bundled_execution.clone()), vec![bundled_collision]),
+            Err(ExecutionStoreError::DuplicateTraceHandle)
+        ));
+        assert!(sqlite
+            .execution(&bundled_execution.manifest.execution_id)
+            .expect("read bundled execution")
+            .is_none());
+        assert!(matches!(
+            sqlite.trace(&expired_handle),
+            Err(ExecutionStoreError::ExpiredTraceHandle)
+        ));
+        drop(sqlite);
         let _ = std::fs::remove_file(path);
     }
 

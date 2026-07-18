@@ -68,7 +68,11 @@ short-lived reader/service process from turning connection teardown into an
 unbounded checkpoint; it does not disable ordinary automatic checkpointing or
 make the base database file a complete snapshot by itself. Backup and restore
 therefore continue to move the execution database with any WAL/SHM companions
-after the service is stopped or quiesced.
+after the service is stopped or quiesced. The packaged file-copy helpers require
+an explicit stopped-service confirmation, refuse a reachable configured
+endpoint, and reject non-empty new snapshot targets. The endpoint probe does not
+replace quiescence coordination; operators must keep the service stopped until
+backup or restore completes.
 
 ## Federation
 

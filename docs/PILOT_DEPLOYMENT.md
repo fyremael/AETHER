@@ -261,35 +261,44 @@ from the running authenticated service.
 
 ## Backup And Restore
 
-Inside the package directory:
+The package uses a quiesced file-copy snapshot. Hot backup is unsupported.
+Stop the pilot service, wait until its configured endpoint is unavailable, and
+keep it stopped for the entire copy. Then run inside the package directory:
 
 ```text
-double-click backup-pilot-state.cmd
+backup-pilot-state.cmd -ConfirmServiceStopped
 ```
 
 exports a timestamped snapshot containing:
 
 - `config/pilot-service.json`
 - package-local token files
-- the SQLite journal
-- the adjacent sidecar catalog
+- the SQLite journal and any WAL/SHM companions
+- the adjacent sidecar catalog and any WAL/SHM companions
+- the `*.executions.sqlite` proof metadata database and any WAL/SHM companions
 - the audit JSONL log
-- a `manifest.json` describing the captured paths
+- a `manifest.json` describing the captured paths and quiesced snapshot mode
+
+The helper fails unless `-ConfirmServiceStopped` is present, refuses a
+reachable configured service endpoint, and rejects a non-empty snapshot target
+so stale optional WAL/SHM files cannot contaminate a new snapshot. The service
+must remain stopped even after the endpoint probe succeeds.
 
 To restore from a snapshot:
 
 ```text
-double-click restore-pilot-state.cmd
+restore-pilot-state.cmd -SnapshotDir <snapshot-dir> -ConfirmServiceStopped
 ```
 
 or:
 
 ```bash
-powershell -ExecutionPolicy Bypass -File .\restore-pilot-state.ps1 -SnapshotDir <snapshot-dir>
+powershell -ExecutionPolicy Bypass -File .\restore-pilot-state.ps1 -SnapshotDir <snapshot-dir> -ConfirmServiceStopped
 ```
 
-The restore helper can back up the current package state before applying the
-selected snapshot.
+Restore also requires the service to remain stopped and refuses a reachable
+configured endpoint. The helper can back up the current quiesced package state
+before applying the selected snapshot.
 
 ## CI Posture
 

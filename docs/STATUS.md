@@ -194,7 +194,11 @@ Completed:
 - launch validation and drift promotion completed into a required mainline CI gate
 - packaged durable pilot-service bundles implemented with config-backed startup, package-local rotation tooling, restart/replay benchmark coverage, and secret-file/env/command token resolution
 - service-status, auth-reload, and config-backed token/principal identity surfaces implemented for the hardened pilot boundary
-- packaged backup and restore helpers implemented for the Windows pilot bundle, with snapshot/export of journal, sidecar catalog, execution metadata, audit log, config, and token files and a restored-handle replay check in the hardening drill
+- packaged backup and restore helpers implemented for the Windows pilot bundle,
+  with fail-closed quiescence confirmation and endpoint checks, clean-target
+  enforcement, snapshot/export of journal, WAL/SHM companions, sidecar catalog,
+  execution metadata, audit log, config, and token files, and a restored-handle
+  replay check in the hardening drill
 - scheduled/manual extended-operability workflow added for soak, package build, and launch-validation evidence beyond the standard release gate
 - first real Go operator shell implemented against the HTTP API with typed client coverage
 - pilot-focused Go operator TUI implemented as the live cockpit for health, coordination state, audit entries, history, tuple proof traces, service status, and coordination diffs

@@ -103,11 +103,12 @@ If the bind or storage paths changed, restart the service instead of reloading a
 
 ## Backup And Restore Playbook
 
-1. Stop the service if you need a quiet snapshot.
+1. Stop the service, wait until the configured endpoint is unavailable, and
+   keep it stopped. Hot file-copy snapshots are unsupported.
 2. Export a package-local snapshot:
 
    ```text
-   .\backup-pilot-state.cmd
+   .\backup-pilot-state.cmd -ConfirmServiceStopped
    ```
 
 3. Preserve the generated snapshot directory with the release evidence.
@@ -116,15 +117,19 @@ The helper snapshots the journal (including namespace schema revisions,
 activation state, append receipts, and baseline/migration records), sidecar catalog, execution metadata database
 (`*.executions.sqlite`), their SQLite WAL/SHM companions, audit log, config,
 and token files. A trace handle is durable only when its execution database is
-restored with the journal cut that produced it.
+restored with the journal cut that produced it. The helper rejects a missing
+quiescence confirmation, a reachable configured endpoint, and a non-empty
+snapshot target. The endpoint probe is a guard, not a lock; do not restart the
+service until the helper completes.
 
 To restore:
 
-1. Stop the service.
+1. Stop the service, wait until the configured endpoint is unavailable, and
+   keep it stopped until restore completes.
 2. Apply:
 
    ```text
-   .\restore-pilot-state.cmd -SnapshotDir <snapshot-dir>
+   .\restore-pilot-state.cmd -SnapshotDir <snapshot-dir> -ConfirmServiceStopped
    ```
 
 3. Restart the service.

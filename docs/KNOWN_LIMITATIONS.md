@@ -71,6 +71,11 @@ ordinary feature backlog:
 - Coordination delta reports now compare explicit cuts and carry trace handles where visible, but they still summarize fixed pilot sections rather than arbitrary user-defined investigative views.
 - The Go operator TUI is now implemented as the primary live pilot cockpit, but it is intentionally pilot-focused and read-only in v1 rather than a general workflow IDE or mutation surface.
 - The pilot service now has a packaged deployment path with config-backed startup, package-local rotation tooling, backup/restore helpers, auth reload, explicit token/principal identities, and secret-file/env/command token resolution, but it is still a single-node bundle rather than a fully managed deployment story with automated rotation services, distributed revocation, or native cloud secret-manager integrations.
+- Package backup/restore remains a quiesced file-copy procedure rather than an
+  online snapshot protocol. The helpers require explicit stopped-service
+  confirmation and reject a reachable configured endpoint, but that probe is
+  not a coordination lock; operators must keep the service stopped throughout
+  the database/WAL/SHM copy.
 
 ## Performance, Storage, And Release Discipline
 
