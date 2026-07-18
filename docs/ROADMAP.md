@@ -82,6 +82,7 @@ Focus:
 - keep the first pass internal-first and diagnostic before making it blocking
 - mature the bug/spec-gap/usability-gap/security intake posture
 - run measured perturbation and capacity sweeps so scaling discussions stay tied to host evidence rather than intuition
+- use the disposable exact-SHA Colab Linux lane for contained correctness and variance diagnostics while keeping all promotion authority on the protected Windows candidate path
 - promote only the most stable hardening checks into `CI` and release-readiness
 - use GitHub workflow artifacts, tracker issues, and promotion PRs to make that promotion path explicit rather than memory-based
 
