@@ -81,6 +81,12 @@ ordinary feature backlog:
   local automation changes substitutes for green hosted runs on the exact
   candidate; Capacity remains diagnostic unless a claim policy explicitly names it.
 - The accepted regression gate is still deliberately narrow: `core_kernel` and `service_in_process` on the canonical native Windows dev host are the tracked release baselines, while HTTP and replicated-partition suites remain observational until their variance is better understood.
+- The first protected qualification candidate passed CI, Supply Chain, Pages,
+  and Capacity but failed Release Readiness because one first-observed durable
+  coordination restart stalled while later restarts were stable. The focused
+  phase telemetry retains every pass and does not filter, retry, warm up, or
+  change the arithmetic-mean gate. Until a new exact candidate passes that
+  unchanged gate, this remains a beta blocker rather than ignorable host noise.
 - The current measured default `M` envelope is conservative: it presently recommends `1,024` pilot-board tasks even though larger ladders run correctly, because operator/report latency degrades before replay or local storage become the limiting factor.
 - The new R4 verifier binds observations to clean commit/tree/ref identity,
   exact commands, workflow attempts, output bytes, package digest, signed

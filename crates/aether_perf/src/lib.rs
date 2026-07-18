@@ -32,6 +32,7 @@ use aether_resolver::{MaterializedResolver, ResolvedState, Resolver};
 use aether_rules::{DefaultRuleCompiler, RuleCompiler};
 use aether_runtime::{DerivedSet, RuleRuntime, RuntimeIteration, SemiNaiveRuntime};
 use aether_schema::{AttributeClass, AttributeSchema, PredicateSignature, Schema, ValueType};
+use aether_service_core::diagnostics::ServiceOperationTiming;
 use aether_storage::{InMemoryJournal, Journal};
 use axum::{
     body::{to_bytes, Body},
@@ -344,6 +345,21 @@ pub struct LatencyStats {
     pub sample_durations_ns: Vec<u64>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PerfPhaseTiming {
+    pub phase: String,
+    pub duration_ns: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PerfPassTiming {
+    pub sample_index: usize,
+    pub pass_index: usize,
+    pub classification: String,
+    pub total_duration_ns: u64,
+    pub phases: Vec<PerfPhaseTiming>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PerfMeasurement {
     #[serde(default)]
@@ -357,6 +373,8 @@ pub struct PerfMeasurement {
     #[serde(default)]
     pub metrics: Vec<PerfScalarMetric>,
     pub notes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pass_timings: Vec<PerfPassTiming>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1466,7 +1484,7 @@ fn benchmark_durable_restart_current_impl(
         "4 restart-and-replay passes per sample to reduce timer jitter".into(),
     ];
 
-    benchmark_measurement(
+    benchmark_restart_measurement(
         MeasurementPlan {
             group: PerfSuiteId::CoreKernel,
             workload: "Durable restart current replay",
@@ -1484,12 +1502,27 @@ fn benchmark_durable_restart_current_impl(
         },
         observer,
         move || {
-            let service = SqliteKernelService::open(&fixture.database_path)?;
-            service.current_state(CurrentStateRequest {
+            let mut phases = Vec::new();
+            let (service, open_timing) =
+                SqliteKernelService::open_with_diagnostics(&fixture.database_path)?;
+            append_operation_phases(&mut phases, "open", open_timing);
+            let started = Instant::now();
+            let response = service.current_state(CurrentStateRequest {
                 schema: fixture.schema.clone(),
                 datoms: Vec::new(),
                 policy_context: None,
-            })
+            })?;
+            phases.push(PerfPhaseTiming {
+                phase: "run.current_state_replay".into(),
+                duration_ns: duration_ns(started.elapsed()),
+            });
+            let started = Instant::now();
+            drop(service);
+            phases.push(PerfPhaseTiming {
+                phase: "service_close".into(),
+                duration_ns: duration_ns(started.elapsed()),
+            });
+            Ok((response, phases))
         },
     )
 }
@@ -1516,9 +1549,11 @@ fn benchmark_durable_restart_coordination_impl(
         "each sample reopens the durable kernel, replays the SQLite journal, and runs the coordination document"
             .into(),
         "4 restart-and-replay passes per sample to reduce timer jitter".into(),
+        "pass diagnostics retain every restart; journal open includes SQLite configuration, schema checks, and any busy-timeout wait"
+            .into(),
     ];
 
-    benchmark_measurement(
+    benchmark_restart_measurement(
         MeasurementPlan {
             group: PerfSuiteId::ServiceInProcess,
             workload: "Durable restart coordination replay",
@@ -1536,8 +1571,20 @@ fn benchmark_durable_restart_coordination_impl(
         },
         observer,
         move || {
-            let mut service = SqliteKernelService::open(&fixture.database_path)?;
-            service.run_document(fixture.request.clone())
+            let mut phases = Vec::new();
+            let (mut service, open_timing) =
+                SqliteKernelService::open_with_diagnostics(&fixture.database_path)?;
+            append_operation_phases(&mut phases, "open", open_timing);
+            let (response, run_timing) =
+                service.run_document_with_diagnostics(fixture.request.clone())?;
+            append_operation_phases(&mut phases, "run", run_timing);
+            let started = Instant::now();
+            drop(service);
+            phases.push(PerfPhaseTiming {
+                phase: "service_close".into(),
+                duration_ns: duration_ns(started.elapsed()),
+            });
+            Ok((response, phases))
         },
     )
 }
@@ -2835,7 +2882,7 @@ fn render_markdown_report_sections(output: &mut String, report: &PerfReport) {
             output,
             "| --- | --- | ---: | ---: | ---: | ---: | --- | --- |"
         );
-        for measurement in measurements {
+        for measurement in &measurements {
             let _ = writeln!(
                 output,
                 "| {} | {} | {} | {} | {} | {}/{} | {} | {} |",
@@ -2851,6 +2898,47 @@ fn render_markdown_report_sections(output: &mut String, report: &PerfReport) {
             );
         }
         let _ = writeln!(output);
+
+        for measurement in measurements {
+            if measurement.pass_timings.is_empty() {
+                continue;
+            }
+            let _ = writeln!(
+                output,
+                "### Restart pass diagnostics: {}",
+                measurement.workload
+            );
+            let _ = writeln!(output);
+            let _ = writeln!(
+                output,
+                "| Sample | Pass | Classification | Total | Phase timings |"
+            );
+            let _ = writeln!(output, "| ---: | ---: | --- | ---: | --- |");
+            for pass in &measurement.pass_timings {
+                let phases = pass
+                    .phases
+                    .iter()
+                    .map(|phase| {
+                        format!(
+                            "{}={}",
+                            phase.phase,
+                            format_duration(Duration::from_nanos(phase.duration_ns))
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("<br>");
+                let _ = writeln!(
+                    output,
+                    "| {} | {} | `{}` | {} | {} |",
+                    pass.sample_index,
+                    pass.pass_index,
+                    pass.classification,
+                    format_duration(Duration::from_nanos(pass.total_duration_ns)),
+                    phases
+                );
+            }
+            let _ = writeln!(output);
+        }
     }
 
     let _ = writeln!(output, "## Footprint Estimates");
@@ -3723,6 +3811,154 @@ pub fn estimate_derivation_trace_bytes(trace: &DerivationTrace) -> usize {
     bytes
 }
 
+fn duration_ns(duration: Duration) -> u64 {
+    u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
+}
+
+fn append_operation_phases(
+    target: &mut Vec<PerfPhaseTiming>,
+    prefix: &str,
+    timing: ServiceOperationTiming,
+) {
+    let mut attributed = 0_u64;
+    for phase in timing.phases {
+        attributed = attributed.saturating_add(phase.duration_ns);
+        target.push(PerfPhaseTiming {
+            phase: format!("{prefix}.{}", phase.phase),
+            duration_ns: phase.duration_ns,
+        });
+    }
+    if timing.total_duration_ns > attributed {
+        target.push(PerfPhaseTiming {
+            phase: format!("{prefix}.unattributed"),
+            duration_ns: timing.total_duration_ns - attributed,
+        });
+    }
+}
+
+fn benchmark_restart_measurement<T, F>(
+    plan: MeasurementPlan,
+    observer: &mut Option<&mut dyn FnMut(PerfEvent)>,
+    mut operation: F,
+) -> Result<PerfMeasurement, ApiError>
+where
+    F: FnMut() -> Result<(T, Vec<PerfPhaseTiming>), ApiError>,
+{
+    let samples = plan.samples.max(1);
+    let iterations_per_sample = plan.iterations_per_sample.max(1);
+    let effective_units = plan.units.saturating_mul(iterations_per_sample);
+    let mut durations = Vec::with_capacity(samples);
+    let mut pass_timings = Vec::with_capacity(samples.saturating_mul(iterations_per_sample));
+    emit_event(
+        observer,
+        PerfEvent::MeasurementStart {
+            group: plan.group,
+            workload: plan.workload,
+            scale: plan.scale.clone(),
+            total_samples: samples,
+            units: effective_units,
+            unit_label: plan.unit_label,
+            metrics: plan.metrics.clone(),
+            notes: plan.notes.clone(),
+        },
+    );
+
+    let mut total = Duration::default();
+    let mut min = Duration::default();
+    let mut max = Duration::default();
+    for sample_index in 1..=samples {
+        let sample_started = Instant::now();
+        for pass_index in 1..=iterations_per_sample {
+            let pass_started = Instant::now();
+            let (result, mut phases) = operation()?;
+            black_box(result);
+            let elapsed = pass_started.elapsed();
+            let elapsed_ns = duration_ns(elapsed);
+            let attributed_ns = phases.iter().fold(0_u64, |total, phase| {
+                total.saturating_add(phase.duration_ns)
+            });
+            if elapsed_ns > attributed_ns {
+                phases.push(PerfPhaseTiming {
+                    phase: "harness.unattributed".into(),
+                    duration_ns: elapsed_ns - attributed_ns,
+                });
+            }
+            pass_timings.push(PerfPassTiming {
+                sample_index,
+                pass_index,
+                classification: if sample_index == 1 && pass_index == 1 {
+                    "first_observed_restart".into()
+                } else {
+                    "subsequent_restart".into()
+                },
+                total_duration_ns: elapsed_ns,
+                phases,
+            });
+        }
+        let elapsed = sample_started.elapsed();
+        durations.push(elapsed);
+        total += elapsed;
+        if durations.len() == 1 {
+            min = elapsed;
+            max = elapsed;
+        } else {
+            min = min.min(elapsed);
+            max = max.max(elapsed);
+        }
+        let sample_throughput = if elapsed.is_zero() {
+            0.0
+        } else {
+            effective_units as f64 / elapsed.as_secs_f64()
+        };
+        emit_event(
+            observer,
+            PerfEvent::SampleRecorded {
+                workload: plan.workload,
+                scale: plan.scale.clone(),
+                sample_index: durations.len(),
+                total_samples: samples,
+                elapsed,
+                throughput_per_second: sample_throughput,
+                mean_so_far: total / (durations.len() as u32),
+                min_so_far: min,
+                max_so_far: max,
+            },
+        );
+    }
+
+    let mean = total / (samples as u32);
+    let throughput_per_second = if mean.is_zero() {
+        0.0
+    } else {
+        effective_units as f64 / mean.as_secs_f64()
+    };
+    let measurement = PerfMeasurement {
+        group: Some(plan.group),
+        workload: plan.workload.into(),
+        scale: plan.scale,
+        units: effective_units,
+        unit_label: plan.unit_label.into(),
+        latency: LatencyStats {
+            samples,
+            mean,
+            min,
+            max,
+            sample_durations_ns: durations.iter().copied().map(duration_ns).collect(),
+        },
+        throughput_per_second,
+        metrics: plan.metrics,
+        notes: plan.notes,
+        pass_timings,
+    };
+    emit_event(
+        observer,
+        PerfEvent::MeasurementComplete {
+            measurement: measurement.clone(),
+        },
+    );
+    Ok(measurement)
+}
+
 fn benchmark_measurement<T, F>(
     plan: MeasurementPlan,
     observer: &mut Option<&mut dyn FnMut(PerfEvent)>,
@@ -3815,6 +4051,7 @@ where
         throughput_per_second,
         metrics: plan.metrics,
         notes: plan.notes,
+        pass_timings: Vec::new(),
     };
     emit_event(
         observer,
@@ -4174,11 +4411,12 @@ fn unique_temp_dir(prefix: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        baseline_from_bundle, benchmark_append, build_matrix_report, build_trend_index,
+        baseline_from_bundle, benchmark_append, benchmark_durable_restart_coordination,
+        benchmark_durable_restart_current, build_matrix_report, build_trend_index,
         collect_host_snapshot, compare_perf_bundle_to_baseline, compare_perf_reports,
-        DriftSeverity, FootprintEstimate, LatencyStats, PerfBaseline, PerfDriftBudget,
-        PerfHostManifest, PerfHostSnapshot, PerfMeasurement, PerfReport, PerfRunBundle,
-        PerfRunMetadata, PerfSuiteId, PerfVerdictPolicy,
+        render_markdown_report, DriftSeverity, FootprintEstimate, LatencyStats, PerfBaseline,
+        PerfDriftBudget, PerfHostManifest, PerfHostSnapshot, PerfMeasurement, PerfReport,
+        PerfRunBundle, PerfRunMetadata, PerfSuiteId, PerfVerdictPolicy,
     };
     use std::time::Duration;
 
@@ -4209,6 +4447,7 @@ mod tests {
                     throughput_per_second: 50_000.0,
                     metrics: Vec::new(),
                     notes: Vec::new(),
+                    pass_timings: Vec::new(),
                 }],
                 footprints: vec![FootprintEstimate {
                     group: Some(PerfSuiteId::CoreKernel),
@@ -4238,6 +4477,7 @@ mod tests {
                 throughput_per_second: 35_000.0,
                 metrics: Vec::new(),
                 notes: Vec::new(),
+                pass_timings: Vec::new(),
             }],
             footprints: vec![FootprintEstimate {
                 group: Some(PerfSuiteId::CoreKernel),
@@ -4294,6 +4534,7 @@ mod tests {
                 throughput_per_second: 300_000.0,
                 metrics: Vec::new(),
                 notes: Vec::new(),
+                pass_timings: Vec::new(),
             }],
             footprints: Vec::new(),
         };
@@ -4432,6 +4673,78 @@ mod tests {
             .all(|sample| *sample > 0));
     }
 
+    #[test]
+    fn durable_restart_coordination_retains_every_non_overlapping_pass_phase() {
+        let measurement =
+            benchmark_durable_restart_coordination(8, 2).expect("durable restart benchmark");
+
+        assert_eq!(measurement.latency.samples, 2);
+        assert_eq!(measurement.latency.sample_durations_ns.len(), 2);
+        assert_eq!(measurement.pass_timings.len(), 8);
+        assert_eq!(
+            measurement
+                .pass_timings
+                .iter()
+                .filter(|pass| pass.classification == "first_observed_restart")
+                .count(),
+            1
+        );
+        assert!(measurement.pass_timings.iter().all(|pass| {
+            let attributed = pass.phases.iter().fold(0_u64, |total, phase| {
+                total.saturating_add(phase.duration_ns)
+            });
+            pass.total_duration_ns > 0
+                && !pass.phases.is_empty()
+                && attributed <= pass.total_duration_ns
+        }));
+
+        let phase_names = measurement
+            .pass_timings
+            .iter()
+            .flat_map(|pass| pass.phases.iter().map(|phase| phase.phase.as_str()))
+            .collect::<Vec<_>>();
+        for expected in [
+            "open.execution_store_open_schema",
+            "open.journal_open_configure_schema",
+            "open.sidecar_open_schema",
+            "run.document_parse",
+            "run.journal_history_read",
+            "run.policy_replay",
+            "run.state_resolution",
+            "run.semi_naive_execution",
+            "run.execution_persistence",
+            "service_close",
+        ] {
+            assert!(phase_names.contains(&expected), "missing phase {expected}");
+        }
+    }
+
+    #[test]
+    fn durable_restart_current_retains_all_passes_and_markdown_diagnostics() {
+        let measurement =
+            benchmark_durable_restart_current(8, 1).expect("durable current benchmark");
+        assert_eq!(measurement.pass_timings.len(), 4);
+        assert_eq!(measurement.pass_timings[0].sample_index, 1);
+        assert_eq!(measurement.pass_timings[0].pass_index, 1);
+        assert_eq!(
+            measurement.pass_timings[0].classification,
+            "first_observed_restart"
+        );
+        assert_eq!(
+            measurement.pass_timings[1].classification,
+            "subsequent_restart"
+        );
+
+        let markdown = render_markdown_report(&PerfReport {
+            samples_per_workload: 1,
+            measurements: vec![measurement],
+            footprints: Vec::new(),
+        });
+        assert!(markdown.contains("Restart pass diagnostics: Durable restart current replay"));
+        assert!(markdown.contains("`first_observed_restart`"));
+        assert!(markdown.contains("open.journal_open_configure_schema"));
+    }
+
     fn fake_bundle(host_id: &str, suite_id: PerfSuiteId) -> PerfRunBundle {
         let host_snapshot = collect_host_snapshot();
         PerfRunBundle {
@@ -4477,6 +4790,7 @@ mod tests {
                     throughput_per_second: 10_000.0,
                     metrics: Vec::new(),
                     notes: Vec::new(),
+                    pass_timings: Vec::new(),
                 }],
                 footprints: vec![FootprintEstimate {
                     group: Some(suite_id),

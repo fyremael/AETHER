@@ -36,9 +36,12 @@ the R4 schemas, runner, deterministic bundler, cryptographic/API-bound verifier,
 policy-only ledger, candidate-bound subject envelopes, canonical-package
 qualification flow, promotion-record validator, negative suite, and two-stage
 reusable workflow are implemented locally. Independent P0/P1 review of the
-focused qualification implementation is complete. The active dependency is
-merge, followed by one protected `main` candidate whose exact CI, Supply Chain,
-Pages, Capacity, operational-readiness, bundle, dependent-verdict, and fresh
+focused qualification implementation is complete and merged. Protected
+candidate `11380eed81d0690717637a6926ae0087547205c2` passed CI, Supply Chain,
+Pages, and Capacity, then failed Release Readiness on first-restart service
+latency. The active dependency is the bounded diagnostic and remediation path
+in `docs/RESTART_LATENCY_INVESTIGATION.md`, followed by a new protected
+candidate whose operational-readiness, bundle, dependent-verdict, and fresh
 independent-verdict outcomes all pass.
 
 The roadmap is no longer about proving the kernel can exist. Its immediate job
@@ -171,7 +174,8 @@ If the team needs a practical ordering, use this one:
    implemented locally; complete hosted exact-candidate evidence remains pending
 7. `R6`: responsibility crates and executable-plan ownership implemented
    locally; preserve the compatibility facade until migration evidence permits removal
-8. `R7`: requalify one selected commercial-beta candidate only after independent bundle verification
+8. `R7`: localize and remediate first-restart latency without changing the gate,
+   then requalify a new selected commercial-beta candidate only after independent bundle verification
 
 Distributed-truth widening, DSL ergonomics, and broad product expansion remain
 behind this sequence unless a separate accepted ADR proves they do not touch a

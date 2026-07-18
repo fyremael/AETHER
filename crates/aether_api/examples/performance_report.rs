@@ -8,6 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut host_manifest: Option<PathBuf> = None;
     let mut bundle_path: Option<PathBuf> = None;
     let mut report_path: Option<PathBuf> = None;
+    let mut samples = aether_api::perf::DEFAULT_REPORT_SAMPLES;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -28,9 +29,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let value = args.next().ok_or("--report-path requires a path")?;
                 report_path = Some(PathBuf::from(value));
             }
+            "--samples" => {
+                let value = args.next().ok_or("--samples requires a value")?;
+                samples = value.parse::<usize>()?;
+                if samples == 0 {
+                    return Err("--samples must be greater than zero".into());
+                }
+            }
             "--help" | "-h" => {
                 println!(
-                    "Usage: cargo run -p aether_api --example performance_report --release -- [--suite full_stack] [--host-manifest {}] [--bundle-path artifacts/performance/latest.json] [--report-path artifacts/performance/latest.md]",
+                    "Usage: cargo run -p aether_api --example performance_report --release -- [--suite full_stack] [--samples {}] [--host-manifest {}] [--bundle-path artifacts/performance/latest.json] [--report-path artifacts/performance/latest.md]",
+                    aether_api::perf::DEFAULT_REPORT_SAMPLES,
                     DEFAULT_HOST_MANIFEST_PATH
                 );
                 return Ok(());
@@ -41,11 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let bundle = performance_bundle_for_suite(
-        suite,
-        aether_api::perf::DEFAULT_REPORT_SAMPLES,
-        host_manifest.as_deref(),
-    )?;
+    let bundle = performance_bundle_for_suite(suite, samples, host_manifest.as_deref())?;
     let markdown = render_markdown_bundle(&bundle);
 
     if let Some(path) = bundle_path {

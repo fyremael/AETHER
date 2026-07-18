@@ -92,10 +92,15 @@ numeric run declaration, declared host, or correctly named file is
 insufficient. The qualification and generated promotion-record path are
 implemented locally. An independent adversarial review found no remaining
 P0/P1 defects after the final capacity and readiness-byte tightening. Local
-validation is green across 208 active Rust tests (plus 10 ignored stress/soak
-cases), 82 Python tests, and 18 Go tests. Merge and one protected `main`
-qualification run are still required. This does not widen the controlled-alpha
-claim.
+validation was green before hosted qualification. PR #28 has since merged and
+protected candidate `11380eed81d0690717637a6926ae0087547205c2` passed exact-SHA
+CI, Supply Chain, Pages, and Capacity Planning. Release Readiness run
+`29625522886` failed the unchanged service performance gate because its first
+durable coordination restart stalled while subsequent passes remained stable.
+No official bundle or passed verdict was emitted. Phase-level, all-pass restart
+instrumentation and a repeated fresh-process runner are now under focused
+investigation in `docs/RESTART_LATENCY_INVESTIGATION.md`. This does not widen
+the controlled-alpha claim.
 
 R5.1-R5.6 are now implemented locally. The service has strict dependency and
 package gates, verified transport modes, independent namespace admission,
@@ -264,8 +269,9 @@ Still open:
   for the exact candidate SHA
 - hosted confirmation that the verified-TLS Postgres matrix passes for the exact
   candidate and that the supported ingress prevents direct backend reachability
-- successful hosted Capacity Planning, Pages exact-SHA deployment, and first
-  Release Readiness runs for the selected candidate
+- a new protected candidate whose exact-SHA CI, Supply Chain, Pages, Capacity
+  Planning, and Release Readiness runs all pass; the first selected candidate's
+  readiness run failed the service restart-latency gate
 - post-v1 DSL ergonomics and document modularity beyond the current canonical surface
 - production hardening for the optional Postgres journal deployment path beyond current parity/concurrency coverage
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
@@ -274,8 +280,9 @@ Still open:
 
 ## Immediate focus
 
-The immediate work is R7 exact-candidate qualification from
-`docs/REMEDIATION_PROGRAMME.md`. Feature broadening across policy, service
+The immediate work is to localize and remediate the failed first-restart
+latency documented in `docs/RESTART_LATENCY_INVESTIGATION.md`, then resume R7
+exact-candidate qualification from `docs/REMEDIATION_PROGRAMME.md`. Feature broadening across policy, service
 execution, append, proof identity, or release claims stays frozen until the
 relevant repaired contract is green:
 
