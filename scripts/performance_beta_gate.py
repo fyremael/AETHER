@@ -3,11 +3,62 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+POLICY_SCHEMA_VERSION = 2
+APPROVED_BETA_HOST_IDS = {
+    "dev-chad-windows-native",
+    "github-windows-latest",
+}
+REQUIRED_SUITE_ID = "full_stack"
+KNOWN_DRIFT_STATUSES = {"ok", "warn"}
+REQUIRED_DRIFT_SURFACES = {
+    "core_kernel": "artifacts/performance/latest-drift-core_kernel.md",
+    "service_in_process": "artifacts/performance/latest-drift-service_in_process.md",
+}
+REQUIRED_LATENCY_SURFACES = {
+    "core_restart_replay": (
+        "core_kernel",
+        "Durable restart current replay",
+        "1,000 entities",
+    ),
+    "service_restart_replay": (
+        "service_in_process",
+        "Durable restart coordination replay",
+        "128 tasks",
+    ),
+    "service_coordination_run": (
+        "service_in_process",
+        "Kernel service coordination run",
+        "128 tasks",
+    ),
+    "http_status": (
+        "http_pilot_boundary",
+        "HTTP service status endpoint",
+        "pilot boundary",
+    ),
+    "http_history": (
+        "http_pilot_boundary",
+        "HTTP history endpoint",
+        "25 datoms",
+    ),
+    "http_coordination_report": (
+        "http_pilot_boundary",
+        "HTTP coordination report endpoint",
+        "pilot coordination",
+    ),
+    "http_coordination_delta": (
+        "http_pilot_boundary",
+        "HTTP coordination delta endpoint",
+        "4 changed rows",
+    ),
+}
 
 
 def repo_root() -> Path:
@@ -34,6 +85,131 @@ def write_text(path: Path, content: str) -> None:
 
 def normalize_path(path: Path) -> str:
     return str(path).replace("\\", "/")
+
+
+def is_trimmed_identifier(value: Any) -> bool:
+    return type(value) is str and bool(value) and value == value.strip()
+
+
+def validate_threshold_policy(thresholds: Any) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(thresholds, dict):
+        return ["threshold policy must be an object"]
+
+    schema_version = thresholds.get("schema_version")
+    if type(schema_version) is not int or schema_version != POLICY_SCHEMA_VERSION:
+        errors.append(f"schema_version must be integer {POLICY_SCHEMA_VERSION}")
+
+    configured_hosts = thresholds.get("allowed_host_ids")
+    if not isinstance(configured_hosts, list) or not configured_hosts:
+        errors.append("allowed_host_ids must be a non-empty list")
+    elif not all(is_trimmed_identifier(item) for item in configured_hosts):
+        errors.append("allowed_host_ids must contain only non-empty trimmed strings")
+    elif len(configured_hosts) != len(set(configured_hosts)):
+        errors.append("allowed_host_ids must not contain duplicates")
+    elif set(configured_hosts) != APPROVED_BETA_HOST_IDS:
+        errors.append(
+            f"allowed_host_ids must be exactly {sorted(APPROVED_BETA_HOST_IDS)}"
+        )
+
+    suite_id = thresholds.get("suite_id")
+    if not is_trimmed_identifier(suite_id) or suite_id != REQUIRED_SUITE_ID:
+        errors.append(f"suite_id must be {REQUIRED_SUITE_ID}")
+
+    drift_reports = thresholds.get("drift_reports")
+    drift_by_suite: dict[str, dict[str, Any]] = {}
+    if not isinstance(drift_reports, list) or not drift_reports:
+        errors.append("drift_reports must be a non-empty list")
+    else:
+        for index, drift in enumerate(drift_reports):
+            prefix = f"drift_reports[{index}]"
+            if not isinstance(drift, dict):
+                errors.append(f"{prefix} must be an object")
+                continue
+            suite = drift.get("suite")
+            path = drift.get("path")
+            allowed = drift.get("allowed_gated_overall")
+            if not is_trimmed_identifier(suite):
+                errors.append(f"{prefix}.suite must be a non-empty trimmed string")
+            elif suite in drift_by_suite:
+                errors.append(f"duplicate drift suite: {suite}")
+            else:
+                drift_by_suite[suite] = drift
+            if not is_trimmed_identifier(path):
+                errors.append(f"{prefix}.path must be a non-empty trimmed string")
+            if not isinstance(allowed, list) or not allowed:
+                errors.append(f"{prefix}.allowed_gated_overall must be non-empty")
+            elif not all(is_trimmed_identifier(item) for item in allowed):
+                errors.append(
+                    f"{prefix}.allowed_gated_overall must contain trimmed strings"
+                )
+            elif len(allowed) != len(set(allowed)):
+                errors.append(f"{prefix}.allowed_gated_overall has duplicates")
+            elif not set(allowed).issubset(KNOWN_DRIFT_STATUSES):
+                errors.append(
+                    f"{prefix}.allowed_gated_overall contains an unknown status"
+                )
+        for suite, expected_path in REQUIRED_DRIFT_SURFACES.items():
+            drift = drift_by_suite.get(suite)
+            if drift is None:
+                errors.append(f"required drift suite is missing: {suite}")
+            elif drift.get("path") != expected_path:
+                errors.append(f"required drift path changed for {suite}")
+
+    latency_thresholds = thresholds.get("latency_thresholds")
+    latency_by_id: dict[str, dict[str, Any]] = {}
+    measurement_keys: set[tuple[str, str, str]] = set()
+    if not isinstance(latency_thresholds, list) or not latency_thresholds:
+        errors.append("latency_thresholds must be a non-empty list")
+    else:
+        for index, threshold in enumerate(latency_thresholds):
+            prefix = f"latency_thresholds[{index}]"
+            if not isinstance(threshold, dict):
+                errors.append(f"{prefix} must be an object")
+                continue
+            threshold_id = threshold.get("id")
+            if not is_trimmed_identifier(threshold_id):
+                errors.append(f"{prefix}.id must be a non-empty trimmed string")
+            elif threshold_id in latency_by_id:
+                errors.append(f"duplicate latency threshold id: {threshold_id}")
+            else:
+                latency_by_id[threshold_id] = threshold
+            fields = (
+                threshold.get("group"),
+                threshold.get("workload"),
+                threshold.get("scale"),
+            )
+            if not all(is_trimmed_identifier(item) for item in fields):
+                errors.append(
+                    f"{prefix} group, workload, and scale must be non-empty trimmed strings"
+                )
+            elif fields in measurement_keys:
+                errors.append(f"duplicate latency measurement surface: {fields}")
+            else:
+                measurement_keys.add(fields)
+            ceiling = threshold.get("max_mean_ms")
+            if (
+                type(ceiling) not in (int, float)
+                or not math.isfinite(ceiling)
+                or ceiling <= 0
+            ):
+                errors.append(f"{prefix}.max_mean_ms must be finite and positive")
+            if not is_trimmed_identifier(threshold.get("why")):
+                errors.append(f"{prefix}.why must be a non-empty trimmed string")
+        for threshold_id, expected_surface in REQUIRED_LATENCY_SURFACES.items():
+            threshold = latency_by_id.get(threshold_id)
+            if threshold is None:
+                errors.append(f"required latency threshold is missing: {threshold_id}")
+                continue
+            observed_surface = (
+                threshold.get("group"),
+                threshold.get("workload"),
+                threshold.get("scale"),
+            )
+            if observed_surface != expected_surface:
+                errors.append(f"required latency surface changed for {threshold_id}")
+
+    return errors
 
 
 def duration_ms(duration: dict[str, Any]) -> float:
@@ -102,30 +278,36 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     bundle = load_json(bundle_path) if bundle_path.exists() else {}
     gates: list[dict[str, Any]] = []
 
+    policy_errors = validate_threshold_policy(thresholds)
+    gates.append(
+        build_gate(
+            "policy_integrity",
+            "Performance beta threshold policy is complete and valid",
+            not policy_errors,
+            [normalize_path(thresholds_path)],
+            blockers=policy_errors,
+            details={"schema_version": thresholds.get("schema_version") if isinstance(thresholds, dict) else None},
+        )
+    )
+    if policy_errors:
+        return {
+            "generated_at": generated_at,
+            "thresholds": normalize_path(thresholds_path),
+            "bundle": normalize_path(bundle_path),
+            "beta_ready": False,
+            "gates": gates,
+        }
+
     host_id = bundle.get("host_manifest", {}).get("host_id")
     suite_id = bundle.get("run", {}).get("suite_id")
-    configured_hosts = thresholds.get("allowed_host_ids", [])
-    threshold_schema_version = thresholds.get("schema_version")
-    expected_suite_id = thresholds.get("suite_id")
-    allowed_host_ids = (
-        configured_hosts
-        if isinstance(configured_hosts, list)
-        and configured_hosts
-        and all(isinstance(item, str) and item for item in configured_hosts)
-        and len(configured_hosts) == len(set(configured_hosts))
-        else []
-    )
-    policy_valid = (
-        threshold_schema_version == 2
-        and bool(allowed_host_ids)
-        and isinstance(expected_suite_id, str)
-        and bool(expected_suite_id)
-    )
+    allowed_host_ids = thresholds["allowed_host_ids"]
+    threshold_schema_version = thresholds["schema_version"]
+    expected_suite_id = thresholds["suite_id"]
     gates.append(
         build_gate(
             "bundle_identity",
             "Performance bundle matches an approved beta host and suite",
-            policy_valid and host_id in allowed_host_ids and suite_id == expected_suite_id,
+            host_id in allowed_host_ids and suite_id == expected_suite_id,
             [normalize_path(bundle_path)],
             blockers=[
                 f"expected schema 2, one of hosts {allowed_host_ids}, and suite {expected_suite_id}; got schema {threshold_schema_version}, host {host_id}, and suite {suite_id}"

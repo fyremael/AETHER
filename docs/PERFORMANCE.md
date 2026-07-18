@@ -145,6 +145,12 @@ does not authorize cross-host drift comparison. Each gated drift report still
 uses the baseline captured for its own host; the shared beta ceilings are
 absolute product-boundary limits for the named workloads.
 
+The version-2 policy integrity gate also pins the `full_stack` suite, both
+required drift surfaces, all seven required latency surfaces, known drift
+statuses, unique identifiers, and finite positive ceilings. Missing, duplicate,
+malformed, or structurally weakened policy entries block before bundle metrics
+can authorize beta readiness.
+
 ## Run Artifacts
 
 Raw run artifacts live under:

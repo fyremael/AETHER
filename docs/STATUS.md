@@ -118,7 +118,9 @@ passed, but the beta gate rejected its pinned `github-windows-latest` evidence
 because the policy named only `dev-chad-windows-native`. No official bundle or
 passed verdict was emitted. The policy now explicitly permits those two
 Windows evidence hosts while continuing to reject every other host and
-preserving same-host drift comparisons; failed readiness runs also retain their
+preserving same-host drift comparisons. A policy-integrity gate pins every
+required drift and latency surface and rejects missing, duplicate, malformed,
+non-finite, or status-weakened entries; failed readiness runs also retain their
 primary failure in a partial immutable manifest. A new protected candidate must
 pass the complete sequence. This does not widen the controlled-alpha claim.
 
