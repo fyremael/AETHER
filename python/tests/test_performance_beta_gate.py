@@ -4,6 +4,7 @@ import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -26,7 +27,11 @@ class PerformanceBetaGateTests(unittest.TestCase):
         )
         threshold_ids = {item["id"] for item in payload["latency_thresholds"]}
 
-        self.assertEqual(payload["host_id"], "dev-chad-windows-native")
+        self.assertEqual(payload["schema_version"], 2)
+        self.assertEqual(
+            payload["allowed_host_ids"],
+            ["dev-chad-windows-native", "github-windows-latest"],
+        )
         self.assertEqual(payload["suite_id"], "full_stack")
         self.assertIn("core_restart_replay", threshold_ids)
         self.assertIn("service_restart_replay", threshold_ids)
@@ -65,6 +70,114 @@ class PerformanceBetaGateTests(unittest.TestCase):
         measurement = module.find_measurement(bundle, threshold)
         self.assertIsNotNone(measurement)
         self.assertEqual(module.duration_ms(measurement["latency"]["mean"]), 3.0)
+
+    def test_bundle_identity_accepts_only_explicitly_approved_hosts(self) -> None:
+        module = load_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            thresholds = root / "thresholds.json"
+            bundle = root / "bundle.json"
+            module.write_json(
+                thresholds,
+                {
+                    "schema_version": 2,
+                    "allowed_host_ids": [
+                        "dev-chad-windows-native",
+                        "github-windows-latest",
+                    ],
+                    "suite_id": "full_stack",
+                    "drift_reports": [],
+                    "latency_thresholds": [],
+                },
+            )
+
+            for host_id in ("dev-chad-windows-native", "github-windows-latest"):
+                module.write_json(
+                    bundle,
+                    {
+                        "host_manifest": {"host_id": host_id},
+                        "run": {"suite_id": "full_stack"},
+                    },
+                )
+                report = module.build_report(
+                    SimpleNamespace(
+                        thresholds=str(thresholds),
+                        bundle=str(bundle),
+                        generated_at="2026-07-18T00:00:00+00:00",
+                    )
+                )
+                self.assertTrue(report["beta_ready"])
+                self.assertEqual(report["gates"][0]["status"], "passed")
+
+            module.write_json(
+                bundle,
+                {
+                    "host_manifest": {"host_id": "unapproved-windows-host"},
+                    "run": {"suite_id": "full_stack"},
+                },
+            )
+            report = module.build_report(
+                SimpleNamespace(
+                    thresholds=str(thresholds),
+                    bundle=str(bundle),
+                    generated_at="2026-07-18T00:00:00+00:00",
+                )
+            )
+            self.assertFalse(report["beta_ready"])
+            self.assertEqual(report["gates"][0]["status"], "blocked")
+
+    def test_malformed_host_policy_fails_closed(self) -> None:
+        module = load_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            thresholds = root / "thresholds.json"
+            bundle = root / "bundle.json"
+            module.write_json(
+                thresholds,
+                {
+                    "schema_version": 2,
+                    "allowed_host_ids": [
+                        "github-windows-latest",
+                        "github-windows-latest",
+                    ],
+                    "suite_id": "full_stack",
+                    "drift_reports": [],
+                    "latency_thresholds": [],
+                },
+            )
+            module.write_json(
+                bundle,
+                {
+                    "host_manifest": {"host_id": "github-windows-latest"},
+                    "run": {"suite_id": "full_stack"},
+                },
+            )
+            report = module.build_report(
+                SimpleNamespace(
+                    thresholds=str(thresholds),
+                    bundle=str(bundle),
+                    generated_at="2026-07-18T00:00:00+00:00",
+                )
+            )
+            self.assertFalse(report["beta_ready"])
+            self.assertEqual(report["gates"][0]["allowed_host_ids"], [])
+            self.assertEqual(report["gates"][0]["threshold_schema_version"], 2)
+
+            payload = module.load_json(thresholds)
+            payload["schema_version"] = 1
+            payload["allowed_host_ids"] = ["github-windows-latest"]
+            module.write_json(thresholds, payload)
+            report = module.build_report(
+                SimpleNamespace(
+                    thresholds=str(thresholds),
+                    bundle=str(bundle),
+                    generated_at="2026-07-18T00:00:00+00:00",
+                )
+            )
+            self.assertFalse(report["beta_ready"])
+            self.assertEqual(report["gates"][0]["threshold_schema_version"], 1)
 
 
 if __name__ == "__main__":

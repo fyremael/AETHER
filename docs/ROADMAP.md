@@ -39,15 +39,18 @@ reusable workflow are implemented locally. Independent P0/P1 review of the
 focused qualification implementation is complete and merged. Protected
 candidate `11380eed81d0690717637a6926ae0087547205c2` passed CI, Supply Chain,
 Pages, and Capacity, then failed Release Readiness on first-restart service
-latency. The active dependency is the bounded diagnostic and remediation path
-in `docs/RESTART_LATENCY_INVESTIGATION.md`. The atomic batch-persistence fix and
-ten-process local comparison are green. The execution catalog now batches
-manifest/traces atomically, uses WAL/`synchronous=NORMAL`, and avoids a
-last-connection checkpoint while preserving database/WAL/SHM backup semantics.
-The latest ten-process diagnostic and five local baseline/current comparisons
-pass the unchanged gate. Hosted PR validation is pending, then a new protected
-candidate must pass operational readiness, bundle verification, the dependent
-verdict, and a fresh independent verdict.
+latency. The bounded remediation in `docs/RESTART_LATENCY_INVESTIGATION.md`
+batches execution manifest/traces atomically, uses WAL/`synchronous=NORMAL`,
+and avoids a last-connection checkpoint while preserving database/WAL/SHM
+backup semantics. Protected successor
+`083833634c174ce04f4a7329b78bcdcdb241024d` passed exact-SHA CI, Supply Chain,
+Pages, and Capacity. Its Release Readiness run passed every measured drift and
+latency threshold but exposed a policy wiring defect: the pinned GitHub Windows
+evidence host was not in the beta host policy. The policy now fail-closed allows
+only the native Windows qualification host and the official GitHub Windows
+runner. After this focused repair merges, a new protected candidate must pass
+operational readiness, bundle verification, the dependent verdict, and a fresh
+independent verdict.
 
 The roadmap is no longer about proving the kernel can exist. Its immediate job
 is to repair the correctness and claim boundaries before widening resumes.

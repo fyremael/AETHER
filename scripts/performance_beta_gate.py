@@ -104,16 +104,38 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
 
     host_id = bundle.get("host_manifest", {}).get("host_id")
     suite_id = bundle.get("run", {}).get("suite_id")
+    configured_hosts = thresholds.get("allowed_host_ids", [])
+    threshold_schema_version = thresholds.get("schema_version")
+    expected_suite_id = thresholds.get("suite_id")
+    allowed_host_ids = (
+        configured_hosts
+        if isinstance(configured_hosts, list)
+        and configured_hosts
+        and all(isinstance(item, str) and item for item in configured_hosts)
+        and len(configured_hosts) == len(set(configured_hosts))
+        else []
+    )
+    policy_valid = (
+        threshold_schema_version == 2
+        and bool(allowed_host_ids)
+        and isinstance(expected_suite_id, str)
+        and bool(expected_suite_id)
+    )
     gates.append(
         build_gate(
             "bundle_identity",
-            "Performance bundle matches beta threshold host and suite",
-            host_id == thresholds["host_id"] and suite_id == thresholds["suite_id"],
+            "Performance bundle matches an approved beta host and suite",
+            policy_valid and host_id in allowed_host_ids and suite_id == expected_suite_id,
             [normalize_path(bundle_path)],
             blockers=[
-                f"expected host {thresholds['host_id']} and suite {thresholds['suite_id']}, got host {host_id} and suite {suite_id}"
+                f"expected schema 2, one of hosts {allowed_host_ids}, and suite {expected_suite_id}; got schema {threshold_schema_version}, host {host_id}, and suite {suite_id}"
             ],
-            details={"host_id": host_id, "suite_id": suite_id},
+            details={
+                "host_id": host_id,
+                "allowed_host_ids": allowed_host_ids,
+                "suite_id": suite_id,
+                "threshold_schema_version": threshold_schema_version,
+            },
         )
     )
 

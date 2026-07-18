@@ -645,9 +645,29 @@ if ($manifestParent) {
 }
 $treeSha = if ($git) { (& $git.Source -C $repoRoot rev-parse "HEAD^{tree}").Trim() } else { "" }
 $manifestStatus = if ($failed) { "failed" } else { "passed" }
+$readinessOutputPaths = [ordered]@{
+    performance_beta = $performanceBetaJsonPath
+    service_operability = $serviceV2JsonPath
+    rollback = $rollbackJsonPath
+    customer_workflow = $customerWorkflowJsonPath
+    security_lifecycle = $securityKeyJsonPath
+    commercial_policy = $commercialReadinessJsonPath
+    package_file_manifest = Join-Path $securityKeyProofDir "pilot-package-file-manifest.json"
+    readiness_transcript = $transcriptPath
+    pilot_launch_transcript = $pilotLaunchArtifactPath
+}
+$readinessOutputs = [ordered]@{}
+foreach ($output in $readinessOutputPaths.GetEnumerator()) {
+    if ($output.Value -and (Test-Path -LiteralPath $output.Value -PathType Leaf)) {
+        $readinessOutputs[$output.Key] = Get-FileReceipt $output.Value
+    } elseif (-not $failed) {
+        throw "Required immutable readiness output is missing: $($output.Value)"
+    }
+}
 $readinessEvidence = [ordered]@{
     schema_version = "aether.release-readiness-evidence.v1"
     status = $manifestStatus
+    failure = if ($failed) { $failureMessage } else { $null }
     candidate = [ordered]@{
         commit_sha = $commit
         tree_sha = $treeSha
@@ -661,17 +681,7 @@ $readinessEvidence = [ordered]@{
         path = [System.IO.Path]::GetRelativePath($repoRoot, $pilotPackageZip).Replace('\', '/')
         sha256 = if (Test-Path -LiteralPath $pilotPackageZip) { (Get-FileHash -LiteralPath $pilotPackageZip -Algorithm SHA256).Hash.ToLowerInvariant() } else { "" }
     }
-    outputs = [ordered]@{
-        performance_beta = Get-FileReceipt $performanceBetaJsonPath
-        service_operability = Get-FileReceipt $serviceV2JsonPath
-        rollback = Get-FileReceipt $rollbackJsonPath
-        customer_workflow = Get-FileReceipt $customerWorkflowJsonPath
-        security_lifecycle = Get-FileReceipt $securityKeyJsonPath
-        commercial_policy = Get-FileReceipt $commercialReadinessJsonPath
-        package_file_manifest = Get-FileReceipt (Join-Path $securityKeyProofDir "pilot-package-file-manifest.json")
-        readiness_transcript = Get-FileReceipt $transcriptPath
-        pilot_launch_transcript = Get-FileReceipt $pilotLaunchArtifactPath
-    }
+    outputs = $readinessOutputs
 }
 $readinessEvidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $EvidenceManifestPath
 
