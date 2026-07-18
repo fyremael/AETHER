@@ -8,7 +8,7 @@ use aether_resolver::{MaterializedResolver, Resolver};
 use aether_runtime::{DerivedSet, RuleRuntime, SemiNaiveRuntime};
 use aether_schema::Schema;
 use rand::{rngs::OsRng, RngCore};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{config::DbConfig, params, Connection, OptionalExtension};
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::{
@@ -378,6 +378,7 @@ impl SqliteExecutionStore {
             std::fs::create_dir_all(parent)?;
         }
         let connection = Connection::open(&path)?;
+        connection.set_db_config(DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, true)?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "NORMAL")?;
         connection.pragma_update(None, "busy_timeout", 5_000)?;
@@ -1107,9 +1108,14 @@ mod tests {
             .connection
             .pragma_query_value(None, "busy_timeout", |row| row.get(0))
             .expect("read busy timeout");
+        let no_checkpoint_on_close = sqlite
+            .connection
+            .db_config(DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE)
+            .expect("read checkpoint-on-close posture");
         assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
         assert_eq!(synchronous, 1);
         assert_eq!(busy_timeout, 5_000);
+        assert!(no_checkpoint_on_close);
         drop(sqlite);
         let _ = std::fs::remove_file(path);
     }
