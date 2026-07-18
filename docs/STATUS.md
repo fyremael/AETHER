@@ -110,9 +110,19 @@ The derived execution catalog now uses the established journal WAL and
 last-connection checkpointing. The latest ten-process run bounded first
 persistence to `7.239 ms` and service close to `1.198 ms`; five local exact
 baseline/current comparisons passed the unchanged gate. Backup/restore coverage
-now proves the database/WAL/SHM snapshot boundary. Final hosted PR checks and a
-new protected candidate still must pass. This does not widen the
-controlled-alpha claim.
+now proves the database/WAL/SHM snapshot boundary. PR #29 merged, and protected
+candidate `083833634c174ce04f4a7329b78bcdcdb241024d` passed exact-SHA CI,
+Supply Chain, Pages, and Capacity Planning. Release Readiness run `29642281070`
+then exposed an in-repo host-policy mismatch: every latency and drift threshold
+passed, but the beta gate rejected its pinned `github-windows-latest` evidence
+because the policy named only `dev-chad-windows-native`. No official bundle or
+passed verdict was emitted. The policy now explicitly permits those two
+Windows evidence hosts while continuing to reject every other host and
+preserving same-host drift comparisons. A policy-integrity gate pins every
+required drift and latency surface and rejects missing, duplicate, malformed,
+non-finite, or status-weakened entries; failed readiness runs also retain their
+primary failure in a partial immutable manifest. A new protected candidate must
+pass the complete sequence. This does not widen the controlled-alpha claim.
 
 R5.1-R5.6 are now implemented locally. The service has strict dependency and
 package gates, verified transport modes, independent namespace admission,
@@ -235,7 +245,9 @@ Completed:
 - release-readiness now also emits a Service v2 operability proof artifact with a direct SQLite namespace restart/replay drill, Postgres availability status, CI container-smoke coverage, current-run package backup/restore-through-restart proof, and admin/operator promotion status
 - release-readiness now emits a versioned rollback record that ties the packaged bundle, package-local backup/restore proof, restart/replay evidence, packaged upgrade/rollback playbook, and Postgres export/restore boundary into one release artifact
 - release-readiness now emits a customer workflow acceptance artifact that runs the AI support resolution desk demo and checks the buyer-facing workflow markers
-- release-readiness now emits a performance beta gate artifact that enforces explicit canonical-host thresholds for gated drift, restart/replay, in-process report latency, and pilot HTTP read paths
+- release-readiness now emits a performance beta gate artifact that enforces
+  explicit approved-Windows-host thresholds for gated same-host drift,
+  restart/replay, in-process report latency, and pilot HTTP read paths
 - release-readiness emits a security/key lifecycle artifact that verifies package token rotation, token-command/auth-reload tests, secret-manager documentation, and an honestly named package file/checksum manifest
 - strict CycloneDX 1.5 Rust, Go, and assembled-package SBOM generation now
   covers lockfiles, package URLs, hashes, licenses, dependency graphs, and every

@@ -1,6 +1,9 @@
 {
-  "schema_version": 1,
-  "host_id": "dev-chad-windows-native",
+  "schema_version": 2,
+  "allowed_host_ids": [
+    "dev-chad-windows-native",
+    "github-windows-latest"
+  ],
   "suite_id": "full_stack",
   "drift_reports": [
     {

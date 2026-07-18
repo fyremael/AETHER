@@ -133,6 +133,24 @@ That means the current formal accepted gate is the native Windows dev host:
 The GitHub runners and WSL host manifests are part of the matrix from the first
 implementation slice, but they are not yet tracked accepted baselines in-repo.
 
+The commercial-beta absolute latency policy is deliberately narrower than the
+whole host matrix but broader than the long-term accepted-baseline catalog. It
+allows exactly two Windows evidence hosts:
+
+- `dev-chad-windows-native` for native local qualification
+- `github-windows-latest` for protected exact-candidate Release Readiness
+
+This does not make an ephemeral GitHub runner a tracked accepted baseline and
+does not authorize cross-host drift comparison. Each gated drift report still
+uses the baseline captured for its own host; the shared beta ceilings are
+absolute product-boundary limits for the named workloads.
+
+The version-2 policy integrity gate also pins the `full_stack` suite, both
+required drift surfaces, all seven required latency surfaces, known drift
+statuses, unique identifiers, and finite positive ceilings. Missing, duplicate,
+malformed, or structurally weakened policy entries block before bundle metrics
+can authorize beta readiness.
+
 ## Run Artifacts
 
 Raw run artifacts live under:

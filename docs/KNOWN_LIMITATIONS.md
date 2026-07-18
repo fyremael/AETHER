@@ -86,22 +86,20 @@ ordinary feature backlog:
   local automation changes substitutes for green hosted runs on the exact
   candidate; Capacity remains diagnostic unless a claim policy explicitly names it.
 - The accepted regression gate is still deliberately narrow: `core_kernel` and `service_in_process` on the canonical native Windows dev host are the tracked release baselines, while HTTP and replicated-partition suites remain observational until their variance is better understood.
-- The first protected qualification candidate passed CI, Supply Chain, Pages,
-  and Capacity but failed Release Readiness because one first-observed durable
-  coordination restart stalled while later restarts were stable. The focused
-  phase telemetry retains every pass and does not filter, retry, warm up, or
-  change the arithmetic-mean gate. Ten fresh processes localized the stall to
-  first-write execution-trace persistence, where traces were inserted as
-  separate SQLite commits. Atomic batch persistence is implemented and cut
-  the ten-process local first-restart mean by `99.09%`. Hosted checks then
-  localized filesystem tails first to the rollback-journal commit and then to
-  the WAL last-connection checkpoint. The derived catalog now batches
-  manifest/traces atomically, uses WAL/`synchronous=NORMAL`, and avoids that
-  close-time checkpoint while retaining automatic checkpointing and the
-  database/WAL/SHM backup contract. Ten fresh local processes bounded close to
-  `1.198 ms`, and five local comparisons pass. Until final hosted checks and a
-  new exact candidate pass the unchanged gate, this remains a beta blocker
-  rather than ignorable host noise.
+- The first protected qualification candidate failed Release Readiness on a
+  first-observed durable coordination restart. All-pass phase telemetry and
+  ten fresh processes localized the stall to separately committed first-write
+  execution-trace persistence. Atomic batch persistence plus the established
+  WAL/`synchronous=NORMAL` posture cut first-observed mean latency from
+  `3,347.816 ms` to `30.579 ms` while preserving the database/WAL/SHM backup
+  contract.
+- The next protected candidate passed exact-SHA CI, Supply Chain, Pages, and
+  Capacity. Its Release Readiness run passed every drift and absolute latency
+  threshold, but the beta policy rejected the pinned GitHub Windows host. The
+  repaired policy allows only `dev-chad-windows-native` and
+  `github-windows-latest`; this does not authorize cross-host drift or promote
+  the ephemeral runner to a tracked accepted baseline. A new exact candidate
+  and full official plus independent verdict remain required.
 - The current measured default `M` envelope is conservative: it presently recommends `1,024` pilot-board tasks even though larger ladders run correctly, because operator/report latency degrades before replay or local storage become the limiting factor.
 - The new R4 verifier binds observations to clean commit/tree/ref identity,
   exact commands, workflow attempts, output bytes, package digest, signed

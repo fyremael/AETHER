@@ -185,6 +185,11 @@ The release-readiness runner writes:
 - `artifacts/pilot/launch/latest.txt`
 - `artifacts/pilot/packages/aether-pilot-service-windows-x86_64.zip`
 
+A passed readiness evidence manifest requires every immutable output above. A
+failed run instead records its primary failure and receipts only for outputs
+that were actually produced, so later skipped gates cannot overwrite the
+original blocker with a secondary missing-file error.
+
 Those files answer five different release questions:
 
 - did the code pass the cross-language regression gate?
