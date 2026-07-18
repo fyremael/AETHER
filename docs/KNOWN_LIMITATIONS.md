@@ -85,8 +85,11 @@ ordinary feature backlog:
   and Capacity but failed Release Readiness because one first-observed durable
   coordination restart stalled while later restarts were stable. The focused
   phase telemetry retains every pass and does not filter, retry, warm up, or
-  change the arithmetic-mean gate. Until a new exact candidate passes that
-  unchanged gate, this remains a beta blocker rather than ignorable host noise.
+  change the arithmetic-mean gate. Ten fresh processes localized the stall to
+  first-write execution-trace persistence, where traces are currently inserted
+  as separate SQLite commits. Until that persistence path is atomically batched
+  and a new exact candidate passes the unchanged gate, this remains a beta
+  blocker rather than ignorable host noise.
 - The current measured default `M` envelope is conservative: it presently recommends `1,024` pilot-board tasks even though larger ladders run correctly, because operator/report latency degrades before replay or local storage become the limiting factor.
 - The new R4 verifier binds observations to clean commit/tree/ref identity,
   exact commands, workflow attempts, output bytes, package digest, signed

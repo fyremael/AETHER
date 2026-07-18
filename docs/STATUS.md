@@ -98,9 +98,12 @@ CI, Supply Chain, Pages, and Capacity Planning. Release Readiness run
 `29625522886` failed the unchanged service performance gate because its first
 durable coordination restart stalled while subsequent passes remained stable.
 No official bundle or passed verdict was emitted. Phase-level, all-pass restart
-instrumentation and a repeated fresh-process runner are now under focused
-investigation in `docs/RESTART_LATENCY_INVESTIGATION.md`. This does not widen
-the controlled-alpha claim.
+instrumentation and ten fresh native Windows processes localized `99.67%` of
+first-observed restart time to separately committed execution-trace
+persistence; replay and recursive execution remained millisecond-scale. The
+hash-bound diagnostic record and bounded batch-persistence follow-up are in
+`docs/RESTART_LATENCY_INVESTIGATION.md`. This does not widen the
+controlled-alpha claim.
 
 R5.1-R5.6 are now implemented locally. The service has strict dependency and
 package gates, verified transport modes, independent namespace admission,

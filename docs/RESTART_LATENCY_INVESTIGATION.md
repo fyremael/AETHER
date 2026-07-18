@@ -86,3 +86,20 @@ weakening the gate, regression coverage is in place, and a new protected
 sequence. Candidate `11380eed81d0690717637a6926ae0087547205c2` remains a
 failed qualification candidate permanently; it must not be retrospectively
 promoted.
+
+## First diagnostic result
+
+Ten fresh native Windows processes from clean instrumentation commit
+`008516a1187958446aa25d29ff58c6695db6f230` localized `99.67%` of
+first-observed restart time to execution-receipt and trace persistence. SQLite
+open, journal replay, policy replay, resolution, semi-naive execution, and
+harness-only time remained millisecond-scale. The exact per-process hashes and
+phase distributions are recorded in
+`docs/evidence/RESTART_LATENCY_008516A.md`.
+
+Code inspection matches the measurement: a new execution persists each derived
+tuple trace with a separate SQLite insert outside a shared transaction, while
+equivalent later restarts reuse the stored traces. The next bounded change is an
+atomic batch-persistence contract with rollback/restart/identity regression
+coverage, followed by the same fresh-process diagnostic and a new protected
+qualification candidate.
