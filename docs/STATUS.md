@@ -105,8 +105,11 @@ hash-bound diagnostic record and bounded batch-persistence follow-up are in
 `docs/RESTART_LATENCY_INVESTIGATION.md`. Atomic SQLite batch persistence is now
 implemented with rollback and restart coverage; ten fresh local processes cut
 first-observed mean restart latency from `3,347.816 ms` to `30.579 ms`.
-Hosted PR checks and a new protected candidate still must pass the unchanged
-gate. This does not widen the controlled-alpha claim.
+The derived execution catalog now also uses the established journal WAL and
+`synchronous=NORMAL` posture; ten fresh processes bounded first persistence to
+`11.840 ms`, and three local exact baseline/current comparisons passed the
+unchanged gate. Hosted PR checks and a new protected candidate still must pass.
+This does not widen the controlled-alpha claim.
 
 R5.1-R5.6 are now implemented locally. The service has strict dependency and
 package gates, verified transport modes, independent namespace admission,

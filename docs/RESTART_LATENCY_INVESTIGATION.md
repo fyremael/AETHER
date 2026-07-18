@@ -111,3 +111,11 @@ subsequent restarts remained stable. The before/after hashes, raw phase
 summaries, and correctness boundary are recorded in
 `docs/evidence/RESTART_LATENCY_CE69DB7.md`. Hosted CI and the official protected
 candidate sequence remain required.
+
+The next hosted attempt showed that batching removed the seconds-long defect
+but left one filesystem-sync tail on the default SQLite rollback journal. The
+derived execution catalog now uses the same WAL, `synchronous=NORMAL`, and
+5-second busy-timeout posture as AETHER's authoritative SQLite journal. Ten
+fresh processes bounded first persistence to `11.840 ms`; three separate local
+baseline/current drift invocations all passed the unchanged durable-restart
+gate. Exact results are in `docs/evidence/RESTART_LATENCY_0D9E63B.md`.
