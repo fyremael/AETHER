@@ -378,6 +378,9 @@ impl SqliteExecutionStore {
             std::fs::create_dir_all(parent)?;
         }
         let connection = Connection::open(&path)?;
+        connection.pragma_update(None, "journal_mode", "WAL")?;
+        connection.pragma_update(None, "synchronous", "NORMAL")?;
+        connection.pragma_update(None, "busy_timeout", 5_000)?;
         connection.execute_batch(
             "
             PRAGMA foreign_keys = ON;
@@ -1084,6 +1087,30 @@ mod tests {
             second
         );
         drop(reopened);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn sqlite_execution_store_uses_the_journal_connection_posture() {
+        let nonce = NEXT_TEST_PATH.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("aether-execution-pragmas-{nonce}.sqlite"));
+        let sqlite = SqliteExecutionStore::open(&path).expect("open sqlite store");
+        let journal_mode: String = sqlite
+            .connection
+            .pragma_query_value(None, "journal_mode", |row| row.get(0))
+            .expect("read journal mode");
+        let synchronous: i64 = sqlite
+            .connection
+            .pragma_query_value(None, "synchronous", |row| row.get(0))
+            .expect("read synchronous mode");
+        let busy_timeout: i64 = sqlite
+            .connection
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .expect("read busy timeout");
+        assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
+        assert_eq!(synchronous, 1);
+        assert_eq!(busy_timeout, 5_000);
+        drop(sqlite);
         let _ = std::fs::remove_file(path);
     }
 
