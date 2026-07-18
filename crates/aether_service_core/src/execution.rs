@@ -1330,6 +1330,16 @@ mod tests {
         ));
         let live = root.join("sidecars.sqlite.executions.sqlite");
         let backup = root.join("backup.executions.sqlite");
+        let live_files = [
+            live.clone(),
+            PathBuf::from(format!("{}-wal", live.display())),
+            PathBuf::from(format!("{}-shm", live.display())),
+        ];
+        let backup_files = [
+            backup.clone(),
+            PathBuf::from(format!("{}-wal", backup.display())),
+            PathBuf::from(format!("{}-shm", backup.display())),
+        ];
         std::fs::create_dir_all(&root).expect("create test directory");
 
         let handle = {
@@ -1342,9 +1352,25 @@ mod tests {
             store.put_trace(record).expect("put trace");
             handle
         };
-        std::fs::copy(&live, &backup).expect("copy execution backup");
-        std::fs::remove_file(&live).expect("remove live execution store");
-        std::fs::copy(&backup, &live).expect("restore execution store");
+        assert!(
+            live_files[1].is_file(),
+            "committed execution metadata must remain recoverable from WAL"
+        );
+        for (source, destination) in live_files.iter().zip(&backup_files) {
+            if source.is_file() {
+                std::fs::copy(source, destination).expect("copy execution backup file");
+            }
+        }
+        for path in &live_files {
+            if path.is_file() {
+                std::fs::remove_file(path).expect("remove live execution-store file");
+            }
+        }
+        for (source, destination) in backup_files.iter().zip(&live_files) {
+            if source.is_file() {
+                std::fs::copy(source, destination).expect("restore execution-store file");
+            }
+        }
 
         let restored = SqliteExecutionStore::open(&live).expect("reopen restored store");
         assert_eq!(

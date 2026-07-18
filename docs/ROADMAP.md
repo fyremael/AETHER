@@ -41,11 +41,13 @@ candidate `11380eed81d0690717637a6926ae0087547205c2` passed CI, Supply Chain,
 Pages, and Capacity, then failed Release Readiness on first-restart service
 latency. The active dependency is the bounded diagnostic and remediation path
 in `docs/RESTART_LATENCY_INVESTIGATION.md`. The atomic batch-persistence fix and
-ten-process local comparison are green. The execution catalog is aligned with
-the journal SQLite connection posture and three local baseline/current
-comparisons pass the unchanged gate. Hosted PR validation is pending, then a new
-protected candidate must pass operational readiness, bundle verification, the
-dependent verdict, and a fresh independent verdict.
+ten-process local comparison are green. The execution catalog now batches
+manifest/traces atomically, uses WAL/`synchronous=NORMAL`, and avoids a
+last-connection checkpoint while preserving database/WAL/SHM backup semantics.
+The latest ten-process diagnostic and five local baseline/current comparisons
+pass the unchanged gate. Hosted PR validation is pending, then a new protected
+candidate must pass operational readiness, bundle verification, the dependent
+verdict, and a fresh independent verdict.
 
 The roadmap is no longer about proving the kernel can exist. Its immediate job
 is to repair the correctness and claim boundaries before widening resumes.

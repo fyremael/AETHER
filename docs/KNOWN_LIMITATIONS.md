@@ -88,12 +88,15 @@ ordinary feature backlog:
   change the arithmetic-mean gate. Ten fresh processes localized the stall to
   first-write execution-trace persistence, where traces were inserted as
   separate SQLite commits. Atomic batch persistence is implemented and cut
-  the ten-process local first-restart mean by `99.09%`, but until hosted checks
-  still exposed one rollback-journal filesystem-sync tail on GitHub's runner.
-  The derived catalog is now aligned to the authoritative journal's WAL,
-  `synchronous=NORMAL`, and busy-timeout posture; local comparisons pass, but
-  until hosted checks and a new exact candidate pass the unchanged gate, this
-  remains a beta blocker rather than ignorable host noise.
+  the ten-process local first-restart mean by `99.09%`. Hosted checks then
+  localized filesystem tails first to the rollback-journal commit and then to
+  the WAL last-connection checkpoint. The derived catalog now batches
+  manifest/traces atomically, uses WAL/`synchronous=NORMAL`, and avoids that
+  close-time checkpoint while retaining automatic checkpointing and the
+  database/WAL/SHM backup contract. Ten fresh local processes bounded close to
+  `1.198 ms`, and five local comparisons pass. Until final hosted checks and a
+  new exact candidate pass the unchanged gate, this remains a beta blocker
+  rather than ignorable host noise.
 - The current measured default `M` envelope is conservative: it presently recommends `1,024` pilot-board tasks even though larger ladders run correctly, because operator/report latency degrades before replay or local storage become the limiting factor.
 - The new R4 verifier binds observations to clean commit/tree/ref identity,
   exact commands, workflow attempts, output bytes, package digest, signed

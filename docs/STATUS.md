@@ -105,11 +105,14 @@ hash-bound diagnostic record and bounded batch-persistence follow-up are in
 `docs/RESTART_LATENCY_INVESTIGATION.md`. Atomic SQLite batch persistence is now
 implemented with rollback and restart coverage; ten fresh local processes cut
 first-observed mean restart latency from `3,347.816 ms` to `30.579 ms`.
-The derived execution catalog now also uses the established journal WAL and
-`synchronous=NORMAL` posture; ten fresh processes bounded first persistence to
-`11.840 ms`, and three local exact baseline/current comparisons passed the
-unchanged gate. Hosted PR checks and a new protected candidate still must pass.
-This does not widen the controlled-alpha claim.
+The derived execution catalog now uses the established journal WAL and
+`synchronous=NORMAL` posture plus derived-store-specific suppression of
+last-connection checkpointing. The latest ten-process run bounded first
+persistence to `7.239 ms` and service close to `1.198 ms`; five local exact
+baseline/current comparisons passed the unchanged gate. Backup/restore coverage
+now proves the database/WAL/SHM snapshot boundary. Final hosted PR checks and a
+new protected candidate still must pass. This does not widen the
+controlled-alpha claim.
 
 R5.1-R5.6 are now implemented locally. The service has strict dependency and
 package gates, verified transport modes, independent namespace admission,
@@ -289,9 +292,10 @@ Still open:
 
 ## Immediate focus
 
-The immediate work is to localize and remediate the failed first-restart
-latency documented in `docs/RESTART_LATENCY_INVESTIGATION.md`, then resume R7
-exact-candidate qualification from `docs/REMEDIATION_PROGRAMME.md`. Feature broadening across policy, service
+The immediate work is to complete hosted validation of the remediated
+first-restart latency documented in `docs/RESTART_LATENCY_INVESTIGATION.md`,
+then resume R7 exact-candidate qualification from
+`docs/REMEDIATION_PROGRAMME.md`. Feature broadening across policy, service
 execution, append, proof identity, or release claims stays frozen until the
 relevant repaired contract is green:
 

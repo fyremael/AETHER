@@ -62,6 +62,14 @@ must stop or quiesce the service before file-copy backup. Postgres operators
 must combine the database-native journal backup with the local execution and
 sidecar metadata backup at the same operational cut.
 
+The derived execution store uses WAL with `synchronous=NORMAL`, a bounded busy
+timeout, and `SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE`. The latter prevents a
+short-lived reader/service process from turning connection teardown into an
+unbounded checkpoint; it does not disable ordinary automatic checkpointing or
+make the base database file a complete snapshot by itself. Backup and restore
+therefore continue to move the execution database with any WAL/SHM companions
+after the service is stopped or quiesced.
+
 ## Federation
 
 Federated identities bind the ordered partition cuts, leader epochs,

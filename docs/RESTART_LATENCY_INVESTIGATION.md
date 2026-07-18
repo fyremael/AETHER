@@ -119,3 +119,14 @@ derived execution catalog now uses the same WAL, `synchronous=NORMAL`, and
 fresh processes bounded first persistence to `11.840 ms`; three separate local
 baseline/current drift invocations all passed the unchanged durable-restart
 gate. Exact results are in `docs/evidence/RESTART_LATENCY_0D9E63B.md`.
+
+The next hosted attempt confirmed that WAL bounded persistence but exposed the
+same filesystem tail during last-connection close: the first current process
+spent `536.132 ms` in `service_close`. The derived execution catalog now keeps
+ordinary automatic checkpointing but disables SQLite's checkpoint-on-close
+behavior. Ten fresh native Windows processes bounded close to `1.198 ms`, and
+five local exact baseline/current comparisons passed the unchanged gate. The
+package backup/restore contract and its regression test preserve the database,
+WAL, and SHM as one quiesced snapshot. Exact hosted and local evidence is in
+`docs/evidence/RESTART_LATENCY_8570F0F.md`. Final PR validation and a new
+protected candidate remain required.
