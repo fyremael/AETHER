@@ -103,3 +103,11 @@ equivalent later restarts reuse the stored traces. The next bounded change is an
 atomic batch-persistence contract with rollback/restart/identity regression
 coverage, followed by the same fresh-process diagnostic and a new protected
 qualification candidate.
+
+That bounded change is now implemented on investigation commit
+`ce69db7fdf40a8233920bfa160ae66d78fc87a56`. Ten fresh processes reduced
+first-observed mean restart latency from `3,347.816 ms` to `30.579 ms` while
+subsequent restarts remained stable. The before/after hashes, raw phase
+summaries, and correctness boundary are recorded in
+`docs/evidence/RESTART_LATENCY_CE69DB7.md`. Hosted CI and the official protected
+candidate sequence remain required.

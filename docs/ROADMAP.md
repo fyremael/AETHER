@@ -40,9 +40,10 @@ focused qualification implementation is complete and merged. Protected
 candidate `11380eed81d0690717637a6926ae0087547205c2` passed CI, Supply Chain,
 Pages, and Capacity, then failed Release Readiness on first-restart service
 latency. The active dependency is the bounded diagnostic and remediation path
-in `docs/RESTART_LATENCY_INVESTIGATION.md`, followed by a new protected
-candidate whose operational-readiness, bundle, dependent-verdict, and fresh
-independent-verdict outcomes all pass.
+in `docs/RESTART_LATENCY_INVESTIGATION.md`. The atomic batch-persistence fix and
+ten-process local comparison are green. Hosted PR validation is pending, then a
+new protected candidate must pass operational readiness, bundle verification,
+the dependent verdict, and a fresh independent verdict.
 
 The roadmap is no longer about proving the kernel can exist. Its immediate job
 is to repair the correctness and claim boundaries before widening resumes.
