@@ -27,13 +27,42 @@ receipt="$output_dir/receipt.json"
 mkdir -p "$output_dir"
 
 session_may_exist=0
-stop_session() {
+teardown_session() {
   if [[ "$session_may_exist" == "1" ]]; then
-    colab --auth="$auth_provider" stop -s "$session" >/dev/null 2>&1 || true
-    session_may_exist=0
+    local teardown_failed=0
+    if ! colab --auth="$auth_provider" stop -s "$session" \
+      >"$output_dir/colab-stop.stdout.txt" \
+      2>"$output_dir/colab-stop.stderr.txt"; then
+      teardown_failed=1
+    fi
+    if colab --auth="$auth_provider" sessions >"$output_dir/sessions-after.txt"; then
+      if grep -Fq -- "$session" "$output_dir/sessions-after.txt"; then
+        teardown_failed=1
+      else
+        session_may_exist=0
+        teardown_failed=0
+      fi
+    else
+      teardown_failed=1
+    fi
+    if [[ "$teardown_failed" == "1" ]]; then
+      echo "failed to prove Colab session teardown: $session" >&2
+      return 1
+    fi
   fi
 }
-trap stop_session EXIT INT TERM
+
+cleanup_session() {
+  local status=$?
+  trap - EXIT INT TERM
+  if ! teardown_session && [[ "$status" == "0" ]]; then
+    status=1
+  fi
+  exit "$status"
+}
+trap cleanup_session EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 colab --auth="$auth_provider" whoami >/dev/null
 session_may_exist=1
@@ -50,55 +79,14 @@ colab --auth="$auth_provider" download -s "$session" \
   /content/aether-colab-diagnostic.zip "$archive"
 colab --auth="$auth_provider" download -s "$session" \
   /content/aether-colab-diagnostic/summary.json "$summary"
-stop_session
-colab --auth="$auth_provider" sessions >"$output_dir/sessions-after.txt"
-if grep -Fq -- "$session" "$output_dir/sessions-after.txt"; then
-  echo "Colab session remained active after explicit stop: $session" >&2
-  exit 1
-fi
+teardown_session
 
-python3 - "$summary" "$candidate" "$tree" "$session" "$archive" "$receipt" <<'PY'
-from __future__ import annotations
-
-import hashlib
-import json
-import sys
-from pathlib import Path
-
-summary_path, expected_commit, expected_tree, session, archive_path, receipt_path = sys.argv[1:]
-summary_bytes = Path(summary_path).read_bytes()
-summary = json.loads(summary_bytes)
-if summary.get("qualification_status") != "diagnostic_only":
-    raise SystemExit("Colab output attempted to acquire qualification authority")
-if summary.get("policy", {}).get("commercial_beta_authority") is not False:
-    raise SystemExit("Colab output attempted to acquire commercial beta authority")
-if summary.get("candidate") != {
-    "commit_sha": expected_commit,
-    "tree_sha": expected_tree,
-}:
-    raise SystemExit("Colab output candidate identity mismatch")
-
-archive_bytes = Path(archive_path).read_bytes()
-receipt = {
-    "schema_version": "aether.colab-diagnostic-receipt.v1",
-    "qualification_status": "diagnostic_only",
-    "commercial_beta_authority": False,
-    "candidate": {"commit_sha": expected_commit, "tree_sha": expected_tree},
-    "session": session,
-    "artifacts": {
-        "archive": {
-            "path": str(Path(archive_path)),
-            "byte_size": len(archive_bytes),
-            "sha256": hashlib.sha256(archive_bytes).hexdigest(),
-        },
-        "summary": {
-            "path": str(Path(summary_path)),
-            "byte_size": len(summary_bytes),
-            "sha256": hashlib.sha256(summary_bytes).hexdigest(),
-        },
-    },
-}
-Path(receipt_path).write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
-PY
+python3 "$repo_root/scripts/verify_colab_runtime_diagnostic.py" \
+  --summary "$summary" \
+  --candidate "$candidate" \
+  --tree "$tree" \
+  --session "$session" \
+  --archive "$archive" \
+  --receipt "$receipt"
 
 echo "Colab diagnostic complete: $receipt"

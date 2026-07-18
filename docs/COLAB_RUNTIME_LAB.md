@@ -49,8 +49,11 @@ fails. A successful run performs:
 3. a release build of the performance reporter;
 4. one recorded but discarded warm-up report;
 5. three retained core-kernel reports with five samples per workload;
-6. candidate-bound summary and receipt generation; and
-7. an explicit check that the named runtime is absent after teardown.
+6. byte-exact equality between the downloaded summary and the ZIP's sole
+   top-level `summary.json`;
+7. candidate-bound summary and receipt generation; and
+8. an explicit check that the named runtime is absent after teardown, including
+   failure and interruption paths.
 
 Outputs are written under
 `artifacts/colab/runs/<commit>/<timestamp>/`. The receipt hashes the downloaded
