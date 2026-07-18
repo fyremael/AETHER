@@ -187,7 +187,7 @@ function Resolve-ConfigPath([string]$BaseDir, [string]$PathValue) {
 
 function Test-TcpEndpoint([string]$BindAddress) {
     $uri = [System.Uri]::new("tcp://$BindAddress")
-    $hostName = $uri.Host
+    $hostName = $uri.DnsSafeHost -replace '^\[|\]$', ''
     if ($hostName -eq "0.0.0.0") {
         $hostName = "127.0.0.1"
     } elseif ($hostName -eq "::") {
@@ -296,6 +296,7 @@ if (Test-Path $auditPath) {
 
 $manifest = [pscustomobject]@{
     generated_at = (Get-Date).ToString("o")
+    snapshot_contract_version = "aether.pilot-quiesced-snapshot.v1"
     snapshot_mode = "quiesced_file_copy"
     service_stopped_confirmed = $true
     config_path = $configPath
@@ -337,7 +338,7 @@ function Resolve-ConfigPath([string]$BaseDir, [string]$PathValue) {
 
 function Test-TcpEndpoint([string]$BindAddress) {
     $uri = [System.Uri]::new("tcp://$BindAddress")
-    $hostName = $uri.Host
+    $hostName = $uri.DnsSafeHost -replace '^\[|\]$', ''
     if ($hostName -eq "0.0.0.0") {
         $hostName = "127.0.0.1"
     } elseif ($hostName -eq "::") {
@@ -361,6 +362,19 @@ $snapshotDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFrom
 $manifestPath = Join-Path $snapshotDir "manifest.json"
 if (-not (Test-Path $manifestPath)) {
     throw "Snapshot manifest not found at $manifestPath"
+}
+
+try {
+    $snapshotManifest = Get-Content -Path $manifestPath -Raw | ConvertFrom-Json
+} catch {
+    throw "Snapshot manifest at $manifestPath is not valid JSON: $($_.Exception.Message)"
+}
+if (
+    $snapshotManifest.snapshot_contract_version -ne "aether.pilot-quiesced-snapshot.v1" -or
+    $snapshotManifest.snapshot_mode -ne "quiesced_file_copy" -or
+    $snapshotManifest.service_stopped_confirmed -ne $true
+) {
+    throw "Snapshot manifest does not declare the required versioned quiesced snapshot contract."
 }
 
 $configPath = Join-Path $PSScriptRoot "config\pilot-service.json"

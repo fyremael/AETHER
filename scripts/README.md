@@ -127,7 +127,10 @@ The backup/restore pair treats the journal, sidecar catalog, and
 one quiesced operational snapshot. Both helpers require
 `-ConfirmServiceStopped` and refuse a reachable configured endpoint; backup
 also rejects a non-empty target so stale optional companion files cannot be
-carried into a new cut. The hardening drill proves those fail-closed contracts,
+carried into a new cut. Every backup declares the versioned
+`aether.pilot-quiesced-snapshot.v1` contract, and restore validates that
+contract before copying state. The endpoint guard handles IPv4 and IPv6
+wildcard binds. The hardening drill proves those fail-closed contracts,
 then resolves a pre-backup trace handle after restore and requests
 digest-checked replay.
 

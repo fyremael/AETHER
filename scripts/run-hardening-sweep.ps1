@@ -520,6 +520,49 @@ function Invoke-AdminPack {
                 Assert-PathExists $rotateScriptPath "packaged token rotation script"
                 Assert-PathExists $rotateCmdPath "packaged token rotation cmd"
 
+                $originalPackageConfigText = Get-Content -Path $packageConfigPath -Raw
+                $ipv6Listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::IPv6Any, 0)
+                try {
+                    $ipv6Listener.Server.DualMode = $false
+                    $ipv6Listener.Start()
+                    $ipv6Port = ([System.Net.IPEndPoint]$ipv6Listener.LocalEndpoint).Port
+                    $ipv6Config = $originalPackageConfigText | ConvertFrom-Json
+                    Set-JsonProperty -Object $ipv6Config -Name "bind_addr" -Value "[::]:$ipv6Port"
+                    $ipv6Config | ConvertTo-Json -Depth 16 | Set-Content -Path $packageConfigPath
+
+                    $ipv6SnapshotDir = Join-Path $runDir "admin\snapshot-ipv6-hot"
+                    $ipv6Backup = Invoke-CapturedCommand `
+                        -PackName "admin" `
+                        -Label "backup-rejects-ipv6-wildcard-service" `
+                        -Command $pwshPath `
+                        -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $backupScriptPath, "-SnapshotDir", $ipv6SnapshotDir, "-ConfirmServiceStopped") `
+                        -AllowFailure
+                    if ($ipv6Backup.ExitCode -eq 0) {
+                        throw "backup while the IPv6 wildcard endpoint was reachable unexpectedly succeeded"
+                    }
+                    Assert-Contains $ipv6Backup.OutputText "still reachable" "IPv6 wildcard hot backup output"
+
+                    New-Item -ItemType Directory -Force -Path $ipv6SnapshotDir | Out-Null
+                    [pscustomobject]@{
+                        snapshot_contract_version = "aether.pilot-quiesced-snapshot.v1"
+                        snapshot_mode = "quiesced_file_copy"
+                        service_stopped_confirmed = $true
+                    } | ConvertTo-Json | Set-Content -Path (Join-Path $ipv6SnapshotDir "manifest.json")
+                    $ipv6Restore = Invoke-CapturedCommand `
+                        -PackName "admin" `
+                        -Label "restore-rejects-ipv6-wildcard-service" `
+                        -Command $pwshPath `
+                        -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $restoreScriptPath, "-SnapshotDir", $ipv6SnapshotDir, "-ConfirmServiceStopped") `
+                        -AllowFailure
+                    if ($ipv6Restore.ExitCode -eq 0) {
+                        throw "restore while the IPv6 wildcard endpoint was reachable unexpectedly succeeded"
+                    }
+                    Assert-Contains $ipv6Restore.OutputText "still reachable" "IPv6 wildcard hot restore output"
+                } finally {
+                    $ipv6Listener.Stop()
+                    Set-Content -Path $packageConfigPath -Value $originalPackageConfigText -NoNewline
+                }
+
                 $serviceHandle = Start-ServiceProcess `
                     -PackName "admin" `
                     -WorkingDirectory $packageRoot `
@@ -648,9 +691,38 @@ query {
                 $snapshotManifestPath = Join-Path $snapshotDir "manifest.json"
                 Assert-PathExists $snapshotManifestPath "pilot snapshot manifest"
                 $snapshotManifest = Get-Content -Path $snapshotManifestPath -Raw | ConvertFrom-Json
-                if ($snapshotManifest.snapshot_mode -ne "quiesced_file_copy" -or -not $snapshotManifest.service_stopped_confirmed) {
+                if (
+                    $snapshotManifest.snapshot_contract_version -ne "aether.pilot-quiesced-snapshot.v1" -or
+                    $snapshotManifest.snapshot_mode -ne "quiesced_file_copy" -or
+                    -not $snapshotManifest.service_stopped_confirmed
+                ) {
                     throw "pilot snapshot manifest does not record the quiesced file-copy contract"
                 }
+
+                $unconfirmedRestore = Invoke-CapturedCommand `
+                    -PackName "admin" `
+                    -Label "restore-rejects-missing-quiescence-confirmation" `
+                    -Command $pwshPath `
+                    -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $restoreScriptPath, "-SnapshotDir", $snapshotDir) `
+                    -AllowFailure
+                if ($unconfirmedRestore.ExitCode -eq 0) {
+                    throw "restore without quiescence confirmation unexpectedly succeeded"
+                }
+                Assert-Contains $unconfirmedRestore.OutputText "ConfirmServiceStopped" "unconfirmed restore output"
+
+                $invalidSnapshotDir = Join-Path $runDir "admin\snapshot-invalid-manifest"
+                New-Item -ItemType Directory -Force -Path $invalidSnapshotDir | Out-Null
+                '{}' | Set-Content -Path (Join-Path $invalidSnapshotDir "manifest.json")
+                $invalidManifestRestore = Invoke-CapturedCommand `
+                    -PackName "admin" `
+                    -Label "restore-rejects-invalid-snapshot-manifest" `
+                    -Command $pwshPath `
+                    -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $restoreScriptPath, "-SnapshotDir", $invalidSnapshotDir, "-ConfirmServiceStopped") `
+                    -AllowFailure
+                if ($invalidManifestRestore.ExitCode -eq 0) {
+                    throw "restore with an invalid snapshot manifest unexpectedly succeeded"
+                }
+                Assert-Contains $invalidManifestRestore.OutputText "versioned quiesced snapshot contract" "invalid snapshot-manifest restore output"
 
                 $serviceHandle = Start-ServiceProcess `
                     -PackName "admin" `
@@ -671,6 +743,17 @@ query {
                 if ($historyBeforeRestore.Body.datoms.Count -ne 2) {
                     throw "expected two datoms before restore, found $($historyBeforeRestore.Body.datoms.Count)"
                 }
+
+                $hotRestore = Invoke-CapturedCommand `
+                    -PackName "admin" `
+                    -Label "restore-rejects-running-service" `
+                    -Command $pwshPath `
+                    -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $restoreScriptPath, "-SnapshotDir", $snapshotDir, "-ConfirmServiceStopped") `
+                    -AllowFailure
+                if ($hotRestore.ExitCode -eq 0) {
+                    throw "restore while the service was reachable unexpectedly succeeded"
+                }
+                Assert-Contains $hotRestore.OutputText "still reachable" "hot restore output"
 
                 $oldToken = $token
                 $rotate = Invoke-CapturedCommand `

@@ -277,7 +277,9 @@ exports a timestamped snapshot containing:
 - the adjacent sidecar catalog and any WAL/SHM companions
 - the `*.executions.sqlite` proof metadata database and any WAL/SHM companions
 - the audit JSONL log
-- a `manifest.json` describing the captured paths and quiesced snapshot mode
+- a `manifest.json` declaring the
+  `aether.pilot-quiesced-snapshot.v1` contract, captured paths, and quiesced
+  snapshot mode
 
 The helper fails unless `-ConfirmServiceStopped` is present, refuses a
 reachable configured service endpoint, and rejects a non-empty snapshot target
@@ -296,9 +298,11 @@ or:
 powershell -ExecutionPolicy Bypass -File .\restore-pilot-state.ps1 -SnapshotDir <snapshot-dir> -ConfirmServiceStopped
 ```
 
-Restore also requires the service to remain stopped and refuses a reachable
-configured endpoint. The helper can back up the current quiesced package state
-before applying the selected snapshot.
+Restore also requires the service to remain stopped, refuses a reachable
+configured endpoint (including IPv4 and IPv6 wildcard binds), and rejects a
+missing, malformed, unversioned, or non-quiesced snapshot manifest before any
+copy. The helper can back up the current quiesced package state before applying
+the selected snapshot.
 
 ## CI Posture
 

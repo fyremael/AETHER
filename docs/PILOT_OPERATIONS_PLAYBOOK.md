@@ -120,7 +120,11 @@ and token files. A trace handle is durable only when its execution database is
 restored with the journal cut that produced it. The helper rejects a missing
 quiescence confirmation, a reachable configured endpoint, and a non-empty
 snapshot target. The endpoint probe is a guard, not a lock; do not restart the
-service until the helper completes.
+service until the helper completes. The manifest is a versioned
+`aether.pilot-quiesced-snapshot.v1` contract. Restore validates that contract
+and rejects malformed, unversioned, or non-quiesced manifests before copying
+state; both helpers probe IPv4 and IPv6 wildcard binds through their loopback
+addresses.
 
 To restore:
 

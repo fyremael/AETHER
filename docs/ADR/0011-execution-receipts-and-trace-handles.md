@@ -72,7 +72,10 @@ after the service is stopped or quiesced. The packaged file-copy helpers require
 an explicit stopped-service confirmation, refuse a reachable configured
 endpoint, and reject non-empty new snapshot targets. The endpoint probe does not
 replace quiescence coordination; operators must keep the service stopped until
-backup or restore completes.
+backup or restore completes. Backup emits the versioned
+`aether.pilot-quiesced-snapshot.v1` contract, restore validates that contract
+before copying state, and the reachability guard maps both IPv4 and IPv6
+wildcard binds to their loopback probes.
 
 ## Federation
 
