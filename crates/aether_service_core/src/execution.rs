@@ -8,7 +8,7 @@ use aether_resolver::{MaterializedResolver, Resolver};
 use aether_runtime::{DerivedSet, RuleRuntime, SemiNaiveRuntime};
 use aether_schema::Schema;
 use rand::{rngs::OsRng, RngCore};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{config::DbConfig, params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::{
@@ -183,6 +183,11 @@ pub struct StoredExecution {
 
 pub trait ExecutionStore: fmt::Debug + Send {
     fn put_execution(&mut self, execution: StoredExecution) -> Result<(), ExecutionStoreError>;
+    fn put_execution_bundle(
+        &mut self,
+        execution: Option<StoredExecution>,
+        traces: Vec<TraceRecord>,
+    ) -> Result<(), ExecutionStoreError>;
     fn execution(
         &self,
         execution_id: &ExecutionId,
@@ -230,13 +235,8 @@ impl InMemoryExecutionStore {
             }
         }
     }
-}
 
-impl ExecutionStore for InMemoryExecutionStore {
-    fn put_execution(&mut self, execution: StoredExecution) -> Result<(), ExecutionStoreError> {
-        self.executions
-            .entry(execution.manifest.execution_id.clone())
-            .or_insert(execution);
+    fn prune(&mut self) -> Result<(), ExecutionStoreError> {
         while self.executions.len() > self.max_executions {
             let oldest = self
                 .executions
@@ -252,6 +252,51 @@ impl ExecutionStore for InMemoryExecutionStore {
             self.expire_execution(&oldest)?;
         }
         Ok(())
+    }
+}
+
+impl ExecutionStore for InMemoryExecutionStore {
+    fn put_execution(&mut self, execution: StoredExecution) -> Result<(), ExecutionStoreError> {
+        self.executions
+            .entry(execution.manifest.execution_id.clone())
+            .or_insert(execution);
+        self.prune()
+    }
+
+    fn put_execution_bundle(
+        &mut self,
+        execution: Option<StoredExecution>,
+        traces: Vec<TraceRecord>,
+    ) -> Result<(), ExecutionStoreError> {
+        let pending_execution_id = execution
+            .as_ref()
+            .map(|execution| execution.manifest.execution_id.clone());
+        let mut handles = BTreeSet::new();
+        for trace in &traces {
+            if !handles.insert(trace.handle.clone())
+                || self.traces.contains_key(&trace.handle)
+                || self.expired_handles.contains(&trace.handle)
+            {
+                return Err(ExecutionStoreError::DuplicateTraceHandle);
+            }
+            if pending_execution_id.as_ref() != Some(&trace.execution_id)
+                && !self.executions.contains_key(&trace.execution_id)
+            {
+                return Err(ExecutionStoreError::Corrupted(
+                    "trace bundle references an unknown execution".into(),
+                ));
+            }
+        }
+
+        if let Some(execution) = execution {
+            self.executions
+                .entry(execution.manifest.execution_id.clone())
+                .or_insert(execution);
+        }
+        for trace in traces {
+            self.traces.insert(trace.handle.clone(), trace);
+        }
+        self.prune()
     }
 
     fn execution(
@@ -333,6 +378,10 @@ impl SqliteExecutionStore {
             std::fs::create_dir_all(parent)?;
         }
         let connection = Connection::open(&path)?;
+        connection.set_db_config(DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, true)?;
+        connection.pragma_update(None, "journal_mode", "WAL")?;
+        connection.pragma_update(None, "synchronous", "NORMAL")?;
+        connection.pragma_update(None, "busy_timeout", 5_000)?;
         connection.execute_batch(
             "
             PRAGMA foreign_keys = ON;
@@ -437,6 +486,53 @@ impl ExecutionStore for SqliteExecutionStore {
         self.prune()
     }
 
+    fn put_execution_bundle(
+        &mut self,
+        execution: Option<StoredExecution>,
+        traces: Vec<TraceRecord>,
+    ) -> Result<(), ExecutionStoreError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(execution) = execution {
+            transaction.execute(
+                "INSERT OR IGNORE INTO execution_records (execution_id, created_at_ms, record_json)
+                 VALUES (?1, ?2, ?3)",
+                params![
+                    &execution.manifest.execution_id.0,
+                    i64::try_from(execution.manifest.created_at_ms).unwrap_or(i64::MAX),
+                    serde_json::to_string(&execution)?,
+                ],
+            )?;
+        }
+        {
+            let mut statement = transaction.prepare_cached(
+                "INSERT OR IGNORE INTO trace_records (handle, execution_id, record_json)
+                 VALUES (?1, ?2, ?3)",
+            )?;
+            for trace in traces {
+                let expired = transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM expired_trace_handles WHERE handle = ?1)",
+                    params![trace.handle.as_str()],
+                    |row| row.get::<_, bool>(0),
+                )?;
+                if expired {
+                    return Err(ExecutionStoreError::DuplicateTraceHandle);
+                }
+                let inserted = statement.execute(params![
+                    trace.handle.as_str(),
+                    &trace.execution_id.0,
+                    serde_json::to_string(&trace)?,
+                ])?;
+                if inserted != 1 {
+                    return Err(ExecutionStoreError::DuplicateTraceHandle);
+                }
+            }
+        }
+        transaction.commit()?;
+        self.prune()
+    }
+
     fn execution(
         &self,
         execution_id: &ExecutionId,
@@ -471,7 +567,18 @@ impl ExecutionStore for SqliteExecutionStore {
     }
 
     fn put_trace(&mut self, trace: TraceRecord) -> Result<(), ExecutionStoreError> {
-        let inserted = self.connection.execute(
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let expired = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM expired_trace_handles WHERE handle = ?1)",
+            params![trace.handle.as_str()],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if expired {
+            return Err(ExecutionStoreError::DuplicateTraceHandle);
+        }
+        let inserted = transaction.execute(
             "INSERT OR IGNORE INTO trace_records (handle, execution_id, record_json)
              VALUES (?1, ?2, ?3)",
             params![
@@ -481,6 +588,7 @@ impl ExecutionStore for SqliteExecutionStore {
             ],
         )?;
         if inserted == 1 {
+            transaction.commit()?;
             Ok(())
         } else {
             Err(ExecutionStoreError::DuplicateTraceHandle)
@@ -585,7 +693,7 @@ pub fn persist_execution(
         compiled_program: compiled_program.clone(),
         effective_policy: effective_scope.context().clone(),
     };
-    let manifest = match store.execution(&execution_id)? {
+    let (manifest, pending_execution) = match store.execution(&execution_id)? {
         Some(existing) => {
             if digest_json(&existing.manifest)? != existing.manifest_digest
                 || existing.inputs != inputs
@@ -593,16 +701,18 @@ pub fn persist_execution(
             {
                 return Err(ExecutionError::CorruptedExecutionManifest);
             }
-            existing.manifest
+            (existing.manifest, None)
         }
         None => {
             let manifest_digest = digest_json(&candidate_manifest)?;
-            store.put_execution(StoredExecution {
-                manifest: candidate_manifest.clone(),
-                manifest_digest,
-                inputs,
-            })?;
-            candidate_manifest
+            (
+                candidate_manifest.clone(),
+                Some(StoredExecution {
+                    manifest: candidate_manifest,
+                    manifest_digest,
+                    inputs,
+                }),
+            )
         }
     };
 
@@ -615,6 +725,7 @@ pub fn persist_execution(
     );
     let explainer = InMemoryExplainer::from_derived_set(derived);
     let mut trace_handles = Vec::with_capacity(derived.tuples.len());
+    let mut pending_traces = Vec::new();
     for tuple in &derived.tuples {
         let trace = explainer.explain_tuple(&tuple.tuple.id)?;
         let tuple_digest = digest_json(tuple)?;
@@ -634,22 +745,16 @@ pub fn persist_execution(
                 .next()
                 .ok_or(ExecutionError::CorruptedExecutionManifest)?
         } else {
-            loop {
-                let handle = TraceHandle::generate();
-                let record = TraceRecord {
-                    handle: handle.clone(),
-                    execution_id: execution_id.clone(),
-                    local_tuple_id: tuple.tuple.id,
-                    tuple_digest: tuple_digest.clone(),
-                    trace_digest: trace_digest.clone(),
-                    trace: trace.clone(),
-                };
-                match store.put_trace(record.clone()) {
-                    Ok(()) => break record,
-                    Err(ExecutionStoreError::DuplicateTraceHandle) => continue,
-                    Err(error) => return Err(error.into()),
-                }
-            }
+            let record = TraceRecord {
+                handle: TraceHandle::generate(),
+                execution_id: execution_id.clone(),
+                local_tuple_id: tuple.tuple.id,
+                tuple_digest: tuple_digest.clone(),
+                trace_digest: trace_digest.clone(),
+                trace: trace.clone(),
+            };
+            pending_traces.push(record.clone());
+            record
         };
         trace_handles.push(TraceHandleBinding {
             local_tuple_id: tuple.tuple.id,
@@ -658,6 +763,29 @@ pub fn persist_execution(
     }
     if !stored_traces.is_empty() {
         return Err(ExecutionError::CorruptedExecutionManifest);
+    }
+
+    if pending_execution.is_some() || !pending_traces.is_empty() {
+        loop {
+            match store.put_execution_bundle(pending_execution.clone(), pending_traces.clone()) {
+                Ok(()) => break,
+                Err(ExecutionStoreError::DuplicateTraceHandle) => {
+                    for record in &mut pending_traces {
+                        record.handle = TraceHandle::generate();
+                    }
+                    let replacements = pending_traces
+                        .iter()
+                        .map(|record| (record.local_tuple_id, record.handle.clone()))
+                        .collect::<BTreeMap<_, _>>();
+                    for binding in &mut trace_handles {
+                        if let Some(handle) = replacements.get(&binding.local_tuple_id) {
+                            binding.handle = handle.clone();
+                        }
+                    }
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
     }
 
     Ok(ExecutionReceipt {
@@ -896,6 +1024,173 @@ mod tests {
     }
 
     #[test]
+    fn execution_bundle_rolls_back_every_record_on_trace_collision() {
+        let execution = stored_execution("execution-batch", ENGINE_SEMANTICS_VERSION);
+        let first = trace_record("execution-batch");
+        let duplicate = TraceRecord {
+            local_tuple_id: TupleId::new(2),
+            ..first.clone()
+        };
+
+        let mut memory = InMemoryExecutionStore::default();
+        assert!(matches!(
+            memory.put_execution_bundle(
+                Some(execution.clone()),
+                vec![first.clone(), duplicate.clone()]
+            ),
+            Err(ExecutionStoreError::DuplicateTraceHandle)
+        ));
+        assert!(memory
+            .execution(&execution.manifest.execution_id)
+            .expect("read memory execution")
+            .is_none());
+        assert!(matches!(
+            memory.trace(&first.handle),
+            Err(ExecutionStoreError::UnknownTraceHandle)
+        ));
+
+        let nonce = NEXT_TEST_PATH.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("aether-batch-rollback-{nonce}.sqlite"));
+        let mut sqlite = SqliteExecutionStore::open(&path).expect("open sqlite store");
+        assert!(matches!(
+            sqlite.put_execution_bundle(Some(execution.clone()), vec![first.clone(), duplicate]),
+            Err(ExecutionStoreError::DuplicateTraceHandle)
+        ));
+        assert!(sqlite
+            .execution(&execution.manifest.execution_id)
+            .expect("read sqlite execution")
+            .is_none());
+        assert!(matches!(
+            sqlite.trace(&first.handle),
+            Err(ExecutionStoreError::UnknownTraceHandle)
+        ));
+        drop(sqlite);
+
+        let reopened = SqliteExecutionStore::open(&path).expect("reopen sqlite store");
+        assert!(reopened
+            .execution(&execution.manifest.execution_id)
+            .expect("read reopened execution")
+            .is_none());
+        drop(reopened);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn sqlite_execution_bundle_commits_manifest_and_traces_across_restart() {
+        let nonce = NEXT_TEST_PATH.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("aether-batch-restart-{nonce}.sqlite"));
+        let execution = stored_execution("execution-batch", ENGINE_SEMANTICS_VERSION);
+        let first = trace_record("execution-batch");
+        let second = TraceRecord {
+            handle: TraceHandle::generate(),
+            local_tuple_id: TupleId::new(2),
+            ..trace_record("execution-batch")
+        };
+        {
+            let mut sqlite = SqliteExecutionStore::open(&path).expect("open sqlite store");
+            sqlite
+                .put_execution_bundle(Some(execution.clone()), vec![first.clone(), second.clone()])
+                .expect("commit execution bundle");
+        }
+
+        let reopened = SqliteExecutionStore::open(&path).expect("reopen sqlite store");
+        assert_eq!(
+            reopened
+                .execution(&execution.manifest.execution_id)
+                .expect("read execution")
+                .expect("stored execution"),
+            execution
+        );
+        assert_eq!(
+            reopened.trace(&first.handle).expect("read first trace"),
+            first
+        );
+        assert_eq!(
+            reopened.trace(&second.handle).expect("read second trace"),
+            second
+        );
+        drop(reopened);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn sqlite_rejects_retained_tombstones_for_single_and_bundled_trace_inserts() {
+        let nonce = NEXT_TEST_PATH.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("aether-tombstone-collision-{nonce}.sqlite"));
+        let mut sqlite = SqliteExecutionStore::open(&path).expect("open sqlite store");
+        sqlite
+            .put_execution(stored_execution("execution-a", ENGINE_SEMANTICS_VERSION))
+            .expect("put expiring execution");
+        let expired_trace = trace_record("execution-a");
+        let expired_handle = expired_trace.handle.clone();
+        sqlite.put_trace(expired_trace).expect("put expiring trace");
+        sqlite
+            .expire_execution(&ExecutionId("execution-a".into()))
+            .expect("expire execution");
+
+        sqlite
+            .put_execution(stored_execution("execution-b", ENGINE_SEMANTICS_VERSION))
+            .expect("put replacement execution");
+        let single_collision = TraceRecord {
+            handle: expired_handle.clone(),
+            ..trace_record("execution-b")
+        };
+        assert!(matches!(
+            sqlite.put_trace(single_collision),
+            Err(ExecutionStoreError::DuplicateTraceHandle)
+        ));
+
+        let bundled_execution = stored_execution("execution-c", ENGINE_SEMANTICS_VERSION);
+        let bundled_collision = TraceRecord {
+            handle: expired_handle.clone(),
+            ..trace_record("execution-c")
+        };
+        assert!(matches!(
+            sqlite.put_execution_bundle(Some(bundled_execution.clone()), vec![bundled_collision]),
+            Err(ExecutionStoreError::DuplicateTraceHandle)
+        ));
+        assert!(sqlite
+            .execution(&bundled_execution.manifest.execution_id)
+            .expect("read bundled execution")
+            .is_none());
+        assert!(matches!(
+            sqlite.trace(&expired_handle),
+            Err(ExecutionStoreError::ExpiredTraceHandle)
+        ));
+        drop(sqlite);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn sqlite_execution_store_uses_the_journal_connection_posture() {
+        let nonce = NEXT_TEST_PATH.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("aether-execution-pragmas-{nonce}.sqlite"));
+        let sqlite = SqliteExecutionStore::open(&path).expect("open sqlite store");
+        let journal_mode: String = sqlite
+            .connection
+            .pragma_query_value(None, "journal_mode", |row| row.get(0))
+            .expect("read journal mode");
+        let synchronous: i64 = sqlite
+            .connection
+            .pragma_query_value(None, "synchronous", |row| row.get(0))
+            .expect("read synchronous mode");
+        let busy_timeout: i64 = sqlite
+            .connection
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .expect("read busy timeout");
+        let no_checkpoint_on_close = sqlite
+            .connection
+            .db_config(DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE)
+            .expect("read checkpoint-on-close posture");
+        assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
+        assert_eq!(synchronous, 1);
+        assert_eq!(busy_timeout, 5_000);
+        assert!(no_checkpoint_on_close);
+        drop(sqlite);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn retention_quota_evicts_oldest_execution_and_tombstones_its_handles() {
         let mut memory = InMemoryExecutionStore {
             max_executions: 2,
@@ -1105,6 +1400,16 @@ mod tests {
         ));
         let live = root.join("sidecars.sqlite.executions.sqlite");
         let backup = root.join("backup.executions.sqlite");
+        let live_files = [
+            live.clone(),
+            PathBuf::from(format!("{}-wal", live.display())),
+            PathBuf::from(format!("{}-shm", live.display())),
+        ];
+        let backup_files = [
+            backup.clone(),
+            PathBuf::from(format!("{}-wal", backup.display())),
+            PathBuf::from(format!("{}-shm", backup.display())),
+        ];
         std::fs::create_dir_all(&root).expect("create test directory");
 
         let handle = {
@@ -1117,9 +1422,25 @@ mod tests {
             store.put_trace(record).expect("put trace");
             handle
         };
-        std::fs::copy(&live, &backup).expect("copy execution backup");
-        std::fs::remove_file(&live).expect("remove live execution store");
-        std::fs::copy(&backup, &live).expect("restore execution store");
+        assert!(
+            live_files[1].is_file(),
+            "committed execution metadata must remain recoverable from WAL"
+        );
+        for (source, destination) in live_files.iter().zip(&backup_files) {
+            if source.is_file() {
+                std::fs::copy(source, destination).expect("copy execution backup file");
+            }
+        }
+        for path in &live_files {
+            if path.is_file() {
+                std::fs::remove_file(path).expect("remove live execution-store file");
+            }
+        }
+        for (source, destination) in backup_files.iter().zip(&live_files) {
+            if source.is_file() {
+                std::fs::copy(source, destination).expect("restore execution-store file");
+            }
+        }
 
         let restored = SqliteExecutionStore::open(&live).expect("reopen restored store");
         assert_eq!(

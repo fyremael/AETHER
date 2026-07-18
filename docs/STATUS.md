@@ -92,10 +92,27 @@ numeric run declaration, declared host, or correctly named file is
 insufficient. The qualification and generated promotion-record path are
 implemented locally. An independent adversarial review found no remaining
 P0/P1 defects after the final capacity and readiness-byte tightening. Local
-validation is green across 208 active Rust tests (plus 10 ignored stress/soak
-cases), 82 Python tests, and 18 Go tests. Merge and one protected `main`
-qualification run are still required. This does not widen the controlled-alpha
-claim.
+validation was green before hosted qualification. PR #28 has since merged and
+protected candidate `11380eed81d0690717637a6926ae0087547205c2` passed exact-SHA
+CI, Supply Chain, Pages, and Capacity Planning. Release Readiness run
+`29625522886` failed the unchanged service performance gate because its first
+durable coordination restart stalled while subsequent passes remained stable.
+No official bundle or passed verdict was emitted. Phase-level, all-pass restart
+instrumentation and ten fresh native Windows processes localized `99.67%` of
+first-observed restart time to separately committed execution-trace
+persistence; replay and recursive execution remained millisecond-scale. The
+hash-bound diagnostic record and bounded batch-persistence follow-up are in
+`docs/RESTART_LATENCY_INVESTIGATION.md`. Atomic SQLite batch persistence is now
+implemented with rollback and restart coverage; ten fresh local processes cut
+first-observed mean restart latency from `3,347.816 ms` to `30.579 ms`.
+The derived execution catalog now uses the established journal WAL and
+`synchronous=NORMAL` posture plus derived-store-specific suppression of
+last-connection checkpointing. The latest ten-process run bounded first
+persistence to `7.239 ms` and service close to `1.198 ms`; five local exact
+baseline/current comparisons passed the unchanged gate. Backup/restore coverage
+now proves the database/WAL/SHM snapshot boundary. Final hosted PR checks and a
+new protected candidate still must pass. This does not widen the
+controlled-alpha claim.
 
 R5.1-R5.6 are now implemented locally. The service has strict dependency and
 package gates, verified transport modes, independent namespace admission,
@@ -177,7 +194,12 @@ Completed:
 - launch validation and drift promotion completed into a required mainline CI gate
 - packaged durable pilot-service bundles implemented with config-backed startup, package-local rotation tooling, restart/replay benchmark coverage, and secret-file/env/command token resolution
 - service-status, auth-reload, and config-backed token/principal identity surfaces implemented for the hardened pilot boundary
-- packaged backup and restore helpers implemented for the Windows pilot bundle, with snapshot/export of journal, sidecar catalog, execution metadata, audit log, config, and token files and a restored-handle replay check in the hardening drill
+- packaged backup and restore helpers implemented for the Windows pilot bundle,
+  with fail-closed quiescence confirmation and endpoint checks, clean-target
+  enforcement, a validated versioned snapshot contract, IPv4/IPv6 wildcard
+  probes, snapshot/export of journal, WAL/SHM companions, sidecar catalog,
+  execution metadata, audit log, config, and token files, and a restored-handle
+  replay check in the hardening drill
 - scheduled/manual extended-operability workflow added for soak, package build, and launch-validation evidence beyond the standard release gate
 - first real Go operator shell implemented against the HTTP API with typed client coverage
 - pilot-focused Go operator TUI implemented as the live cockpit for health, coordination state, audit entries, history, tuple proof traces, service status, and coordination diffs
@@ -264,8 +286,9 @@ Still open:
   for the exact candidate SHA
 - hosted confirmation that the verified-TLS Postgres matrix passes for the exact
   candidate and that the supported ingress prevents direct backend reachability
-- successful hosted Capacity Planning, Pages exact-SHA deployment, and first
-  Release Readiness runs for the selected candidate
+- a new protected candidate whose exact-SHA CI, Supply Chain, Pages, Capacity
+  Planning, and Release Readiness runs all pass; the first selected candidate's
+  readiness run failed the service restart-latency gate
 - post-v1 DSL ergonomics and document modularity beyond the current canonical surface
 - production hardening for the optional Postgres journal deployment path beyond current parity/concurrency coverage
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
@@ -274,7 +297,9 @@ Still open:
 
 ## Immediate focus
 
-The immediate work is R7 exact-candidate qualification from
+The immediate work is to complete hosted validation of the remediated
+first-restart latency documented in `docs/RESTART_LATENCY_INVESTIGATION.md`,
+then resume R7 exact-candidate qualification from
 `docs/REMEDIATION_PROGRAMME.md`. Feature broadening across policy, service
 execution, append, proof identity, or release claims stays frozen until the
 relevant repaired contract is green:

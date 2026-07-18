@@ -71,6 +71,11 @@ ordinary feature backlog:
 - Coordination delta reports now compare explicit cuts and carry trace handles where visible, but they still summarize fixed pilot sections rather than arbitrary user-defined investigative views.
 - The Go operator TUI is now implemented as the primary live pilot cockpit, but it is intentionally pilot-focused and read-only in v1 rather than a general workflow IDE or mutation surface.
 - The pilot service now has a packaged deployment path with config-backed startup, package-local rotation tooling, backup/restore helpers, auth reload, explicit token/principal identities, and secret-file/env/command token resolution, but it is still a single-node bundle rather than a fully managed deployment story with automated rotation services, distributed revocation, or native cloud secret-manager integrations.
+- Package backup/restore remains a quiesced file-copy procedure rather than an
+  online snapshot protocol. The helpers require explicit stopped-service
+  confirmation and reject a reachable configured endpoint, but that probe is
+  not a coordination lock; operators must keep the service stopped throughout
+  the database/WAL/SHM copy.
 
 ## Performance, Storage, And Release Discipline
 
@@ -81,6 +86,22 @@ ordinary feature backlog:
   local automation changes substitutes for green hosted runs on the exact
   candidate; Capacity remains diagnostic unless a claim policy explicitly names it.
 - The accepted regression gate is still deliberately narrow: `core_kernel` and `service_in_process` on the canonical native Windows dev host are the tracked release baselines, while HTTP and replicated-partition suites remain observational until their variance is better understood.
+- The first protected qualification candidate passed CI, Supply Chain, Pages,
+  and Capacity but failed Release Readiness because one first-observed durable
+  coordination restart stalled while later restarts were stable. The focused
+  phase telemetry retains every pass and does not filter, retry, warm up, or
+  change the arithmetic-mean gate. Ten fresh processes localized the stall to
+  first-write execution-trace persistence, where traces were inserted as
+  separate SQLite commits. Atomic batch persistence is implemented and cut
+  the ten-process local first-restart mean by `99.09%`. Hosted checks then
+  localized filesystem tails first to the rollback-journal commit and then to
+  the WAL last-connection checkpoint. The derived catalog now batches
+  manifest/traces atomically, uses WAL/`synchronous=NORMAL`, and avoids that
+  close-time checkpoint while retaining automatic checkpointing and the
+  database/WAL/SHM backup contract. Ten fresh local processes bounded close to
+  `1.198 ms`, and five local comparisons pass. Until final hosted checks and a
+  new exact candidate pass the unchanged gate, this remains a beta blocker
+  rather than ignorable host noise.
 - The current measured default `M` envelope is conservative: it presently recommends `1,024` pilot-board tasks even though larger ladders run correctly, because operator/report latency degrades before replay or local storage become the limiting factor.
 - The new R4 verifier binds observations to clean commit/tree/ref identity,
   exact commands, workflow attempts, output bytes, package digest, signed

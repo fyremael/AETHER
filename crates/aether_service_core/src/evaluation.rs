@@ -1,3 +1,4 @@
+use crate::diagnostics::{record_phase, PhaseTiming};
 use crate::{ApiError, ENGINE_SEMANTICS_VERSION};
 use aether_ast::{Datom, PartitionCut, PolicyScope, RuleProgram, TemporalView};
 use aether_plan::ScopedProgram;
@@ -9,7 +10,7 @@ use aether_runtime::{EvaluationBundle, RuntimeLimits, SemiNaiveRuntime};
 use aether_schema::Schema;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::fmt;
+use std::{fmt, time::Instant};
 
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct EvaluationKey([u8; 32]);
@@ -113,8 +114,33 @@ impl<'a> ScopedEvaluationBuilder<'a> {
         view: TemporalView,
         limits: RuntimeLimits,
     ) -> Result<(EvaluationKey, EvaluationBundle), ApiError> {
+        self.evaluate_with_key_and_limits_observed(view, limits, None)
+    }
+
+    #[doc(hidden)]
+    pub fn evaluate_with_key_and_limits_diagnostics(
+        &self,
+        view: TemporalView,
+        limits: RuntimeLimits,
+        phases: &mut Vec<PhaseTiming>,
+    ) -> Result<(EvaluationKey, EvaluationBundle), ApiError> {
+        self.evaluate_with_key_and_limits_observed(view, limits, Some(phases))
+    }
+
+    fn evaluate_with_key_and_limits_observed(
+        &self,
+        view: TemporalView,
+        limits: RuntimeLimits,
+        mut phases: Option<&mut Vec<PhaseTiming>>,
+    ) -> Result<(EvaluationKey, EvaluationBundle), ApiError> {
+        let started = Instant::now();
         let replay = ScopedReplay::new(self.history, view, self.program.scope().clone())
             .map_err(public_resolve_error)?;
+        if let Some(phases) = phases.as_deref_mut() {
+            record_phase(phases, "policy_replay", started);
+        }
+
+        let started = Instant::now();
         let key = build_evaluation_key(
             &self.namespace,
             self.schema,
@@ -122,11 +148,24 @@ impl<'a> ScopedEvaluationBuilder<'a> {
             &replay,
             &self.federation,
         )?;
+        if let Some(phases) = phases.as_deref_mut() {
+            record_phase(phases, "evaluation_identity", started);
+        }
+
+        let started = Instant::now();
         let snapshot = MaterializedResolver
             .resolve_scoped(self.schema, &replay)
             .map_err(public_resolve_error)?;
+        if let Some(phases) = phases.as_deref_mut() {
+            record_phase(phases, "state_resolution", started);
+        }
+
+        let started = Instant::now();
         let evaluation =
             SemiNaiveRuntime.evaluate_scoped_with_limits(snapshot, self.program.clone(), limits)?;
+        if let Some(phases) = phases {
+            record_phase(phases, "semi_naive_execution", started);
+        }
         Ok((key, evaluation))
     }
 }

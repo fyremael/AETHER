@@ -14,6 +14,7 @@ use aether_schema::Schema;
 use aether_storage::{InMemoryJournal, Journal, JournalError, PostgresJournal, SqliteJournal};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::time::Instant;
 use thiserror::Error;
 
 pub const ENGINE_SEMANTICS_VERSION: &str = "aether-semantic-v1-policy-scope-1";
@@ -25,6 +26,49 @@ pub mod execution;
 pub mod namespace;
 pub mod sidecar {
     pub use aether_sidecar::*;
+}
+
+#[doc(hidden)]
+pub mod diagnostics {
+    use serde::{Deserialize, Serialize};
+    use std::time::Instant;
+
+    #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+    pub struct PhaseTiming {
+        pub phase: String,
+        pub duration_ns: u64,
+    }
+
+    #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+    pub struct ServiceOperationTiming {
+        pub total_duration_ns: u64,
+        pub phases: Vec<PhaseTiming>,
+    }
+
+    pub(crate) fn elapsed_ns(started: Instant) -> u64 {
+        u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX)
+    }
+
+    pub(crate) fn record_phase(
+        phases: &mut Vec<PhaseTiming>,
+        phase: impl Into<String>,
+        started: Instant,
+    ) {
+        phases.push(PhaseTiming {
+            phase: phase.into(),
+            duration_ns: elapsed_ns(started),
+        });
+    }
+}
+
+fn record_optional_phase(
+    phases: &mut Option<&mut Vec<diagnostics::PhaseTiming>>,
+    phase: &'static str,
+    started: Instant,
+) {
+    if let Some(phases) = phases.as_deref_mut() {
+        diagnostics::record_phase(phases, phase, started);
+    }
 }
 
 use admission::{
@@ -201,6 +245,43 @@ impl KernelServiceCore<SqliteJournal, SqliteSidecarFederation> {
             Box::new(execution_store),
         ))
     }
+
+    #[doc(hidden)]
+    pub fn open_with_diagnostics(
+        path: impl AsRef<Path>,
+    ) -> Result<(Self, diagnostics::ServiceOperationTiming), ApiError> {
+        let total_started = Instant::now();
+        let path = path.as_ref();
+        let mut phases = Vec::with_capacity(3);
+
+        let started = Instant::now();
+        let execution_store = SqliteExecutionStore::open(execution_catalog_path_for_journal(path))
+            .map_err(ExecutionError::from)?;
+        diagnostics::record_phase(&mut phases, "execution_store_open_schema", started);
+
+        let started = Instant::now();
+        let journal = SqliteJournal::open(path)?;
+        diagnostics::record_phase(&mut phases, "journal_open_configure_schema", started);
+
+        let started = Instant::now();
+        let sidecars =
+            SqliteSidecarFederation::open(sidecar::sidecar_catalog_path_for_journal(path))?;
+        diagnostics::record_phase(&mut phases, "sidecar_open_schema", started);
+
+        let service = Self::from_parts_with_execution_store(
+            journal,
+            sidecars,
+            NamespaceId::default(),
+            Box::new(execution_store),
+        );
+        Ok((
+            service,
+            diagnostics::ServiceOperationTiming {
+                total_duration_ns: diagnostics::elapsed_ns(total_started),
+                phases,
+            },
+        ))
+    }
 }
 
 impl KernelServiceCore<PostgresJournal, SqliteSidecarFederation> {
@@ -334,18 +415,24 @@ impl<J: Journal, S: SidecarFederation> KernelServiceCore<J, S> {
         builder: &ScopedEvaluationBuilder<'_>,
         view: &TemporalView,
         limits: DocumentExecutionLimits,
+        phases: Option<&mut Vec<diagnostics::PhaseTiming>>,
     ) -> Result<&'a DocumentEvaluation, ApiError> {
         if let Some(index) = cache.iter().position(|evaluation| &evaluation.view == view) {
             return Ok(&cache[index]);
         }
 
-        let (key, evaluation) = builder.evaluate_with_key_and_limits(
-            view.clone(),
-            RuntimeLimits {
-                max_iterations: limits.max_iterations,
-                max_derived_tuples: limits.max_derived_tuples,
-            },
-        )?;
+        let runtime_limits = RuntimeLimits {
+            max_iterations: limits.max_iterations,
+            max_derived_tuples: limits.max_derived_tuples,
+        };
+        let (key, evaluation) = match phases {
+            Some(phases) => builder.evaluate_with_key_and_limits_diagnostics(
+                view.clone(),
+                runtime_limits,
+                phases,
+            )?,
+            None => builder.evaluate_with_key_and_limits(view.clone(), runtime_limits)?,
+        };
         cache.push(DocumentEvaluation {
             view: view.clone(),
             key,
@@ -354,6 +441,191 @@ impl<J: Journal, S: SidecarFederation> KernelServiceCore<J, S> {
         Ok(cache
             .last()
             .expect("evaluation cache contains the inserted view"))
+    }
+
+    #[doc(hidden)]
+    pub fn run_document_with_diagnostics(
+        &mut self,
+        request: RunDocumentRequest,
+    ) -> Result<(RunDocumentResponse, diagnostics::ServiceOperationTiming), ApiError> {
+        let total_started = Instant::now();
+        let mut phases = Vec::with_capacity(12);
+        let response = self.run_document_with_limits_observed(
+            request,
+            DocumentExecutionLimits::UNBOUNDED,
+            Some(&mut phases),
+        )?;
+        Ok((
+            response,
+            diagnostics::ServiceOperationTiming {
+                total_duration_ns: diagnostics::elapsed_ns(total_started),
+                phases,
+            },
+        ))
+    }
+
+    fn run_document_with_limits_observed(
+        &mut self,
+        request: RunDocumentRequest,
+        limits: DocumentExecutionLimits,
+        mut phases: Option<&mut Vec<diagnostics::PhaseTiming>>,
+    ) -> Result<RunDocumentResponse, ApiError> {
+        let RunDocumentRequest {
+            dsl,
+            policy_context,
+        } = request;
+        if dsl.len() > limits.max_document_bytes {
+            return Err(ApiError::ResourceLimit {
+                resource: "document_bytes",
+                limit: limits.max_document_bytes,
+                observed: dsl.len(),
+            });
+        }
+
+        let started = Instant::now();
+        let document = DefaultDslParser.parse_document(&dsl)?;
+        record_optional_phase(&mut phases, "document_parse", started);
+        if document.program.rules.len() > limits.max_rules {
+            return Err(ApiError::ResourceLimit {
+                resource: "document_rules",
+                limit: limits.max_rules,
+                observed: document.program.rules.len(),
+            });
+        }
+
+        let started = Instant::now();
+        if let Some(active) = schema_catalog(&self.journal)?.active {
+            document_schema_compatible(&active, &document.schema)?;
+        }
+        record_optional_phase(&mut phases, "schema_catalog_validation", started);
+
+        let started = Instant::now();
+        let datoms = self.datoms_or_history(&[])?;
+        record_optional_phase(&mut phases, "journal_history_read", started);
+
+        let scope = PolicyScope::from_optional(policy_context);
+        let started = Instant::now();
+        let builder = ScopedEvaluationBuilder::new_in_namespace(
+            self.namespace.as_str(),
+            &document.schema,
+            &datoms,
+            &document.program,
+            scope.clone(),
+        )?;
+        record_optional_phase(&mut phases, "program_compile", started);
+
+        let mut evaluations = Vec::new();
+        let primary_view = document
+            .query
+            .as_ref()
+            .map(|query| query.view.clone())
+            .or_else(|| {
+                document
+                    .queries
+                    .first()
+                    .map(|query| query.spec.view.clone())
+            })
+            .or_else(|| {
+                document
+                    .explains
+                    .first()
+                    .map(|explain| explain.spec.view.clone())
+            })
+            .unwrap_or(TemporalView::Current);
+        let primary = self.document_evaluation(
+            &mut evaluations,
+            &builder,
+            &primary_view,
+            limits,
+            phases.as_deref_mut(),
+        )?;
+        let primary_key = primary.key.clone();
+        let primary_state = primary.evaluation.snapshot().state().clone();
+        let primary_derived = primary.evaluation.derived().clone();
+
+        let started = Instant::now();
+        let query = match &document.query {
+            Some(query) => Some(execute_scoped_query(&primary.evaluation, &query.query)?),
+            None => None,
+        };
+        let queries = document
+            .queries
+            .iter()
+            .map(|named_query| {
+                let evaluation = self.document_evaluation(
+                    &mut evaluations,
+                    &builder,
+                    &named_query.spec.view,
+                    limits,
+                    None,
+                )?;
+                Ok(NamedQueryResult {
+                    name: named_query.name.clone(),
+                    spec: named_query.spec.clone(),
+                    result: execute_scoped_query(&evaluation.evaluation, &named_query.spec.query)?,
+                    execution_id: Some(ExecutionId(evaluation.key.to_hex())),
+                })
+            })
+            .collect::<Result<Vec<_>, ApiError>>()?;
+        let explains = document
+            .explains
+            .iter()
+            .map(|named_explain| {
+                let evaluation = self.document_evaluation(
+                    &mut evaluations,
+                    &builder,
+                    &named_explain.spec.view,
+                    limits,
+                    None,
+                )?;
+                Ok(NamedExplainResult {
+                    name: named_explain.name.clone(),
+                    spec: named_explain.spec.clone(),
+                    result: execute_explain_spec(evaluation, &named_explain.spec)?,
+                    execution_id: Some(ExecutionId(evaluation.key.to_hex())),
+                })
+            })
+            .collect::<Result<Vec<_>, ApiError>>()?;
+        record_optional_phase(&mut phases, "query_and_explain", started);
+
+        let started = Instant::now();
+        let mut executions = Vec::with_capacity(evaluations.len());
+        for evaluation in &evaluations {
+            let visible_history =
+                project_history_at_view(&datoms, evaluation.view.clone(), scope.clone())?;
+            executions.push(persist_execution(
+                self.execution_store.as_mut(),
+                &self.namespace,
+                &evaluation.key,
+                &document.schema,
+                visible_history,
+                builder.program().compiled(),
+                &scope,
+                evaluation.view.clone(),
+                evaluation.evaluation.derived(),
+                None,
+            )?);
+        }
+        record_optional_phase(&mut phases, "execution_persistence", started);
+
+        let primary_execution_id = ExecutionId(primary_key.to_hex());
+        let execution = executions
+            .iter()
+            .find(|execution| execution.manifest.execution_id == primary_execution_id)
+            .cloned()
+            .ok_or_else(|| {
+                ApiError::Validation("primary execution receipt was not persisted".into())
+            })?;
+        Ok(RunDocumentResponse {
+            state: primary_state,
+            program: builder.program().compiled().clone(),
+            derived: primary_derived,
+            query,
+            queries,
+            explains,
+            execution: Some(execution.clone()),
+            executions,
+        })
     }
 }
 
@@ -635,135 +907,7 @@ impl<J: Journal, S: SidecarFederation> KernelService for KernelServiceCore<J, S>
         request: RunDocumentRequest,
         limits: DocumentExecutionLimits,
     ) -> Result<RunDocumentResponse, ApiError> {
-        let RunDocumentRequest {
-            dsl,
-            policy_context,
-        } = request;
-        if dsl.len() > limits.max_document_bytes {
-            return Err(ApiError::ResourceLimit {
-                resource: "document_bytes",
-                limit: limits.max_document_bytes,
-                observed: dsl.len(),
-            });
-        }
-        let document = DefaultDslParser.parse_document(&dsl)?;
-        if document.program.rules.len() > limits.max_rules {
-            return Err(ApiError::ResourceLimit {
-                resource: "document_rules",
-                limit: limits.max_rules,
-                observed: document.program.rules.len(),
-            });
-        }
-        if let Some(active) = schema_catalog(&self.journal)?.active {
-            document_schema_compatible(&active, &document.schema)?;
-        }
-        let datoms = self.datoms_or_history(&[])?;
-        let scope = PolicyScope::from_optional(policy_context);
-        let builder = ScopedEvaluationBuilder::new_in_namespace(
-            self.namespace.as_str(),
-            &document.schema,
-            &datoms,
-            &document.program,
-            scope.clone(),
-        )?;
-        let mut evaluations = Vec::new();
-        let primary_view = document
-            .query
-            .as_ref()
-            .map(|query| query.view.clone())
-            .or_else(|| {
-                document
-                    .queries
-                    .first()
-                    .map(|query| query.spec.view.clone())
-            })
-            .or_else(|| {
-                document
-                    .explains
-                    .first()
-                    .map(|explain| explain.spec.view.clone())
-            })
-            .unwrap_or(TemporalView::Current);
-        let primary =
-            self.document_evaluation(&mut evaluations, &builder, &primary_view, limits)?;
-        let primary_key = primary.key.clone();
-        let primary_state = primary.evaluation.snapshot().state().clone();
-        let primary_derived = primary.evaluation.derived().clone();
-        let query = match &document.query {
-            Some(query) => Some(execute_scoped_query(&primary.evaluation, &query.query)?),
-            None => None,
-        };
-        let queries = document
-            .queries
-            .iter()
-            .map(|named_query| {
-                let evaluation = self.document_evaluation(
-                    &mut evaluations,
-                    &builder,
-                    &named_query.spec.view,
-                    limits,
-                )?;
-                Ok(NamedQueryResult {
-                    name: named_query.name.clone(),
-                    spec: named_query.spec.clone(),
-                    result: execute_scoped_query(&evaluation.evaluation, &named_query.spec.query)?,
-                    execution_id: Some(ExecutionId(evaluation.key.to_hex())),
-                })
-            })
-            .collect::<Result<Vec<_>, ApiError>>()?;
-        let explains = document
-            .explains
-            .iter()
-            .map(|named_explain| {
-                let evaluation = self.document_evaluation(
-                    &mut evaluations,
-                    &builder,
-                    &named_explain.spec.view,
-                    limits,
-                )?;
-                Ok(NamedExplainResult {
-                    name: named_explain.name.clone(),
-                    spec: named_explain.spec.clone(),
-                    result: execute_explain_spec(evaluation, &named_explain.spec)?,
-                    execution_id: Some(ExecutionId(evaluation.key.to_hex())),
-                })
-            })
-            .collect::<Result<Vec<_>, ApiError>>()?;
-        let mut executions = Vec::with_capacity(evaluations.len());
-        for evaluation in &evaluations {
-            let visible_history =
-                project_history_at_view(&datoms, evaluation.view.clone(), scope.clone())?;
-            executions.push(persist_execution(
-                self.execution_store.as_mut(),
-                &self.namespace,
-                &evaluation.key,
-                &document.schema,
-                visible_history,
-                builder.program().compiled(),
-                &scope,
-                evaluation.view.clone(),
-                evaluation.evaluation.derived(),
-                None,
-            )?);
-        }
-        let primary_execution_id = ExecutionId(primary_key.to_hex());
-        let execution = executions
-            .iter()
-            .find(|execution| execution.manifest.execution_id == primary_execution_id)
-            .cloned()
-            .ok_or_else(|| {
-                ApiError::Validation("primary execution receipt was not persisted".into())
-            })?;
-        Ok(RunDocumentResponse {
-            state: primary_state,
-            program: builder.program().compiled().clone(),
-            derived: primary_derived,
-            query,
-            queries,
-            explains,
-            execution: Some(execution.clone()),
-            executions,
-        })
+        self.run_document_with_limits_observed(request, limits, None)
     }
 
     fn register_artifact_reference(

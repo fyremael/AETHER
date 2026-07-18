@@ -174,7 +174,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0rotate-pilot-token.ps1
 
 @'
 param(
-    [string]$SnapshotDir
+    [string]$SnapshotDir,
+    [switch]$ConfirmServiceStopped
 )
 
 $ErrorActionPreference = "Stop"
@@ -182,6 +183,28 @@ $ErrorActionPreference = "Stop"
 function Resolve-ConfigPath([string]$BaseDir, [string]$PathValue) {
     $path = [System.IO.Path]::IsPathRooted($PathValue) ? $PathValue : (Join-Path $BaseDir $PathValue)
     $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
+}
+
+function Test-TcpEndpoint([string]$BindAddress) {
+    $uri = [System.Uri]::new("tcp://$BindAddress")
+    $hostName = $uri.DnsSafeHost -replace '^\[|\]$', ''
+    if ($hostName -eq "0.0.0.0") {
+        $hostName = "127.0.0.1"
+    } elseif ($hostName -eq "::") {
+        $hostName = "::1"
+    }
+    $client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $task = $client.ConnectAsync($hostName, $uri.Port)
+        if (-not $task.Wait(750)) {
+            return $false
+        }
+        return $client.Connected
+    } catch {
+        return $false
+    } finally {
+        $client.Dispose()
+    }
 }
 
 $configPath = Join-Path $PSScriptRoot "config\pilot-service.json"
@@ -198,11 +221,26 @@ $executionWalPath = "$executionPath-wal"
 $executionShmPath = "$executionPath-shm"
 $auditPath = Resolve-ConfigPath $configDir $config.audit_log_path
 
+if (-not $ConfirmServiceStopped) {
+    throw "Quiesced snapshot required: stop the pilot service and rerun with -ConfirmServiceStopped. Hot file-copy snapshots are unsupported."
+}
+if (Test-TcpEndpoint ([string]$config.bind_addr)) {
+    throw "Quiesced snapshot required: the configured pilot endpoint $($config.bind_addr) is still reachable. Stop the service before backup."
+}
+
 if (-not $SnapshotDir) {
     $SnapshotDir = Join-Path $PSScriptRoot ("snapshots\pilot-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 }
 
 $snapshotDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SnapshotDir)
+if (Test-Path -LiteralPath $snapshotDir) {
+    if (-not (Test-Path -LiteralPath $snapshotDir -PathType Container)) {
+        throw "Snapshot target must be a directory: $snapshotDir"
+    }
+    if (Get-ChildItem -LiteralPath $snapshotDir -Force | Select-Object -First 1) {
+        throw "Snapshot target must be empty to prevent stale database/WAL/SHM files: $snapshotDir"
+    }
+}
 $snapshotConfigDir = Join-Path $snapshotDir "config"
 $snapshotDataDir = Join-Path $snapshotDir "data"
 $snapshotLogsDir = Join-Path $snapshotDir "logs"
@@ -258,6 +296,9 @@ if (Test-Path $auditPath) {
 
 $manifest = [pscustomobject]@{
     generated_at = (Get-Date).ToString("o")
+    snapshot_contract_version = "aether.pilot-quiesced-snapshot.v1"
+    snapshot_mode = "quiesced_file_copy"
+    service_stopped_confirmed = $true
     config_path = $configPath
     database_path = $databasePath
     database_wal_path = $databaseWalPath
@@ -284,7 +325,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0backup-pilot-state.ps1
 param(
     [Parameter(Mandatory = $true)]
     [string]$SnapshotDir,
-    [switch]$BackupExisting = $true
+    [switch]$BackupExisting = $true,
+    [switch]$ConfirmServiceStopped
 )
 
 $ErrorActionPreference = "Stop"
@@ -294,10 +336,45 @@ function Resolve-ConfigPath([string]$BaseDir, [string]$PathValue) {
     $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
 }
 
+function Test-TcpEndpoint([string]$BindAddress) {
+    $uri = [System.Uri]::new("tcp://$BindAddress")
+    $hostName = $uri.DnsSafeHost -replace '^\[|\]$', ''
+    if ($hostName -eq "0.0.0.0") {
+        $hostName = "127.0.0.1"
+    } elseif ($hostName -eq "::") {
+        $hostName = "::1"
+    }
+    $client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $task = $client.ConnectAsync($hostName, $uri.Port)
+        if (-not $task.Wait(750)) {
+            return $false
+        }
+        return $client.Connected
+    } catch {
+        return $false
+    } finally {
+        $client.Dispose()
+    }
+}
+
 $snapshotDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SnapshotDir)
 $manifestPath = Join-Path $snapshotDir "manifest.json"
 if (-not (Test-Path $manifestPath)) {
     throw "Snapshot manifest not found at $manifestPath"
+}
+
+try {
+    $snapshotManifest = Get-Content -Path $manifestPath -Raw | ConvertFrom-Json
+} catch {
+    throw "Snapshot manifest at $manifestPath is not valid JSON: $($_.Exception.Message)"
+}
+if (
+    $snapshotManifest.snapshot_contract_version -ne "aether.pilot-quiesced-snapshot.v1" -or
+    $snapshotManifest.snapshot_mode -ne "quiesced_file_copy" -or
+    $snapshotManifest.service_stopped_confirmed -ne $true
+) {
+    throw "Snapshot manifest does not declare the required versioned quiesced snapshot contract."
 }
 
 $configPath = Join-Path $PSScriptRoot "config\pilot-service.json"
@@ -313,6 +390,13 @@ $executionPath = "$databasePath.executions.sqlite"
 $executionWalPath = "$executionPath-wal"
 $executionShmPath = "$executionPath-shm"
 $auditPath = Resolve-ConfigPath $configDir $config.audit_log_path
+
+if (-not $ConfirmServiceStopped) {
+    throw "Quiesced restore required: stop the pilot service and rerun with -ConfirmServiceStopped. Live restore is unsupported."
+}
+if (Test-TcpEndpoint ([string]$config.bind_addr)) {
+    throw "Quiesced restore required: the configured pilot endpoint $($config.bind_addr) is still reachable. Stop the service before restore."
+}
 
 function Restore-OptionalFile([string]$SnapshotPath, [string]$DestinationPath) {
     for ($attempt = 1; $attempt -le 40; $attempt++) {
