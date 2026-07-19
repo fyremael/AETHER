@@ -77,6 +77,7 @@ For documentation publishing:
 - run `powershell -ExecutionPolicy Bypass -File scripts/run-capacity-planner.ps1 -SkipHardening`
 - run `cargo run -p aether_api --example pilot_coordination_report --release`
 - run `cargo run -p aether_api --example pilot_coordination_delta_report --release`
+- run `./scripts/run-colab-runtime-diagnostic.ps1 -CandidateSha <full-commit-sha>` for a disposable, diagnostic-only Colab CPU run with automatic artifact retrieval and teardown
 - run `cargo run -p aether_api --example capture_performance_baseline --release -- --suite core_kernel --host-manifest fixtures/performance/hosts/dev-chad-windows-native.json --output fixtures/performance/baselines/core_kernel/dev-chad-windows-native.json`
 - run `cargo run -p aether_api --example performance_drift_report --release -- --suite core_kernel --host-manifest fixtures/performance/hosts/dev-chad-windows-native.json --baseline fixtures/performance/baselines/core_kernel/dev-chad-windows-native.json`
 - run `cargo run -p aether_api --example performance_matrix_report --release -- --output-json artifacts/performance/matrix/latest.json --output-report artifacts/performance/matrix/latest.md <bundle-path-1> <bundle-path-2>`

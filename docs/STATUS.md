@@ -215,6 +215,7 @@ Completed:
 - pilot-focused Go operator TUI implemented as the live cockpit for health, coordination state, audit entries, history, tuple proof traces, service status, and coordination diffs
 - broader typed Python SDK surface implemented against the HTTP API with fixture builders and live integration coverage
 - Colab notebook lane now boots the authenticated pilot boundary with notebook-local token, namespace, SQLite storage, service status, and audit context instead of the older unauthenticated in-memory HTTP example
+- A Colab CLI runtime lane now executes exact detached candidates in disposable CPU sessions, retrieves hash-bound diagnostic artifacts, and explicitly releases the VM. Its outputs remain diagnostic-only and subordinate to protected Windows qualification.
 - semantic compliance matrix added to map `SPEC.md` sections `1-11` to implementation and acceptance evidence, with policy-aware closure now explicitly reopened
 - formal v1 closeout record retained as the historical acceptance record, with its policy-aware and release-claim portions reopened pending the remediation gates
 - partition IDs, partition-qualified cuts, and federated-cut types implemented in the semantic model
