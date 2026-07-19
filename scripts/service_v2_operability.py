@@ -16,6 +16,14 @@ from urllib import error, request
 
 
 PASSING_STATUSES = {"passed", "ci_blocking"}
+POSTGRES_CI_REQUIRED_MARKERS = [
+    "postgres-journal",
+    "scripts/ci-postgres-tls.sh",
+    "Postgres transport security matrix",
+    "cargo test -p aether_storage --lib",
+    "cargo test -p aether_storage --test postgres_tls",
+    "cargo test -p aether_api --test http_service http_service_postgres_namespaces",
+]
 
 
 def repo_root() -> Path:
@@ -282,6 +290,7 @@ def run_package_backup_restore_drill(
                 str(backup_script),
                 "-SnapshotDir",
                 str(snapshot_dir),
+                "-ConfirmServiceStopped",
             ],
             root=package_root,
             timeout_seconds=timeout_seconds,
@@ -318,6 +327,7 @@ def run_package_backup_restore_drill(
                 str(restore_script),
                 "-SnapshotDir",
                 str(snapshot_dir),
+                "-ConfirmServiceStopped",
             ],
             root=package_root,
             timeout_seconds=timeout_seconds,
@@ -523,13 +533,7 @@ def collect_service_v2_evidence(args: argparse.Namespace) -> dict[str, Any]:
     else:
         postgres_ci_ok, postgres_ci_missing = file_contains_all(
             root / ".github" / "workflows" / "ci.yml",
-            [
-                "postgres-journal",
-                "postgres:16",
-                args.postgres_env,
-                "cargo test -p aether_storage postgres_journal",
-                "cargo test -p aether_api --test http_service http_service_postgres_namespaces",
-            ],
+            POSTGRES_CI_REQUIRED_MARKERS,
         )
         if args.accept_ci_postgres and postgres_ci_ok:
             status = "ci_blocking"
