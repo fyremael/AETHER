@@ -613,6 +613,7 @@ def assemble(args: argparse.Namespace) -> int:
                 candidate=candidate,
                 package_sha256=package_digest,
                 now=utc_now(),
+                gate_policy=policy,
             )
             item = copy_into(staging, source, f"subjects/{subject_id}/{source.name}")
             integrity_paths.append(staging / item["path"])

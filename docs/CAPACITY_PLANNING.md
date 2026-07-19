@@ -14,24 +14,32 @@ These numbers are internal planning guidance, not public SLAs.
 
 ## Current Measured Readout
 
-The current live artifacts are:
+Mutable navigation artifacts are:
 
 - `artifacts/performance/capacity/latest.json`
 - `artifacts/performance/capacity/latest.md`
 - `artifacts/performance/perturbation/latest.json`
 - `artifacts/performance/perturbation/latest.md`
 
-The current default recommendation is:
+They are useful for local navigation, but never qualify a release. The latest
+immutable protected-candidate report is Capacity Planning run `29689359042`,
+attempt 1, for candidate
+`64797af68261bc72618487e47f8f44fae3a11d28`. Release Readiness rejected that
+candidate because its M-class envelope recommended only 16 concurrent
+operators against the unchanged policy minimum of 32. That candidate is
+permanently failed; the report is diagnostic evidence, not a qualified sizing
+claim.
+
+The planning default remains:
 
 - node class: `M`
 - hardware: `16 vCPU`, `64 GB RAM`, `500 GB NVMe`
 - reference workload: governed incident board / pilot coordination surface
 
-Current measured single-node envelope from the latest canonical Windows host
-run:
+That failed candidate's measured single-node envelope was:
 
-- `M`: `1,024` pilot-board tasks
-- `M`: `32` mixed operator-service concurrent workers
+- `M`: `4,096` pilot-board tasks
+- `M`: `16` mixed operator-service concurrent workers
 - `M`: `10,000` durable replay entities
 
 The current limiting factor for the default `M` recommendation is
@@ -52,14 +60,31 @@ Current conservative envelopes from the latest planner run:
 
 | Class | Pilot board | Mixed concurrency | Durable replay | Limiting factor |
 | --- | ---: | ---: | ---: | --- |
-| `S` | `1,024` tasks | `32` | `10,000` entities | `memory` |
-| `M` | `1,024` tasks | `32` | `10,000` entities | `report_latency` |
-| `L` | `4,096` tasks | `32` | `10,000` entities | `report_latency` |
-| `XL` | `4,096` tasks | `32` | `10,000` entities | `report_latency` |
+| `S` | `4,096` tasks | `16` | `10,000` entities | `memory` |
+| `M` | `4,096` tasks | `16` | `10,000` entities | `report_latency` |
+| `L` | `4,096` tasks | `16` | `10,000` entities | `report_latency` |
+| `XL` | `8,192` tasks | `16` | `10,000` entities | `cpu` |
 
-Those envelopes are intentionally capped at the largest measured ladder points
-that still satisfy the planner thresholds. We do not extrapolate aggressive
-upper bounds just because the node class is larger.
+Those historical envelopes used an invalid mixed-concurrency model: every
+worker constructed a separate in-process service, and the raw calibration-host
+throughput plateau was then used as an unscaled node-class cap. They must not
+be used to claim either that one service supports 32 workers or that it fails
+to do so.
+
+The repaired contract creates one service per concurrency point and shares its
+router/state across every worker. Service construction and worker preparation
+finish before timing begins. Each raw rung records total, successful and failed
+operations, 503 saturation responses, setup and measurement durations,
+throughput, p95 and p99. A node-class recommendation is the largest measured
+rung whose projected p95 is inside the class target and whose raw run has no
+failed or saturated operations. The first marginal-throughput plateau remains
+a diagnostic efficiency/scale-out signal; it is not an unscaled hard cap.
+
+For commercial-beta qualification, the verifier additionally requires exactly
+one raw 32-worker rung from one shared service, internally consistent operation
+and duration accounting, p95 at or below 2,000 ms, zero errors and zero 503s.
+It recomputes those checks from the raw concurrency pack. A nonempty artifact
+or an authored derived envelope is insufficient.
 
 ## What Limits A Single Node Today
 
@@ -69,11 +94,12 @@ There are two different ceilings to keep separate.
 
 The current measured board ladder shows:
 
-- `1,024` tasks: about `93 ms` mean coordination latency
-- `4,096` tasks: about `1.28 s` mean coordination latency
-- `8,192` tasks: about `4.76 s` mean coordination latency
+- `1,024` tasks: about `124 ms` mean coordination latency
+- `4,096` tasks: about `1.43 s` mean coordination latency
+- `8,192` tasks: about `5.38 s` mean coordination latency
 
-That is why the default `M` recommendation stops at `1,024` tasks today. The
+That is why the failed candidate's projected `M` recommendation stopped at
+`4,096` tasks. The
 planner treats the board ceiling as **near**, not because the kernel breaks,
 but because coordination/report latency moves too far once the board widens
 beyond the current comfortable operator cell.
@@ -108,9 +134,9 @@ The storage planner now measures:
 
 The current default `M` envelope is still light on local storage:
 
-- steady-state storage: about `346.8 KiB`
-- 30-day retained journal budget: about `10.16 MiB`
-- backup/restore scratch budget: about `693.6 KiB`
+- steady-state storage: about `1.39 MiB`
+- 30-day retained journal budget: about `41.77 MiB`
+- backup/restore scratch budget: about `2.78 MiB`
 
 That means storage is not the current blocker for the pilot-shaped workload.
 The practical bottleneck remains board/report latency first, closure growth

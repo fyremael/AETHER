@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering},
-        Arc,
+        Arc, Barrier,
     },
     thread,
     time::{Duration, Instant},
@@ -130,6 +130,18 @@ pub struct PerfCapacityCurve {
 pub struct PerfCapacityConcurrencyPoint {
     pub concurrency: usize,
     pub total_operations: usize,
+    #[serde(default)]
+    pub successful_operations: usize,
+    #[serde(default)]
+    pub failed_operations: usize,
+    #[serde(default)]
+    pub saturation_responses: usize,
+    #[serde(default)]
+    pub setup_duration_ms: f64,
+    #[serde(default)]
+    pub measurement_duration_ms: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failure_messages: Vec<String>,
     pub throughput_per_second: f64,
     pub mean_latency_ms: f64,
     pub p95_latency_ms: f64,
@@ -139,6 +151,8 @@ pub struct PerfCapacityConcurrencyPoint {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PerfCapacityConcurrencyPack {
     pub label: String,
+    #[serde(default)]
+    pub service_instances_per_point: usize,
     pub operations_per_worker: usize,
     pub operation_mix: Vec<String>,
     pub first_saturation_point: Option<usize>,
@@ -377,25 +391,38 @@ pub fn render_markdown_capacity_input_bundle(bundle: &PerfCapacityInputBundle) -
     let _ = writeln!(output);
     let _ = writeln!(
         output,
-        "| Concurrency | Throughput | Mean latency (ms) | p95 (ms) | p99 (ms) |"
+        "| Concurrency | Successful | Failed | 503 | Setup (ms) | Measured (ms) | Throughput | Mean latency (ms) | p95 (ms) | p99 (ms) |"
     );
-    let _ = writeln!(output, "| ---: | ---: | ---: | ---: | ---: |");
+    let _ = writeln!(
+        output,
+        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+    );
     for point in &bundle.concurrency_pack.points {
         let _ = writeln!(
             output,
-            "| {} | {:.2} ops/s | {:.3} | {:.3} | {:.3} |",
+            "| {} | {} | {} | {} | {:.3} | {:.3} | {:.2} ops/s | {:.3} | {:.3} | {:.3} |",
             point.concurrency,
+            point.successful_operations,
+            point.failed_operations,
+            point.saturation_responses,
+            point.setup_duration_ms,
+            point.measurement_duration_ms,
             point.throughput_per_second,
             point.mean_latency_ms,
             point.p95_latency_ms,
             point.p99_latency_ms
         );
     }
+    let _ = writeln!(output);
+    let _ = writeln!(
+        output,
+        "- Shared service instances per concurrency point: `{}`",
+        bundle.concurrency_pack.service_instances_per_point
+    );
     if let Some(first) = bundle.concurrency_pack.first_saturation_point {
-        let _ = writeln!(output);
         let _ = writeln!(
             output,
-            "- First saturation point: `{first}` concurrent workers"
+            "- First marginal-throughput saturation point (diagnostic only): `{first}` concurrent workers"
         );
     }
     let _ = writeln!(output);
@@ -594,6 +621,7 @@ pub fn build_capacity_report(
             assumptions: vec![
                 "The current pilot coordination surface is the primary customer-shaped workload; recursive closure remains a separate limiting curve.".into(),
                 "Scale-up recommendations are conservative and capped at the largest measured ladder point rather than extrapolating optimistic upper bounds.".into(),
+                "Mixed-concurrency recommendations use projected p95 latency against the selected node-class target; calibration-host throughput saturation remains a diagnostic efficiency signal and is not projected as an unscaled hard cap across node classes.".into(),
                 "Closure headroom uses a 25% RAM budget to reserve space for the OS, allocator variance, burst load, and sidecars.".into(),
                 "Storage planning assumes one board-equivalent of retained journal growth per day over 30 days plus 20% snapshot overhead.".into(),
             ],
@@ -861,61 +889,30 @@ fn build_mixed_operator_concurrency_pack() -> Result<PerfCapacityConcurrencyPack
     let mut first_saturation_point = None;
 
     for concurrency in CONCURRENCY_LADDER {
-        let started = Instant::now();
-        let mut handles = Vec::new();
-        for worker in 0..concurrency {
-            handles.push(thread::spawn(move || -> Result<Vec<f64>, ApiError> {
-                let fixture = build_http_fixture()?;
-                let mut latencies = Vec::with_capacity(DEFAULT_CONCURRENCY_OPERATIONS_PER_WORKER);
-                for offset in 0..DEFAULT_CONCURRENCY_OPERATIONS_PER_WORKER {
-                    let operation = operations[(worker + offset) % operations.len()];
-                    let op_started = Instant::now();
-                    run_mixed_operation(&fixture, operation)?;
-                    latencies.push(op_started.elapsed().as_secs_f64() * 1000.0);
-                }
-                Ok(latencies)
-            }));
-        }
-
-        let mut latencies = Vec::new();
-        for handle in handles {
-            let worker_latencies = handle.join().map_err(|_| {
-                ApiError::Validation(
-                    "mixed operator concurrency worker thread panicked unexpectedly".into(),
-                )
-            })??;
-            latencies.extend(worker_latencies);
-        }
-        latencies.sort_by(|left, right| left.partial_cmp(right).unwrap_or(Ordering::Equal));
-
-        let total_operations = concurrency * DEFAULT_CONCURRENCY_OPERATIONS_PER_WORKER;
-        let elapsed = started.elapsed().as_secs_f64().max(0.000_001);
-        let throughput = total_operations as f64 / elapsed;
-        let mean_latency_ms = latencies.iter().sum::<f64>() / latencies.len().max(1) as f64;
-        let p95_latency_ms = percentile(&latencies, 0.95);
-        let p99_latency_ms = percentile(&latencies, 0.99);
+        let setup_started = Instant::now();
+        let fixture = build_http_fixture()?;
+        let setup_duration_ms = setup_started.elapsed().as_secs_f64() * 1000.0;
+        let point = measure_mixed_operator_concurrency_point(
+            &fixture,
+            operations,
+            concurrency,
+            setup_duration_ms,
+        )?;
 
         if first_saturation_point.is_none() {
             if let Some(previous) = prior_throughput {
-                if throughput < previous * 1.15 {
+                if point.throughput_per_second < previous * 1.15 {
                     first_saturation_point = Some(concurrency);
                 }
             }
         }
-        prior_throughput = Some(throughput);
-
-        points.push(PerfCapacityConcurrencyPoint {
-            concurrency,
-            total_operations,
-            throughput_per_second: throughput,
-            mean_latency_ms,
-            p95_latency_ms,
-            p99_latency_ms,
-        });
+        prior_throughput = Some(point.throughput_per_second);
+        points.push(point);
     }
 
     Ok(PerfCapacityConcurrencyPack {
         label: "Mixed operator-service pilot surface".into(),
+        service_instances_per_point: 1,
         operations_per_worker: DEFAULT_CONCURRENCY_OPERATIONS_PER_WORKER,
         operation_mix: operations
             .into_iter()
@@ -923,6 +920,129 @@ fn build_mixed_operator_concurrency_pack() -> Result<PerfCapacityConcurrencyPack
             .collect(),
         first_saturation_point,
         points,
+    })
+}
+
+#[derive(Debug)]
+struct MixedOperatorWorkerResult {
+    latencies_ms: Vec<f64>,
+    failures: Vec<String>,
+    saturation_responses: usize,
+}
+
+fn build_shared_http_worker_fixture(fixture: &HttpFixture) -> Result<HttpFixture, ApiError> {
+    let runtime = RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|source| {
+            ApiError::Validation(format!(
+                "failed to build shared-service concurrency worker runtime: {source}"
+            ))
+        })?;
+    Ok(HttpFixture {
+        runtime,
+        router: fixture.router.clone(),
+        token: fixture.token.clone(),
+        explain_handle: fixture.explain_handle.clone(),
+        history_datoms: fixture.history_datoms,
+        coordination_rows: fixture.coordination_rows,
+        delta_changed_rows: fixture.delta_changed_rows,
+        explain_trace_tuples: fixture.explain_trace_tuples,
+    })
+}
+
+fn measure_mixed_operator_concurrency_point(
+    shared_fixture: &HttpFixture,
+    operations: [MixedOperation; 6],
+    concurrency: usize,
+    service_setup_duration_ms: f64,
+) -> Result<PerfCapacityConcurrencyPoint, ApiError> {
+    let worker_setup_started = Instant::now();
+    let worker_fixtures = (0..concurrency)
+        .map(|_| build_shared_http_worker_fixture(shared_fixture))
+        .collect::<Result<Vec<_>, _>>()?;
+    let ready = Arc::new(Barrier::new(concurrency + 1));
+    let start = Arc::new(Barrier::new(concurrency + 1));
+    let mut handles = Vec::with_capacity(concurrency);
+
+    for (worker, fixture) in worker_fixtures.into_iter().enumerate() {
+        let ready = Arc::clone(&ready);
+        let start = Arc::clone(&start);
+        handles.push(thread::spawn(move || {
+            let mut result = MixedOperatorWorkerResult {
+                latencies_ms: Vec::with_capacity(DEFAULT_CONCURRENCY_OPERATIONS_PER_WORKER),
+                failures: Vec::new(),
+                saturation_responses: 0,
+            };
+            // `ready` means the worker runtime, result buffers, and thread are
+            // fully initialized; only request execution belongs to measurement.
+            ready.wait();
+            start.wait();
+            for offset in 0..DEFAULT_CONCURRENCY_OPERATIONS_PER_WORKER {
+                let operation = operations[(worker + offset) % operations.len()];
+                let op_started = Instant::now();
+                match run_mixed_operation(&fixture, operation) {
+                    Ok(()) => result
+                        .latencies_ms
+                        .push(op_started.elapsed().as_secs_f64() * 1000.0),
+                    Err(error) => {
+                        let message = error.to_string();
+                        if message.contains("returned 503") {
+                            result.saturation_responses += 1;
+                        }
+                        result.failures.push(message);
+                    }
+                }
+            }
+            result
+        }));
+    }
+
+    ready.wait();
+    let setup_duration_ms =
+        service_setup_duration_ms + worker_setup_started.elapsed().as_secs_f64() * 1000.0;
+    let started = Instant::now();
+    start.wait();
+
+    let mut latencies = Vec::new();
+    let mut failures = Vec::new();
+    let mut saturation_responses = 0usize;
+    for handle in handles {
+        let worker = handle.join().map_err(|_| {
+            ApiError::Validation(
+                "mixed operator concurrency worker thread panicked unexpectedly".into(),
+            )
+        })?;
+        latencies.extend(worker.latencies_ms);
+        saturation_responses += worker.saturation_responses;
+        failures.extend(worker.failures);
+    }
+    let elapsed = started.elapsed().as_secs_f64().max(0.000_001);
+    latencies.sort_by(|left, right| left.partial_cmp(right).unwrap_or(Ordering::Equal));
+    let total_operations = concurrency * DEFAULT_CONCURRENCY_OPERATIONS_PER_WORKER;
+    let successful_operations = latencies.len();
+    let failed_operations = failures.len();
+    let throughput = successful_operations as f64 / elapsed;
+    let mean_latency_ms = latencies.iter().sum::<f64>() / latencies.len().max(1) as f64;
+    let p95_latency_ms = percentile(&latencies, 0.95);
+    let p99_latency_ms = percentile(&latencies, 0.99);
+    failures.sort();
+    failures.dedup();
+    failures.truncate(10);
+
+    Ok(PerfCapacityConcurrencyPoint {
+        concurrency,
+        total_operations,
+        successful_operations,
+        failed_operations,
+        saturation_responses,
+        setup_duration_ms,
+        measurement_duration_ms: elapsed * 1000.0,
+        failure_messages: failures,
+        throughput_per_second: throughput,
+        mean_latency_ms,
+        p95_latency_ms,
+        p99_latency_ms,
     })
 }
 
@@ -1241,17 +1361,20 @@ fn recommend_concurrency(
     calibration_host: &PerfHostSnapshot,
     pack: &PerfCapacityConcurrencyPack,
 ) -> usize {
+    if pack.service_instances_per_point != 1 {
+        return 0;
+    }
     let cpu_scale = cpu_scale_for_class(class, calibration_host).max(0.25);
-    let saturation_cap = pack.first_saturation_point.unwrap_or(usize::MAX);
-    let mut recommended = pack
-        .points
-        .first()
-        .map(|point| point.concurrency)
-        .unwrap_or(0);
+    let mut recommended = 0;
     for point in &pack.points {
         let projected_p95_ms = point.p95_latency_ms / cpu_scale;
-        if projected_p95_ms <= class.target_p95_latency_ms && point.concurrency <= saturation_cap {
-            recommended = point.concurrency;
+        if point.total_operations > 0
+            && point.successful_operations == point.total_operations
+            && point.failed_operations == 0
+            && point.saturation_responses == 0
+            && projected_p95_ms <= class.target_p95_latency_ms
+        {
+            recommended = recommended.max(point.concurrency);
         }
     }
     recommended
@@ -1651,5 +1774,155 @@ mod tests {
         assert_eq!(triggers[0].category, "closure ceiling");
         assert!(triggers[0].fired);
         assert!(triggers[0].recommendation.contains("Partition"));
+    }
+
+    fn concurrency_point(
+        concurrency: usize,
+        throughput_per_second: f64,
+        p95_latency_ms: f64,
+    ) -> PerfCapacityConcurrencyPoint {
+        PerfCapacityConcurrencyPoint {
+            concurrency,
+            total_operations: concurrency * DEFAULT_CONCURRENCY_OPERATIONS_PER_WORKER,
+            successful_operations: concurrency * DEFAULT_CONCURRENCY_OPERATIONS_PER_WORKER,
+            failed_operations: 0,
+            saturation_responses: 0,
+            setup_duration_ms: 10.0,
+            measurement_duration_ms: 100.0,
+            failure_messages: Vec::new(),
+            throughput_per_second,
+            mean_latency_ms: p95_latency_ms / 2.0,
+            p95_latency_ms,
+            p99_latency_ms: p95_latency_ms * 1.2,
+        }
+    }
+
+    #[test]
+    fn concurrency_recommendation_uses_class_p95_after_calibration_host_plateau() {
+        let class = hardware_classes()
+            .into_iter()
+            .find(|class| class.node_class == CapacityNodeClass::M)
+            .expect("M hardware class");
+        let pack = PerfCapacityConcurrencyPack {
+            label: "test".into(),
+            service_instances_per_point: 1,
+            operations_per_worker: DEFAULT_CONCURRENCY_OPERATIONS_PER_WORKER,
+            operation_mix: Vec::new(),
+            first_saturation_point: Some(16),
+            points: vec![
+                concurrency_point(1, 198.0, 11.0),
+                concurrency_point(4, 310.0, 17.0),
+                concurrency_point(8, 497.0, 42.0),
+                concurrency_point(16, 526.0, 89.0),
+                concurrency_point(32, 525.0, 207.0),
+            ],
+        };
+
+        assert_eq!(recommend_concurrency(&class, &fake_host(4, 16), &pack), 32);
+        assert_eq!(pack.first_saturation_point, Some(16));
+    }
+
+    #[test]
+    fn concurrency_recommendation_stops_at_projected_class_p95_boundary() {
+        let class = hardware_classes()
+            .into_iter()
+            .find(|class| class.node_class == CapacityNodeClass::M)
+            .expect("M hardware class");
+        let pack = PerfCapacityConcurrencyPack {
+            label: "test".into(),
+            service_instances_per_point: 1,
+            operations_per_worker: DEFAULT_CONCURRENCY_OPERATIONS_PER_WORKER,
+            operation_mix: Vec::new(),
+            first_saturation_point: Some(16),
+            points: vec![
+                concurrency_point(1, 198.0, 11.0),
+                concurrency_point(16, 526.0, 89.0),
+                concurrency_point(32, 400.0, 7_000.0),
+            ],
+        };
+
+        assert_eq!(recommend_concurrency(&class, &fake_host(4, 16), &pack), 16);
+    }
+
+    #[test]
+    fn concurrency_recommendation_selects_largest_valid_rung_not_last_rung() {
+        let class = hardware_classes()
+            .into_iter()
+            .find(|class| class.node_class == CapacityNodeClass::M)
+            .expect("M hardware class");
+        let pack = PerfCapacityConcurrencyPack {
+            label: "test".into(),
+            service_instances_per_point: 1,
+            operations_per_worker: DEFAULT_CONCURRENCY_OPERATIONS_PER_WORKER,
+            operation_mix: Vec::new(),
+            first_saturation_point: None,
+            points: vec![
+                concurrency_point(32, 400.0, 200.0),
+                concurrency_point(8, 300.0, 50.0),
+                concurrency_point(16, 350.0, 100.0),
+            ],
+        };
+
+        assert_eq!(recommend_concurrency(&class, &fake_host(4, 16), &pack), 32);
+    }
+
+    #[test]
+    fn concurrency_recommendation_rejects_failed_or_saturated_rungs() {
+        let class = hardware_classes()
+            .into_iter()
+            .find(|class| class.node_class == CapacityNodeClass::M)
+            .expect("M hardware class");
+        let mut failed = concurrency_point(32, 400.0, 200.0);
+        failed.successful_operations -= 1;
+        failed.failed_operations = 1;
+        failed.failure_messages = vec!["request failed".into()];
+        let mut saturated = concurrency_point(16, 400.0, 100.0);
+        saturated.successful_operations -= 1;
+        saturated.failed_operations = 1;
+        saturated.saturation_responses = 1;
+        saturated.failure_messages = vec!["returned 503".into()];
+        let mut pack = PerfCapacityConcurrencyPack {
+            label: "test".into(),
+            service_instances_per_point: 1,
+            operations_per_worker: DEFAULT_CONCURRENCY_OPERATIONS_PER_WORKER,
+            operation_mix: Vec::new(),
+            first_saturation_point: None,
+            points: vec![concurrency_point(8, 300.0, 50.0), saturated, failed],
+        };
+
+        assert_eq!(recommend_concurrency(&class, &fake_host(4, 16), &pack), 8);
+        pack.service_instances_per_point = 3;
+        assert_eq!(recommend_concurrency(&class, &fake_host(4, 16), &pack), 0);
+    }
+
+    #[test]
+    fn mixed_concurrency_point_accounts_for_one_shared_service_run() {
+        let fixture = build_http_fixture().expect("shared HTTP fixture");
+        let point = measure_mixed_operator_concurrency_point(
+            &fixture,
+            [
+                MixedOperation::Health,
+                MixedOperation::Status,
+                MixedOperation::History,
+                MixedOperation::Report,
+                MixedOperation::Delta,
+                MixedOperation::Explain,
+            ],
+            4,
+            12.5,
+        )
+        .expect("shared-service concurrency point");
+
+        assert_eq!(point.concurrency, 4);
+        assert_eq!(
+            point.total_operations,
+            4 * DEFAULT_CONCURRENCY_OPERATIONS_PER_WORKER
+        );
+        assert_eq!(point.successful_operations, point.total_operations);
+        assert_eq!(point.failed_operations, 0);
+        assert_eq!(point.saturation_responses, 0);
+        assert!(point.setup_duration_ms >= 12.5);
+        assert!(point.measurement_duration_ms > 0.0);
+        assert!(point.throughput_per_second > 0.0);
     }
 }

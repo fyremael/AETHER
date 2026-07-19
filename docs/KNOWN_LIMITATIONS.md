@@ -80,7 +80,13 @@ ordinary feature backlog:
 ## Performance, Storage, And Release Discipline
 
 - The performance suite now supports host-aware run bundles, suite-specific drift comparison, stress fixtures, matrix summaries, and a lightweight trend index across saved bundles, but it is still artifact-based rather than a persistent benchmark database.
-- The new capacity planner now produces concrete node-class guidance and explicit scale-out triggers, but those envelopes are still internal planning outputs from single-host calibration rather than public guarantees or cloud-SKU-specific commitments.
+- The capacity planner produces concrete node-class guidance and explicit
+  scale-out triggers, but those envelopes are still internal planning outputs
+  from single-host calibration rather than public guarantees or cloud-SKU-
+  specific commitments. The repaired mixed-concurrency ladder measures one
+  shared service and records setup, measurement duration, successes, failures,
+  503s, p95 and p99; its throughput plateau is diagnostic rather than an
+  unscaled node-class cap.
 - Capacity artifact layout and Pages source identity are now asserted locally,
   and performance verdicts retain fixed raw samples without retry. None of those
   local automation changes substitutes for green hosted runs on the exact
@@ -100,7 +106,19 @@ ordinary feature backlog:
   `github-windows-latest`; this does not authorize cross-host drift or promote
   the ephemeral runner to a tracked accepted baseline. A new exact candidate
   and full official plus independent verdict remain required.
-- The current measured default `M` envelope is conservative: it presently recommends `1,024` pilot-board tasks even though larger ladders run correctly, because operator/report latency degrades before replay or local storage become the limiting factor.
+- Protected candidate `64797af68261bc72618487e47f8f44fae3a11d28`
+  passed exact-SHA CI, Supply Chain, Pages, Capacity Planning, package staging
+  and the complete operational-readiness suite, but failed candidate-subject
+  construction because its M-class capacity envelope recommended 16 operators
+  against the unchanged minimum of 32. Its old 32-worker point used 32
+  separate service fixtures and cannot prove the supported one-service
+  boundary. No official bundle or verdict was emitted; the candidate is
+  permanently failed.
+- The failed candidate's diagnostic `M` envelope recommended `4,096`
+  pilot-board tasks, 16 mixed operators and 10,000 durable replay entities.
+  Those values are not a commercial sizing promise. A new candidate must prove
+  the raw shared-service 32-worker rung at no more than 2,000 ms p95, zero
+  failed operations and zero 503 responses before the capacity subject passes.
 - The new R4 verifier binds observations to clean commit/tree/ref identity,
   exact commands, workflow attempts, output bytes, package digest, signed
   provenance certificate, successful producer job, and exact GitHub artifact;

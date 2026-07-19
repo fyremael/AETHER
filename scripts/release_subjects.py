@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from datetime import datetime, timedelta, timezone
@@ -28,6 +29,226 @@ SHA64 = re.compile(r"^[a-f0-9]{64}$")
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise evidence.EvidenceError(message)
+
+
+def same_json_value(left: Any, right: Any) -> bool:
+    """Compare JSON values without Python's bool/int equality coercion."""
+
+    return evidence.canonical_bytes(left) == evidence.canonical_bytes(right)
+
+
+def recompute_capacity_acceptance(
+    policy: Any,
+    envelope: Any,
+    hardware: Any,
+    concurrency_pack: Any,
+) -> dict[str, Any]:
+    """Recompute capacity acceptance from the raw shared-service policy rung."""
+
+    require(isinstance(policy, dict), "capacity policy is missing")
+    require(isinstance(envelope, dict), "capacity node envelope is missing")
+    require(isinstance(hardware, dict), "capacity hardware recommendation is missing")
+    require(isinstance(concurrency_pack, dict), "capacity concurrency pack is missing")
+
+    def finite_number(container: dict[str, Any], key: str, *, minimum: float = 0.0) -> float:
+        value = container.get(key)
+        require(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and float(value) >= minimum,
+            f"capacity {key} is invalid",
+        )
+        return float(value)
+
+    def nonnegative_integer(container: dict[str, Any], key: str) -> int:
+        value = container.get(key)
+        require(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0,
+            f"capacity {key} is invalid",
+        )
+        return value
+
+    minimum_concurrency = policy.get("minimum_mixed_operator_concurrency")
+    require(
+        isinstance(minimum_concurrency, int)
+        and not isinstance(minimum_concurrency, bool)
+        and minimum_concurrency > 0,
+        "capacity policy concurrency threshold is invalid",
+    )
+    minimum_board_size = nonnegative_integer(policy, "minimum_board_size")
+    minimum_replay_size = nonnegative_integer(policy, "minimum_durable_replay_size")
+    minimum_operations_per_worker = nonnegative_integer(
+        policy, "minimum_operator_operations_per_worker"
+    )
+    require(minimum_operations_per_worker > 0, "capacity operator sample depth is empty")
+    required_operation_mix = policy.get("required_operator_mix")
+    require(
+        isinstance(required_operation_mix, list)
+        and required_operation_mix
+        and all(isinstance(item, str) and item for item in required_operation_mix)
+        and len(required_operation_mix) == len(set(required_operation_mix)),
+        "capacity required operator mix is invalid",
+    )
+    maximum_target_p95 = finite_number(policy, "maximum_target_p95_latency_ms")
+    maximum_target_replay = finite_number(policy, "maximum_target_replay_seconds")
+    maximum_operator_p95 = finite_number(policy, "maximum_operator_p95_latency_ms")
+    maximum_operator_error_rate = finite_number(policy, "maximum_operator_error_rate")
+    require(
+        maximum_operator_error_rate <= 1.0,
+        "capacity maximum_operator_error_rate exceeds one",
+    )
+    maximum_operator_saturation = nonnegative_integer(
+        policy, "maximum_operator_saturation_responses"
+    )
+    recommended_board_size = nonnegative_integer(
+        envelope, "maximum_recommended_pilot_board_size"
+    )
+    recommended_concurrency = nonnegative_integer(
+        envelope, "maximum_recommended_mixed_operator_concurrency"
+    )
+    recommended_replay_size = nonnegative_integer(
+        envelope, "maximum_recommended_durable_replay_size"
+    )
+    target_p95 = finite_number(hardware, "target_p95_latency_ms")
+    target_replay = finite_number(hardware, "target_replay_seconds")
+    service_instances_per_point = concurrency_pack.get("service_instances_per_point")
+    require(
+        isinstance(service_instances_per_point, int)
+        and not isinstance(service_instances_per_point, bool)
+        and service_instances_per_point > 0,
+        "capacity service instance count is invalid",
+    )
+    operations_per_worker = concurrency_pack.get("operations_per_worker")
+    require(
+        isinstance(operations_per_worker, int)
+        and not isinstance(operations_per_worker, bool)
+        and operations_per_worker > 0,
+        "capacity operations-per-worker is invalid",
+    )
+    operation_mix = concurrency_pack.get("operation_mix")
+    require(
+        isinstance(operation_mix, list)
+        and operation_mix
+        and all(isinstance(item, str) and item for item in operation_mix)
+        and len(operation_mix) == len(set(operation_mix)),
+        "capacity operation mix is invalid",
+    )
+    points = concurrency_pack.get("points")
+    require(isinstance(points, list) and points, "capacity concurrency points are missing")
+    require(all(isinstance(point, dict) for point in points), "capacity concurrency point is invalid")
+    concurrencies = [point.get("concurrency") for point in points]
+    require(
+        all(isinstance(value, int) and not isinstance(value, bool) and value > 0 for value in concurrencies),
+        "capacity concurrency value is invalid",
+    )
+    require(len(concurrencies) == len(set(concurrencies)), "capacity concurrency points are duplicated")
+    matching_points = [point for point in points if point.get("concurrency") == minimum_concurrency]
+    require(
+        len(matching_points) == 1,
+        "capacity report lacks one raw policy concurrency point",
+    )
+    policy_point = matching_points[0]
+
+    counts: dict[str, int] = {}
+    for key in (
+        "total_operations",
+        "successful_operations",
+        "failed_operations",
+        "saturation_responses",
+    ):
+        value = policy_point.get(key)
+        require(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0,
+            f"capacity policy point {key} is invalid",
+        )
+        counts[key] = value
+    require(counts["total_operations"] > 0, "capacity policy point is empty")
+    require(
+        counts["total_operations"] == minimum_concurrency * operations_per_worker,
+        "capacity policy point operation count is inconsistent",
+    )
+    require(
+        counts["successful_operations"] + counts["failed_operations"]
+        == counts["total_operations"],
+        "capacity policy point operation accounting is inconsistent",
+    )
+    require(
+        counts["saturation_responses"] <= counts["failed_operations"],
+        "capacity policy point saturation count exceeds failures",
+    )
+    failure_messages = policy_point.get("failure_messages", [])
+    require(
+        isinstance(failure_messages, list)
+        and all(isinstance(message, str) and message for message in failure_messages),
+        "capacity failure messages are invalid",
+    )
+    require(
+        counts["failed_operations"] > 0 or not failure_messages,
+        "capacity point reports failure messages without failed operations",
+    )
+
+    for key in (
+        "mean_latency_ms",
+        "p95_latency_ms",
+        "p99_latency_ms",
+        "setup_duration_ms",
+        "measurement_duration_ms",
+    ):
+        value = policy_point.get(key)
+        require(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and float(value) >= 0.0,
+            f"capacity policy point {key} is invalid",
+        )
+    require(
+        float(policy_point["p99_latency_ms"]) >= float(policy_point["p95_latency_ms"]),
+        "capacity policy point p99 is below p95",
+    )
+    require(
+        float(policy_point["measurement_duration_ms"]) > 0.0,
+        "capacity measured duration must be positive",
+    )
+    throughput = policy_point.get("throughput_per_second")
+    require(
+        isinstance(throughput, (int, float))
+        and not isinstance(throughput, bool)
+        and math.isfinite(float(throughput))
+        and float(throughput) > 0.0,
+        "capacity policy point throughput is invalid",
+    )
+    expected_throughput = counts["successful_operations"] / (
+        float(policy_point["measurement_duration_ms"]) / 1000.0
+    )
+    require(
+        math.isclose(float(throughput), expected_throughput, rel_tol=1e-6, abs_tol=1e-6),
+        "capacity policy point throughput disagrees with measured duration",
+    )
+
+    error_rate = counts["failed_operations"] / counts["total_operations"]
+    checks = {
+        "board_size": recommended_board_size >= minimum_board_size,
+        "operator_concurrency": recommended_concurrency >= minimum_concurrency,
+        "durable_replay": recommended_replay_size >= minimum_replay_size,
+        "target_latency": target_p95 <= maximum_target_p95,
+        "target_replay": target_replay <= maximum_target_replay,
+        "shared_service": service_instances_per_point == 1,
+        "operator_sample_depth": operations_per_worker >= minimum_operations_per_worker,
+        "operator_mix": len(operation_mix) == len(required_operation_mix)
+        and set(operation_mix) == set(required_operation_mix),
+        "operator_p95": float(policy_point["p95_latency_ms"]) <= maximum_operator_p95,
+        "operator_error_rate": error_rate <= maximum_operator_error_rate,
+        "operator_saturation": counts["saturation_responses"]
+        <= maximum_operator_saturation,
+    }
+    return {
+        "checks": checks,
+        "policy_point": policy_point,
+        "operator_error_rate": error_rate,
+        "service_instances_per_point": service_instances_per_point,
+    }
 
 
 def load_json_object(path: Path) -> dict[str, Any]:
@@ -113,7 +334,14 @@ def _verify_artifact_receipt(receipt: Any, candidate: dict[str, Any]) -> None:
     require(isinstance(receipt.get("byte_size"), int) and receipt["byte_size"] > 0, "source artifact is empty")
 
 
-def _verify_observation(subject_id: str, observation: Any, candidate: dict[str, Any], package_sha256: str) -> None:
+def _verify_observation(
+    subject_id: str,
+    observation: Any,
+    candidate: dict[str, Any],
+    package_sha256: str,
+    *,
+    capacity_policy: dict[str, Any] | None = None,
+) -> None:
     require(isinstance(observation, dict), f"{subject_id} observation must be an object")
     require(observation.get("status") == "passed", f"{subject_id} observation did not pass")
     require(observation.get("candidate_commit_sha") == candidate["commit_sha"], f"{subject_id} observation commit mismatch")
@@ -160,18 +388,41 @@ def _verify_observation(subject_id: str, observation: Any, candidate: dict[str, 
     elif subject_id == "capacity":
         require(details.get("gate_passed") is True, "capacity gate did not pass")
         require(isinstance(details.get("metrics"), dict) and details["metrics"], "capacity metrics are missing")
-        policy = details.get("policy", {})
+        require(isinstance(capacity_policy, dict), "canonical capacity policy is missing")
+        require(
+            same_json_value(details.get("policy"), capacity_policy),
+            "capacity subject policy differs from canonical gate policy",
+        )
+        policy = capacity_policy
         envelope = details.get("selected_envelope", {})
         hardware = details.get("recommended_hardware", {})
         require(envelope.get("node_class") == policy.get("node_class"), "capacity node class does not match policy")
-        checks = {
-            "board_size": envelope.get("maximum_recommended_pilot_board_size", 0) >= policy.get("minimum_board_size", 0),
-            "operator_concurrency": envelope.get("maximum_recommended_mixed_operator_concurrency", 0) >= policy.get("minimum_mixed_operator_concurrency", 0),
-            "durable_replay": envelope.get("maximum_recommended_durable_replay_size", 0) >= policy.get("minimum_durable_replay_size", 0),
-            "target_latency": hardware.get("target_p95_latency_ms", float("inf")) <= policy.get("maximum_target_p95_latency_ms", 0),
-            "target_replay": hardware.get("target_replay_seconds", float("inf")) <= policy.get("maximum_target_replay_seconds", 0),
+        require(hardware.get("node_class") == policy.get("node_class"), "capacity hardware node class does not match policy")
+        acceptance = recompute_capacity_acceptance(
+            policy,
+            envelope,
+            hardware,
+            details.get("concurrency_pack"),
+        )
+        require(all(acceptance["checks"].values()), "capacity policy threshold failed")
+        require(
+            same_json_value(details["metrics"].get("checks"), acceptance["checks"]),
+            "capacity recorded checks disagree with raw evidence",
+        )
+        require(
+            same_json_value(details.get("capacity_acceptance"), acceptance),
+            "capacity acceptance summary disagrees with raw evidence",
+        )
+        expected_metrics = {
+            "operator_error_rate": acceptance["operator_error_rate"],
+            "operator_p95_latency_ms": acceptance["policy_point"]["p95_latency_ms"],
+            "service_instances_per_point": acceptance["service_instances_per_point"],
         }
-        require(all(checks.values()), "capacity policy threshold failed")
+        for name, expected in expected_metrics.items():
+            require(
+                same_json_value(details["metrics"].get(name), expected),
+                f"capacity {name} metric disagrees with raw evidence",
+            )
     elif subject_id == "customer-workflow":
         raw = details.get("raw_evidence", {})
         gates = raw.get("gates", [])
@@ -219,6 +470,7 @@ def verify_envelope(
     candidate: dict[str, Any],
     package_sha256: str,
     now: datetime,
+    gate_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     require(isinstance(payload, dict), f"{expected_subject_id} envelope must be an object")
     require(payload.get("schema_version") == SUBJECT_VERSION, f"{expected_subject_id} uses an unknown subject schema")
@@ -266,7 +518,24 @@ def verify_envelope(
         key = (str(receipt["run_id"]), receipt["attempt"])
         require(key in seen_runs, f"{expected_subject_id} artifact is bound to an undeclared source run")
     require(isinstance(payload.get("metrics"), dict), f"{expected_subject_id} metrics must be an object")
-    _verify_observation(expected_subject_id, payload.get("observation"), candidate, package_sha256)
+    observation = payload.get("observation")
+    capacity_policy = None
+    if expected_subject_id == "capacity":
+        require(isinstance(gate_policy, dict), "canonical gate policy is missing for capacity")
+        capacity_policy = gate_policy.get("capacity_acceptance")
+        require(isinstance(capacity_policy, dict), "canonical capacity policy is missing")
+    _verify_observation(
+        expected_subject_id,
+        observation,
+        candidate,
+        package_sha256,
+        capacity_policy=capacity_policy,
+    )
+    if expected_subject_id == "capacity":
+        require(
+            same_json_value(payload["metrics"], observation["details"]["metrics"]),
+            "capacity envelope metrics disagree with raw evidence",
+        )
     return payload
 
 

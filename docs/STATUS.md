@@ -90,8 +90,10 @@ job. Official verification now requires signed package provenance plus live
 producer and prerequisite run/job outcomes and redownloaded artifact bytes; a
 numeric run declaration, declared host, or correctly named file is
 insufficient. The qualification and generated promotion-record path are
-implemented locally. An independent adversarial review found no remaining
-P0/P1 defects after the final capacity and readiness-byte tightening. Local
+implemented locally. A prior independent adversarial review found no remaining
+P0/P1 defects in the then-visible evidence path, but hosted qualification later
+exposed that the capacity producer measured one service per worker and capped
+node-class recommendations with an unscaled calibration-host plateau. Local
 validation was green before hosted qualification. PR #28 has since merged and
 protected candidate `11380eed81d0690717637a6926ae0087547205c2` passed exact-SHA
 CI, Supply Chain, Pages, and Capacity Planning. Release Readiness run
@@ -316,6 +318,15 @@ Still open:
   but remains permanently failed because its packaged backup/restore harness
   omitted the required quiesced-service acknowledgement and its Service v2
   collector still checked an obsolete Postgres CI marker set
+- candidate `64797af68261bc72618487e47f8f44fae3a11d28` passed exact-SHA CI,
+  Supply Chain, Pages, Capacity Planning, canonical-package staging and the
+  complete Windows operational-readiness suite. Release Readiness run
+  `29691266971` then failed closed before bundle assembly because the M-class
+  capacity envelope recommended 16 mixed operators against the unchanged
+  minimum of 32. The old raw 32-worker point used 32 separate services and
+  therefore could not qualify the supported one-service boundary. The
+  immutable coordinates and disposition are recorded in
+  `docs/evidence/RELEASE_READINESS_64797AF.md`; this candidate cannot promote
 - post-v1 DSL ergonomics and document modularity beyond the current canonical surface
 - production hardening for the optional Postgres journal deployment path beyond current parity/concurrency coverage
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
@@ -324,16 +335,15 @@ Still open:
 
 ## Immediate focus
 
-Hosted validation of the remediated first-restart latency documented in
-`docs/RESTART_LATENCY_INVESTIGATION.md` passed in Release Readiness run
-`29678877127`, and canonical-package staging passed in run `29684445133`. That
-second run exposed the next fail-closed blocker: the operability harness did not
-pass the package helpers' required `-ConfirmServiceStopped` acknowledgement
-after stopping the service. Its immutable Service v2 payload simultaneously
-showed that the collector still required obsolete Postgres CI markers. The
-immediate work is to merge the focused two-part repair for the quiesced helper
-acknowledgement and current verified-TLS Postgres marker contract, then resume
-R7 exact-candidate qualification from a new protected SHA/tree under
+The quiesced backup/restore and current verified-TLS Postgres marker repairs
+passed on protected candidate `64797af68261bc72618487e47f8f44fae3a11d28`.
+That candidate's Release Readiness suite was green, but candidate-subject
+construction exposed the next fail-closed blocker: the capacity model measured
+separate services per worker and applied a noisy 4-vCPU throughput plateau as
+an unscaled M-class cap. The immediate work is the focused shared-service
+capacity producer and raw-evidence verifier repair. The 32-worker, 2,000 ms,
+zero-error and zero-503 policies remain unchanged. After independent review and
+merge, qualification must restart from a new protected SHA/tree under
 `docs/REMEDIATION_PROGRAMME.md`. Feature broadening across policy, service
 execution, append, proof identity, or release claims stays frozen until the
 relevant repaired contract is green:

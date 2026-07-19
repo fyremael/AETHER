@@ -588,10 +588,11 @@ def verify_subject_github_outcomes(
             require(pages.get("expected_sha") == candidate["commit_sha"] and pages.get("observed_sha") == candidate["commit_sha"], "Pages source verification is cross-candidate")
         elif subject_id == "capacity":
             require(len(verified_source_payloads) == 1, "capacity source report is ambiguous")
-            report = verified_source_payloads[0]
-            details = envelope["observation"]["details"]
-            require(details.get("selected_envelope") in report.get("single_node_envelopes", []), "capacity selected envelope is absent from source report")
-            require(details.get("recommended_hardware") == report.get("recommended_hardware"), "capacity hardware recommendation differs from source report")
+            verify_capacity_source_payload(
+                envelope,
+                verified_source_payloads[0],
+                policy["capacity_acceptance"],
+            )
 
     for subject_id, expected_names in {
         "code-scan": {"CodeQL (go)", "CodeQL (python)"},
@@ -630,6 +631,55 @@ def verify_subject_github_outcomes(
             require(len(matches) == 1, f"{subject_id} GitHub job ID is missing or ambiguous")
             require(matches[0].get("name") == declared.get("name"), f"{subject_id} GitHub job name changed")
             require(matches[0].get("status") == "completed" and matches[0].get("conclusion") == "success", f"{subject_id} GitHub job did not pass")
+
+
+def verify_capacity_source_payload(
+    envelope: dict[str, Any],
+    report: dict[str, Any],
+    capacity_policy: dict[str, Any],
+) -> None:
+    """Bind capacity subject semantics to the redownloaded artifact JSON."""
+
+    details = envelope["observation"]["details"]
+    require(
+        release_subjects.same_json_value(details.get("policy"), capacity_policy),
+        "capacity subject policy differs from canonical gate policy",
+    )
+    source_envelopes = report.get("single_node_envelopes", [])
+    require(isinstance(source_envelopes, list), "capacity source envelopes are invalid")
+    matching_envelopes = [
+        item
+        for item in source_envelopes
+        if release_subjects.same_json_value(details.get("selected_envelope"), item)
+    ]
+    require(
+        len(matching_envelopes) == 1,
+        "capacity selected envelope is absent from source report",
+    )
+    require(
+        release_subjects.same_json_value(
+            details.get("recommended_hardware"), report.get("recommended_hardware")
+        ),
+        "capacity hardware recommendation differs from source report",
+    )
+    require(
+        release_subjects.same_json_value(
+            details.get("concurrency_pack"), report.get("concurrency_pack")
+        ),
+        "capacity concurrency pack differs from source report",
+    )
+    source_acceptance = release_subjects.recompute_capacity_acceptance(
+        capacity_policy,
+        details.get("selected_envelope"),
+        details.get("recommended_hardware"),
+        report.get("concurrency_pack"),
+    )
+    require(
+        release_subjects.same_json_value(
+            details.get("capacity_acceptance"), source_acceptance
+        ),
+        "capacity acceptance differs from source report",
+    )
 
 
 def verify_package_provenance(
@@ -849,6 +899,7 @@ def verify_bundle(
                     candidate=candidate,
                     package_sha256=package_digest,
                     now=now,
+                    gate_policy=policy,
                 )
                 available_subjects.add(subject_id)
             else:

@@ -220,6 +220,7 @@ def make_subject(
     receipts: list[dict[str, Any]],
     source_runs: list[dict[str, Any]],
     metrics: dict[str, Any],
+    gate_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     generated = evidence.utc_now()
     payload = {
@@ -244,6 +245,7 @@ def make_subject(
         candidate=candidate,
         package_sha256=package_sha,
         now=generated,
+        gate_policy=gate_policy,
     )
     return payload
 
@@ -412,22 +414,26 @@ def build_subjects(args: argparse.Namespace) -> int:
     selected_envelope = matching_envelopes[0]
     recommended_hardware = capacity_raw.get("recommended_hardware", {})
     require(capacity_raw.get("node_class") == node_class, "capacity report recommends another node class")
-    capacity_checks = {
-        "board_size": selected_envelope.get("maximum_recommended_pilot_board_size", 0) >= capacity_policy.get("minimum_board_size", 0),
-        "operator_concurrency": selected_envelope.get("maximum_recommended_mixed_operator_concurrency", 0) >= capacity_policy.get("minimum_mixed_operator_concurrency", 0),
-        "durable_replay": selected_envelope.get("maximum_recommended_durable_replay_size", 0) >= capacity_policy.get("minimum_durable_replay_size", 0),
-        "target_latency": recommended_hardware.get("target_p95_latency_ms", float("inf")) <= capacity_policy.get("maximum_target_p95_latency_ms", 0),
-        "target_replay": recommended_hardware.get("target_replay_seconds", float("inf")) <= capacity_policy.get("maximum_target_replay_seconds", 0),
-    }
+    require(recommended_hardware.get("node_class") == node_class, "capacity hardware recommends another node class")
+    capacity_acceptance = subjects.recompute_capacity_acceptance(
+        capacity_policy,
+        selected_envelope,
+        recommended_hardware,
+        capacity_raw.get("concurrency_pack"),
+    )
+    capacity_checks = capacity_acceptance["checks"]
     require(all(capacity_checks.values()), f"capacity acceptance failed: {sorted(name for name, passed in capacity_checks.items() if not passed)}")
     capacity_metrics = {
         "node_class": node_class,
         "limiting_factor": capacity_raw.get("current_limiting_factor"),
         "envelope_count": len(capacity_raw.get("single_node_envelopes", [])),
         "checks": capacity_checks,
+        "operator_error_rate": capacity_acceptance["operator_error_rate"],
+        "operator_p95_latency_ms": capacity_acceptance["policy_point"]["p95_latency_ms"],
+        "service_instances_per_point": capacity_acceptance["service_instances_per_point"],
     }
     observations["capacity"] = (
-        normalized_observation(candidate, package_sha, "capacity-planning", {"gate_passed": True, "metrics": capacity_metrics, "policy": capacity_policy, "selected_envelope": selected_envelope, "recommended_hardware": recommended_hardware, "source_files": [source_file_descriptor(capacity_source, capacity_root, receipts["capacity"])]}),
+        normalized_observation(candidate, package_sha, "capacity-planning", {"gate_passed": True, "metrics": capacity_metrics, "policy": capacity_policy, "selected_envelope": selected_envelope, "recommended_hardware": recommended_hardware, "concurrency_pack": capacity_raw.get("concurrency_pack"), "capacity_acceptance": capacity_acceptance, "source_files": [source_file_descriptor(capacity_source, capacity_root, receipts["capacity"])]}),
         [receipts["capacity"]],
         capacity_metrics,
     )
@@ -561,6 +567,7 @@ def build_subjects(args: argparse.Namespace) -> int:
             receipts=bound_receipts,
             source_runs=bound_runs,
             metrics=metrics,
+            gate_policy=policy,
         )
         evidence.write_canonical_json(output / f"{subject_id}.json", payload)
     shutil.copy2(readiness_manifest_path, readiness_output_dir / readiness_manifest_path.name)
