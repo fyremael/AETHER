@@ -329,11 +329,14 @@ Hosted validation of the remediated first-restart latency documented in
 `29678877127`, and canonical-package staging passed in run `29684445133`. That
 second run exposed the next fail-closed blocker: the operability harness did not
 pass the package helpers' required `-ConfirmServiceStopped` acknowledgement
-after stopping the service. The immediate work is to merge the focused harness
-repair and resume R7 exact-candidate qualification from a new protected SHA/tree
-under `docs/REMEDIATION_PROGRAMME.md`. Feature broadening across policy,
-service execution, append, proof identity, or release claims stays frozen until
-the relevant repaired contract is green:
+after stopping the service. Its immutable Service v2 payload simultaneously
+showed that the collector still required obsolete Postgres CI markers. The
+immediate work is to merge the focused two-part repair for the quiesced helper
+acknowledgement and current verified-TLS Postgres marker contract, then resume
+R7 exact-candidate qualification from a new protected SHA/tree under
+`docs/REMEDIATION_PROGRAMME.md`. Feature broadening across policy, service
+execution, append, proof identity, or release claims stays frozen until the
+relevant repaired contract is green:
 
 - keep the temporary controlled-alpha claim identical across status, roadmap, limitations, commercialization, and site source
 - preserve the now-green local R1-R3 semantic, proof-identity, and append-admission contracts while qualifying them through immutable exact-candidate evidence
