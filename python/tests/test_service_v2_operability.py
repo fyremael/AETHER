@@ -5,6 +5,8 @@ import importlib.util
 import inspect
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -47,19 +49,45 @@ class ServiceV2OperabilityTests(unittest.TestCase):
 
     def test_postgres_ci_has_required_markers(self) -> None:
         module = load_module()
+        expected_markers = [
+            "postgres-journal",
+            "scripts/ci-postgres-tls.sh",
+            "Postgres transport security matrix",
+            "cargo test -p aether_storage --lib",
+            "cargo test -p aether_storage --test postgres_tls",
+            "cargo test -p aether_api --test http_service http_service_postgres_namespaces",
+        ]
+
+        self.assertEqual(module.POSTGRES_CI_REQUIRED_MARKERS, expected_markers)
         ok, missing = module.file_contains_all(
             REPO_ROOT / ".github" / "workflows" / "ci.yml",
-            [
-                "postgres-journal",
-                "scripts/ci-postgres-tls.sh",
-                "Postgres transport security matrix",
-                "cargo test -p aether_storage --lib",
-                "cargo test -p aether_storage --test postgres_tls",
-                "cargo test -p aether_api --test http_service http_service_postgres_namespaces",
-            ],
+            module.POSTGRES_CI_REQUIRED_MARKERS,
         )
 
         self.assertTrue(ok, missing)
+
+    def test_collector_accepts_current_blocking_postgres_ci_contract(self) -> None:
+        module = load_module()
+        args = SimpleNamespace(
+            generated_at="2026-07-19T00:00:00+00:00",
+            hardening_json=None,
+            package_root=None,
+            artifact_dir=None,
+            postgres_env="AETHER_POSTGRES_TEST_URL",
+            accept_ci_postgres=True,
+            timeout_seconds=1,
+        )
+
+        with mock.patch.object(module.shutil, "which", return_value=None), mock.patch.dict(
+            module.os.environ, {}, clear=True
+        ):
+            payload = module.collect_service_v2_evidence(args)
+
+        postgres_gate = next(
+            gate for gate in payload["gates"] if gate["id"] == "postgres_journal_restart_replay"
+        )
+        self.assertEqual(postgres_gate["status"], "ci_blocking")
+        self.assertEqual(postgres_gate["blockers"], [])
 
     def test_hardening_promotion_status_reads_admin_operator_flags(self) -> None:
         module = load_module()

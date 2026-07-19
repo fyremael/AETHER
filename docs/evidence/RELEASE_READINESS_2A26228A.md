@@ -46,7 +46,19 @@ restore helpers without the required acknowledgement.
 
 The focused repair adds that acknowledgement only to the two helper calls after
 the existing process-stop boundary and preserves the helpers' independent
-reachable-endpoint refusal. Controlled alpha remains unchanged. A successful
-repair requires a reviewed merge and an entirely new protected candidate with
-new exact-SHA CI, Supply Chain, Pages, Capacity Planning, Release Readiness,
-clean-room byte verification, and independent review.
+reachable-endpoint refusal.
+
+The same immutable Service v2 payload also recorded
+`postgres_journal_restart_replay` as `unavailable`. Its blockers named the
+obsolete markers `postgres:16`, `AETHER_POSTGRES_TEST_URL`, and
+`cargo test -p aether_storage postgres_journal`, even though the blocking CI
+contract now starts the verified-TLS fixtures with `scripts/ci-postgres-tls.sh`
+and runs the storage library, transport-security matrix, and HTTP namespace
+tests. After the package gate was repaired, that stale collector contract would
+have kept `beta_ready` false. The focused repair therefore binds the collector
+and its regression test to one current Postgres CI marker set.
+
+Controlled alpha remains unchanged. A successful repair requires a reviewed
+merge and an entirely new protected candidate with new exact-SHA CI, Supply
+Chain, Pages, Capacity Planning, Release Readiness, clean-room byte
+verification, and independent review.

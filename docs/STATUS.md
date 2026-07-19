@@ -293,8 +293,9 @@ Still open:
   passed exact-SHA CI, Supply Chain, Pages, and Capacity Planning, but Release
   Readiness run `29678877127` failed because the canonical-package staging
   parent directory did not exist. The immutable blocker is recorded in
-  `docs/evidence/RELEASE_READINESS_5E4F95A.md`; this candidate cannot promote,
-  and the focused repair must be merged before selecting a new candidate
+  `docs/evidence/RELEASE_READINESS_5E4F95A.md`; this candidate cannot promote.
+  Its focused staging repair merged before candidate `2a26228a3b134f12c6be0f0405def043caca4a55`
+  was selected
 - official exact-candidate qualification of the locally green policy-scoped semantics
 - official exact-candidate qualification of durable, non-aliasing trace identity
 - a successful official exact-candidate workflow bundle and independently
@@ -313,7 +314,8 @@ Still open:
   `2a26228a3b134f12c6be0f0405def043caca4a55` passed CI, Supply Chain, Pages,
   Capacity Planning, canonical-package staging, and the performance-beta gate
   but remains permanently failed because its packaged backup/restore harness
-  omitted the required quiesced-service acknowledgement
+  omitted the required quiesced-service acknowledgement and its Service v2
+  collector still checked an obsolete Postgres CI marker set
 - post-v1 DSL ergonomics and document modularity beyond the current canonical surface
 - production hardening for the optional Postgres journal deployment path beyond current parity/concurrency coverage
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
