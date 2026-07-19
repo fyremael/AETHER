@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
+import inspect
 import unittest
 from pathlib import Path
 
@@ -96,6 +98,35 @@ class ServiceV2OperabilityTests(unittest.TestCase):
 
         self.assertEqual(status["admin"], "missing")
         self.assertEqual(status["operator"], "missing")
+
+    def test_package_drill_acknowledges_quiesced_backup_and_restore(self) -> None:
+        module = load_module()
+        source = inspect.getsource(module.run_package_backup_restore_drill)
+        tree = ast.parse(source)
+        helper_commands: dict[str, list[str]] = {}
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            if not isinstance(node.func, ast.Name) or node.func.id != "command_result":
+                continue
+            command = node.args[0]
+            if not isinstance(command, ast.List):
+                continue
+            rendered = [ast.unparse(item) for item in command.elts]
+            for helper in ("backup_script", "restore_script"):
+                if f"str({helper})" in rendered:
+                    helper_commands[helper] = rendered
+
+        self.assertEqual(set(helper_commands), {"backup_script", "restore_script"})
+        for helper, command in helper_commands.items():
+            self.assertIn(
+                "'-ConfirmServiceStopped'",
+                command,
+                f"{helper} invocation must acknowledge the already-quiesced service",
+            )
+
+        self.assertGreaterEqual(source.count("stop_process(service)"), 3)
 
 
 if __name__ == "__main__":

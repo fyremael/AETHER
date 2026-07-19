@@ -309,7 +309,11 @@ Still open:
   Planning, and Release Readiness runs all pass; candidate
   `5e4f95a50792a7a301598abc34f6fd23e32bb91d` passed the hosted performance-beta
   and restart/replay latency gates but remains permanently failed because its
-  readiness run could not stage the canonical package
+  readiness run could not stage the canonical package; candidate
+  `2a26228a3b134f12c6be0f0405def043caca4a55` passed CI, Supply Chain, Pages,
+  Capacity Planning, canonical-package staging, and the performance-beta gate
+  but remains permanently failed because its packaged backup/restore harness
+  omitted the required quiesced-service acknowledgement
 - post-v1 DSL ergonomics and document modularity beyond the current canonical surface
 - production hardening for the optional Postgres journal deployment path beyond current parity/concurrency coverage
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
@@ -320,11 +324,14 @@ Still open:
 
 Hosted validation of the remediated first-restart latency documented in
 `docs/RESTART_LATENCY_INVESTIGATION.md` passed in Release Readiness run
-`29678877127`. The immediate work is to merge the focused canonical-package
-staging repair and resume R7 exact-candidate qualification from a new protected
-SHA/tree under `docs/REMEDIATION_PROGRAMME.md`. Feature broadening across
-policy, service execution, append, proof identity, or release claims stays
-frozen until the relevant repaired contract is green:
+`29678877127`, and canonical-package staging passed in run `29684445133`. That
+second run exposed the next fail-closed blocker: the operability harness did not
+pass the package helpers' required `-ConfirmServiceStopped` acknowledgement
+after stopping the service. The immediate work is to merge the focused harness
+repair and resume R7 exact-candidate qualification from a new protected SHA/tree
+under `docs/REMEDIATION_PROGRAMME.md`. Feature broadening across policy,
+service execution, append, proof identity, or release claims stays frozen until
+the relevant repaired contract is green:
 
 - keep the temporary controlled-alpha claim identical across status, roadmap, limitations, commercialization, and site source
 - preserve the now-green local R1-R3 semantic, proof-identity, and append-admission contracts while qualifying them through immutable exact-candidate evidence
