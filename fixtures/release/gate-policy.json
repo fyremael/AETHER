@@ -1,6 +1,6 @@
 {
   "schema_version": "aether.release-gate-policy.v1",
-  "policy_id": "commercial-beta-r8-v1",
+  "policy_id": "commercial-beta-r9-v1",
   "claim_stage": "commercial_beta_candidate",
   "official_repository": "fyremael/AETHER",
   "official_workflow": ".github/workflows/reusable-exact-candidate-evidence.yml",
@@ -17,9 +17,21 @@
     "node_class": "M",
     "minimum_board_size": 1024,
     "minimum_mixed_operator_concurrency": 32,
+    "minimum_operator_operations_per_worker": 12,
+    "required_operator_mix": [
+      "/health",
+      "/v1/status",
+      "/v1/history",
+      "/v1/reports/pilot/coordination",
+      "/v1/reports/pilot/coordination-delta",
+      "/v1/explanations/resolve"
+    ],
     "minimum_durable_replay_size": 10000,
     "maximum_target_p95_latency_ms": 2000.0,
-    "maximum_target_replay_seconds": 60.0
+    "maximum_target_replay_seconds": 60.0,
+    "maximum_operator_p95_latency_ms": 2000.0,
+    "maximum_operator_error_rate": 0.0,
+    "maximum_operator_saturation_responses": 0
   },
   "non_waivable_gate_ids": [
     "semantic.policy_noninterference",

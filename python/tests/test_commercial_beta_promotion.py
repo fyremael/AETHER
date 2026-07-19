@@ -61,7 +61,7 @@ class CommercialBetaPromotionTests(unittest.TestCase):
                 "ref": "refs/heads/main",
                 "dirty": False,
             },
-            "policy_id": "commercial-beta-r8-v1",
+            "policy_id": "commercial-beta-r9-v1",
             "official": True,
             "computed_verdict": "passed",
             "blockers": [],

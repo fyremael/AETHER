@@ -52,6 +52,9 @@ class ReleaseSubjectTests(unittest.TestCase):
             "dirty": False,
         }
         self.package_sha = "c" * 64
+        self.gate_policy = self.evidence.load_json(
+            REPO_ROOT / "fixtures" / "release" / "gate-policy.json"
+        )
 
     def details(self, subject_id: str) -> dict:
         details = {
@@ -62,9 +65,21 @@ class ReleaseSubjectTests(unittest.TestCase):
                     "node_class": "M",
                     "minimum_board_size": 1024,
                     "minimum_mixed_operator_concurrency": 32,
+                    "minimum_operator_operations_per_worker": 12,
+                    "required_operator_mix": [
+                        "/health",
+                        "/v1/status",
+                        "/v1/history",
+                        "/v1/reports/pilot/coordination",
+                        "/v1/reports/pilot/coordination-delta",
+                        "/v1/explanations/resolve",
+                    ],
                     "minimum_durable_replay_size": 10000,
                     "maximum_target_p95_latency_ms": 2000.0,
                     "maximum_target_replay_seconds": 60.0,
+                    "maximum_operator_p95_latency_ms": 2000.0,
+                    "maximum_operator_error_rate": 0.0,
+                    "maximum_operator_saturation_responses": 0,
                 },
                 "selected_envelope": {
                     "node_class": "M",
@@ -73,8 +88,37 @@ class ReleaseSubjectTests(unittest.TestCase):
                     "maximum_recommended_durable_replay_size": 10000,
                 },
                 "recommended_hardware": {
+                    "node_class": "M",
                     "target_p95_latency_ms": 1500.0,
                     "target_replay_seconds": 45.0,
+                },
+                "concurrency_pack": {
+                    "service_instances_per_point": 1,
+                    "operations_per_worker": 12,
+                    "operation_mix": [
+                        "/health",
+                        "/v1/status",
+                        "/v1/history",
+                        "/v1/reports/pilot/coordination",
+                        "/v1/reports/pilot/coordination-delta",
+                        "/v1/explanations/resolve",
+                    ],
+                    "points": [
+                        {
+                            "concurrency": 32,
+                            "total_operations": 384,
+                            "successful_operations": 384,
+                            "failed_operations": 0,
+                            "saturation_responses": 0,
+                            "setup_duration_ms": 125.0,
+                            "measurement_duration_ms": 900.0,
+                            "failure_messages": [],
+                            "throughput_per_second": 426.6666666666667,
+                            "mean_latency_ms": 100.0,
+                            "p95_latency_ms": 225.0,
+                            "p99_latency_ms": 300.0,
+                        }
+                    ],
                 },
             },
             "code-scan": {
@@ -95,6 +139,24 @@ class ReleaseSubjectTests(unittest.TestCase):
             "customer-workflow": {"workflow_passed": True, "steps": 5},
             "vulnerability-scan": {"tools": ["trivy"], "findings": 0},
         }[subject_id]
+        if subject_id == "capacity":
+            acceptance = self.subjects.recompute_capacity_acceptance(
+                details["policy"],
+                details["selected_envelope"],
+                details["recommended_hardware"],
+                details["concurrency_pack"],
+            )
+            details["capacity_acceptance"] = acceptance
+            details["metrics"]["checks"] = acceptance["checks"]
+            details["metrics"]["operator_error_rate"] = acceptance[
+                "operator_error_rate"
+            ]
+            details["metrics"]["operator_p95_latency_ms"] = acceptance[
+                "policy_point"
+            ]["p95_latency_ms"]
+            details["metrics"]["service_instances_per_point"] = acceptance[
+                "service_instances_per_point"
+            ]
         if subject_id in {"capacity", "pages-deployment", "vulnerability-scan"}:
             details["source_files"] = [
                 {
@@ -107,6 +169,7 @@ class ReleaseSubjectTests(unittest.TestCase):
         return details
 
     def envelope(self, subject_id: str = "capacity") -> dict:
+        details = self.details(subject_id)
         source_run = {
             "workflow_file": ".github/workflows/capacity-planning.yml",
             "run_id": "7",
@@ -152,9 +215,11 @@ class ReleaseSubjectTests(unittest.TestCase):
                 "candidate_tree_sha": self.candidate["tree_sha"],
                 "package_sha256": self.package_sha,
                 "check": subject_id,
-                "details": self.details(subject_id),
+                "details": details,
             },
         }
+        if subject_id == "capacity":
+            payload["metrics"] = json.loads(json.dumps(details["metrics"]))
         payload["subject_identity"] = self.evidence.identity_digest(payload, "subject_identity")
         return payload
 
@@ -165,6 +230,7 @@ class ReleaseSubjectTests(unittest.TestCase):
             candidate=self.candidate,
             package_sha256=self.package_sha,
             now=self.now,
+            gate_policy=self.gate_policy,
         )
 
     def resign(self, payload: dict) -> None:
@@ -181,6 +247,7 @@ class ReleaseSubjectTests(unittest.TestCase):
                 candidate=self.candidate,
                 package_sha256=self.package_sha,
                 now=self.now,
+                gate_policy=self.gate_policy,
             )
         failed = self.envelope()
         failed["observed_status"] = "failed"
@@ -236,6 +303,136 @@ class ReleaseSubjectTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "capacity policy threshold failed"):
             self.verify(payload)
 
+    def test_capacity_raw_shared_service_latency_error_and_saturation_policy_blocks(self) -> None:
+        cases = [
+            (
+                "separate-services",
+                lambda details: details["concurrency_pack"].update(
+                    service_instances_per_point=32
+                ),
+            ),
+            (
+                "raw-p95",
+                lambda details: details["concurrency_pack"]["points"][0].update(
+                    p95_latency_ms=2000.1,
+                    p99_latency_ms=2200.0,
+                ),
+            ),
+            (
+                "shallow-sample",
+                lambda details: (
+                    details["concurrency_pack"].update(operations_per_worker=1),
+                    details["concurrency_pack"]["points"][0].update(
+                        total_operations=32,
+                        successful_operations=32,
+                        measurement_duration_ms=75.0,
+                        throughput_per_second=426.6666666666667,
+                    ),
+                ),
+            ),
+            (
+                "incomplete-mix",
+                lambda details: details["concurrency_pack"].update(
+                    operation_mix=["/health"]
+                ),
+            ),
+            (
+                "failed-operation",
+                lambda details: details["concurrency_pack"]["points"][0].update(
+                    successful_operations=383,
+                    failed_operations=1,
+                    failure_messages=["request failed"],
+                    throughput_per_second=425.55555555555554,
+                ),
+            ),
+            (
+                "saturation-response",
+                lambda details: details["concurrency_pack"]["points"][0].update(
+                    successful_operations=383,
+                    failed_operations=1,
+                    saturation_responses=1,
+                    failure_messages=["returned 503"],
+                    throughput_per_second=425.55555555555554,
+                ),
+            ),
+        ]
+        for label, mutate in cases:
+            with self.subTest(case=label):
+                payload = self.envelope("capacity")
+                mutate(payload["observation"]["details"])
+                self.resign(payload)
+                with self.assertRaisesRegex(ValueError, "capacity policy threshold failed"):
+                    self.verify(payload)
+
+    def test_capacity_raw_policy_point_must_be_unique_and_accounted(self) -> None:
+        duplicated = self.envelope("capacity")
+        points = duplicated["observation"]["details"]["concurrency_pack"]["points"]
+        points.append(json.loads(json.dumps(points[0])))
+        self.resign(duplicated)
+        with self.assertRaisesRegex(ValueError, "concurrency points are duplicated"):
+            self.verify(duplicated)
+
+        inconsistent = self.envelope("capacity")
+        inconsistent["observation"]["details"]["concurrency_pack"]["points"][0][
+            "total_operations"
+        ] = 383
+        self.resign(inconsistent)
+        with self.assertRaisesRegex(ValueError, "operation count is inconsistent"):
+            self.verify(inconsistent)
+
+        inconsistent_metrics = self.envelope("capacity")
+        inconsistent_metrics["metrics"]["checks"]["operator_p95"] = False
+        self.resign(inconsistent_metrics)
+        with self.assertRaisesRegex(ValueError, "envelope metrics disagree"):
+            self.verify(inconsistent_metrics)
+
+        boolean_acceptance = self.envelope("capacity")
+        boolean_acceptance["observation"]["details"]["capacity_acceptance"][
+            "operator_error_rate"
+        ] = False
+        self.resign(boolean_acceptance)
+        with self.assertRaisesRegex(ValueError, "acceptance summary disagrees"):
+            self.verify(boolean_acceptance)
+
+        boolean_metrics = self.envelope("capacity")
+        boolean_metrics["observation"]["details"]["metrics"][
+            "operator_error_rate"
+        ] = False
+        boolean_metrics["metrics"]["operator_error_rate"] = False
+        self.resign(boolean_metrics)
+        with self.assertRaisesRegex(ValueError, "operator_error_rate metric disagrees"):
+            self.verify(boolean_metrics)
+
+        weakened_policy = self.envelope("capacity")
+        weakened_policy["observation"]["details"]["policy"][
+            "minimum_mixed_operator_concurrency"
+        ] = 1
+        self.resign(weakened_policy)
+        with self.assertRaisesRegex(ValueError, "differs from canonical gate policy"):
+            self.verify(weakened_policy)
+
+    def test_capacity_subject_raw_pack_is_bound_to_redownloaded_source_report(self) -> None:
+        payload = self.envelope("capacity")
+        details = payload["observation"]["details"]
+        report = {
+            "single_node_envelopes": [
+                json.loads(json.dumps(details["selected_envelope"]))
+            ],
+            "recommended_hardware": json.loads(
+                json.dumps(details["recommended_hardware"])
+            ),
+            "concurrency_pack": json.loads(json.dumps(details["concurrency_pack"])),
+        }
+        self.verify_module.verify_capacity_source_payload(
+            payload, report, self.gate_policy["capacity_acceptance"]
+        )
+
+        report["concurrency_pack"]["points"][0]["p95_latency_ms"] = 1.0
+        with self.assertRaisesRegex(ValueError, "concurrency pack differs"):
+            self.verify_module.verify_capacity_source_payload(
+                payload, report, self.gate_policy["capacity_acceptance"]
+            )
+
     def test_failed_codeql_tls_pages_capacity_customer_and_scanners_block(self) -> None:
         cases = [
             ("code-scan", lambda p: p["observation"]["details"]["jobs"][0].update(conclusion="failure"), "CodeQL"),
@@ -253,7 +450,7 @@ class ReleaseSubjectTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     self.verify(payload, subject_id)
 
-    def test_live_github_recheck_binds_codeql_and_tls_to_their_exact_source_runs(self) -> None:
+    def test_live_github_recheck_binds_codeql_tls_and_capacity_source_bytes(self) -> None:
         repository = "fyremael/AETHER"
         package = b"immutable canonical package"
         self.package_sha = self.evidence.sha256_bytes(package)
@@ -286,6 +483,53 @@ class ReleaseSubjectTests(unittest.TestCase):
             "head_sha": self.candidate["commit_sha"],
             "status": "passed",
         }
+        capacity_run = {
+            "workflow_file": ".github/workflows/capacity-planning.yml",
+            "run_id": "13",
+            "attempt": 1,
+            "head_sha": self.candidate["commit_sha"],
+            "status": "passed",
+        }
+        capacity_details = self.details("capacity")
+        capacity_report = {
+            "single_node_envelopes": [
+                json.loads(json.dumps(capacity_details["selected_envelope"]))
+            ],
+            "recommended_hardware": json.loads(
+                json.dumps(capacity_details["recommended_hardware"])
+            ),
+            "concurrency_pack": json.loads(
+                json.dumps(capacity_details["concurrency_pack"])
+            ),
+        }
+        capacity_source = self.evidence.canonical_bytes(capacity_report)
+        capacity_buffer = io.BytesIO()
+        with zipfile.ZipFile(
+            capacity_buffer, "w", zipfile.ZIP_DEFLATED
+        ) as capacity_zip:
+            capacity_zip.writestr("capacity-report.json", capacity_source)
+        capacity_archive = capacity_buffer.getvalue()
+        capacity_receipt = {
+            "artifact_id": 98,
+            "artifact_name": (
+                "capacity-report-" + self.candidate["commit_sha"] + "-13-1"
+            ),
+            "workflow_file": capacity_run["workflow_file"],
+            "run_id": capacity_run["run_id"],
+            "attempt": capacity_run["attempt"],
+            "head_sha": self.candidate["commit_sha"],
+            "status": "passed",
+            "sha256": self.evidence.sha256_bytes(capacity_archive),
+            "byte_size": len(capacity_archive),
+        }
+        capacity_details["source_files"] = [
+            {
+                "artifact_id": capacity_receipt["artifact_id"],
+                "path": "capacity-report.json",
+                "sha256": self.evidence.sha256_bytes(capacity_source),
+                "byte_size": len(capacity_source),
+            }
+        ]
         producer = {
             "workflow_file": ".github/workflows/release-readiness.yml",
             "run_id": "42",
@@ -316,6 +560,13 @@ class ReleaseSubjectTests(unittest.TestCase):
                         "job": {"id": 3, "name": "Postgres verified TLS journal", "conclusion": "success"}
                     }
                 },
+            },
+            "capacity": {
+                "producer": producer,
+                "source_runs": [supply_run, capacity_run],
+                "source_artifacts": [receipt, capacity_receipt],
+                "package": {"name": "aether.zip", "sha256": self.package_sha},
+                "observation": {"details": capacity_details},
             },
         }
         readiness_outputs = {}
@@ -350,22 +601,27 @@ class ReleaseSubjectTests(unittest.TestCase):
             "workflow": {"run_id": "42", "attempt": 1},
             "outputs": readiness_outputs,
         }
-        qualification_buffer = io.BytesIO()
-        with zipfile.ZipFile(qualification_buffer, "w", zipfile.ZIP_DEFLATED) as qualification_zip:
-            qualification_zip.writestr(
-                "qualification-readiness/release-readiness-evidence-"
-                + self.candidate["commit_sha"]
-                + "-42-1.json",
-                self.evidence.canonical_bytes(readiness_manifest),
-            )
-            for path, content in readiness_files.items():
-                qualification_zip.writestr(path, content)
-            for subject_id, envelope in envelopes.items():
+        def build_qualification_archive() -> bytes:
+            qualification_buffer = io.BytesIO()
+            with zipfile.ZipFile(
+                qualification_buffer, "w", zipfile.ZIP_DEFLATED
+            ) as qualification_zip:
                 qualification_zip.writestr(
-                    f"qualification-subjects/{subject_id}.json",
-                    self.evidence.canonical_bytes(envelope),
+                    "qualification-readiness/release-readiness-evidence-"
+                    + self.candidate["commit_sha"]
+                    + "-42-1.json",
+                    self.evidence.canonical_bytes(readiness_manifest),
                 )
-        qualification_archive = qualification_buffer.getvalue()
+                for path, content in readiness_files.items():
+                    qualification_zip.writestr(path, content)
+                for subject_id, envelope in envelopes.items():
+                    qualification_zip.writestr(
+                        f"qualification-subjects/{subject_id}.json",
+                        self.evidence.canonical_bytes(envelope),
+                    )
+            return qualification_buffer.getvalue()
+
+        qualification_archive = build_qualification_archive()
         qualification_name = (
             "release-qualification-subjects-"
             + self.candidate["commit_sha"]
@@ -389,6 +645,15 @@ class ReleaseSubjectTests(unittest.TestCase):
                 "status": "completed",
                 "conclusion": "success",
                 "path": ".github/workflows/ci.yml",
+            },
+            "13": {
+                "id": 13,
+                "run_attempt": 1,
+                "head_sha": self.candidate["commit_sha"],
+                "head_branch": "main",
+                "status": "completed",
+                "conclusion": "success",
+                "path": ".github/workflows/capacity-planning.yml",
             },
         }
         job_payloads = {
@@ -420,6 +685,19 @@ class ReleaseSubjectTests(unittest.TestCase):
                             }
                         ]
                     }
+                if "/runs/13/" in endpoint:
+                    return {
+                        "artifacts": [
+                            {
+                                "id": 98,
+                                "name": capacity_receipt["artifact_name"],
+                                "expired": False,
+                                "size_in_bytes": len(capacity_archive),
+                                "digest": "sha256:"
+                                + self.evidence.sha256_bytes(capacity_archive),
+                            }
+                        ]
+                    }
                 return {
                     "artifacts": [
                         {
@@ -436,6 +714,13 @@ class ReleaseSubjectTests(unittest.TestCase):
                 return job_payloads[run_id]
             return run_payloads[run_id]
 
+        def download(_repository: str, artifact_id: int) -> bytes:
+            return {
+                98: capacity_archive,
+                99: archive,
+                100: qualification_archive,
+            }[artifact_id]
+
         policy = self.evidence.load_json(REPO_ROOT / "fixtures" / "release" / "gate-policy.json")
         self.verify_module.verify_subject_github_outcomes(
             envelopes,
@@ -443,10 +728,39 @@ class ReleaseSubjectTests(unittest.TestCase):
             self.candidate,
             policy,
             api=api,
-            download_artifact=lambda _repository, artifact_id: (
-                qualification_archive if artifact_id == 100 else archive
-            ),
+            download_artifact=download,
         )
+
+        original_pack = json.loads(
+            json.dumps(envelopes["capacity"]["observation"]["details"]["concurrency_pack"])
+        )
+        envelopes["capacity"]["observation"]["details"]["concurrency_pack"][
+            "points"
+        ][0]["p95_latency_ms"] = 1.0
+        qualification_archive = build_qualification_archive()
+        with self.assertRaisesRegex(ValueError, "capacity concurrency pack differs"):
+            self.verify_module.verify_subject_github_outcomes(
+                envelopes,
+                {"run_id": "42", "attempt": 1},
+                self.candidate,
+                policy,
+                api=api,
+                download_artifact=download,
+            )
+
+        envelopes["capacity"]["observation"]["details"][
+            "concurrency_pack"
+        ] = original_pack
+        restored_details = envelopes["capacity"]["observation"]["details"]
+        restored_details["capacity_acceptance"] = (
+            self.subjects.recompute_capacity_acceptance(
+                restored_details["policy"],
+                restored_details["selected_envelope"],
+                restored_details["recommended_hardware"],
+                restored_details["concurrency_pack"],
+            )
+        )
+        qualification_archive = build_qualification_archive()
         job_payloads["12"]["jobs"][0]["conclusion"] = "failure"
         with self.assertRaisesRegex(ValueError, "transport-tls GitHub job did not pass"):
             self.verify_module.verify_subject_github_outcomes(
@@ -455,9 +769,7 @@ class ReleaseSubjectTests(unittest.TestCase):
                 self.candidate,
                 policy,
                 api=api,
-                download_artifact=lambda _repository, artifact_id: (
-                    qualification_archive if artifact_id == 100 else archive
-                ),
+                download_artifact=download,
             )
 
 

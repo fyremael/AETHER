@@ -48,7 +48,18 @@ Pages, and Capacity. Its Release Readiness run passed every measured drift and
 latency threshold but exposed a policy wiring defect: the pinned GitHub Windows
 evidence host was not in the beta host policy. The policy now fail-closed allows
 only the native Windows qualification host and the official GitHub Windows
-runner. After this focused repair merges, a new protected candidate must pass
+runner. Later candidates failed closed on canonical-package staging and then on
+the quiesced backup/restore plus current Postgres-marker contract; those focused
+repairs have merged. Protected candidate
+`64797af68261bc72618487e47f8f44fae3a11d28` passed CI, Supply Chain, Pages,
+Capacity Planning and the complete operational-readiness suite, but Release
+Readiness rejected its capacity subject before bundle assembly: the M envelope
+recommended 16 operators against the unchanged minimum of 32. Review showed
+that the old concurrency producer created one service per worker and used a
+noisy 4-vCPU plateau as an unscaled node-class cap. The current focused repair
+measures one shared service, separates setup from measurement, derives from raw
+p95/error evidence and makes the independent subject verifier recompute the
+policy rung. After review and merge, a new protected candidate must pass
 operational readiness, bundle verification, the dependent verdict, and a fresh
 independent verdict.
 
@@ -183,8 +194,9 @@ If the team needs a practical ordering, use this one:
    implemented locally; complete hosted exact-candidate evidence remains pending
 7. `R6`: responsibility crates and executable-plan ownership implemented
    locally; preserve the compatibility facade until migration evidence permits removal
-8. `R7`: localize and remediate first-restart latency without changing the gate,
-   then requalify a new selected commercial-beta candidate only after independent bundle verification
+8. `R7`: preserve every failed candidate, repair the shared-service capacity
+   evidence contract without weakening its thresholds, then requalify a new
+   selected commercial-beta candidate only after independent bundle verification
 
 Distributed-truth widening, DSL ergonomics, and broad product expansion remain
 behind this sequence unless a separate accepted ADR proves they do not touch a
