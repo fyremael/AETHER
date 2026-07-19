@@ -289,6 +289,12 @@ Completed:
 
 Still open:
 
+- protected candidate `5e4f95a50792a7a301598abc34f6fd23e32bb91d`
+  passed exact-SHA CI, Supply Chain, Pages, and Capacity Planning, but Release
+  Readiness run `29678877127` failed because the canonical-package staging
+  parent directory did not exist. The immutable blocker is recorded in
+  `docs/evidence/RELEASE_READINESS_5E4F95A.md`; this candidate cannot promote,
+  and the focused repair must be merged before selecting a new candidate
 - official exact-candidate qualification of the locally green policy-scoped semantics
 - official exact-candidate qualification of durable, non-aliasing trace identity
 - a successful official exact-candidate workflow bundle and independently

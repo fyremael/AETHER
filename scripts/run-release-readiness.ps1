@@ -355,6 +355,8 @@ try {
     if (Test-Path -LiteralPath $pilotPackageZip) {
         Remove-Item -LiteralPath $pilotPackageZip -Force
     }
+    $pilotPackageParent = Split-Path -Parent $pilotPackageZip
+    New-Item -ItemType Directory -Force $pilotPackageParent | Out-Null
     Copy-Item -LiteralPath $CandidatePackageZip -Destination $pilotPackageZip
     Expand-Archive -LiteralPath $pilotPackageZip -DestinationPath $pilotPackageRoot -Force
     $sourcePackageSha = (Get-FileHash -LiteralPath $CandidatePackageZip -Algorithm SHA256).Hash.ToLowerInvariant()
