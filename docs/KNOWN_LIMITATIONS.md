@@ -114,7 +114,17 @@ ordinary feature backlog:
   separate service fixtures and cannot prove the supported one-service
   boundary. No official bundle or verdict was emitted; the candidate is
   permanently failed.
-- The failed candidate's diagnostic `M` envelope recommended `4,096`
+- Protected candidate `d0bb67d0388db6305865f83648e766e3786e0f69`
+  passed exact-SHA CI, Supply Chain, Pages, the repaired 32-worker
+  shared-service Capacity gate, protected approval, and complete operational
+  readiness. Its exact-candidate producer then failed the non-waivable Python
+  boundary before bundle assembly because pytest was not declared in the
+  reusable workflow's pinned dependencies. No official bundle or verdict was
+  emitted, and the candidate is permanently failed. The release dependency is
+  now pinned and future failed gate outputs are retained before an explicit
+  failure barrier; a new candidate remains required.
+- Candidate `64797af68261bc72618487e47f8f44fae3a11d28`'s diagnostic `M`
+  envelope recommended `4,096`
   pilot-board tasks, 16 mixed operators and 10,000 durable replay entities.
   Those values are not a commercial sizing promise. A new candidate must prove
   the raw shared-service 32-worker rung at no more than 2,000 ms p95, zero
