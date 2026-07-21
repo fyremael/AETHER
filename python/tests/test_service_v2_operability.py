@@ -30,6 +30,45 @@ class ServiceV2OperabilityTests(unittest.TestCase):
         self.assertIn("requirements-release.txt", python_job)
         self.assertIn("python -m unittest discover python/tests -v", python_job)
 
+    def test_exact_candidate_pytest_gate_is_pinned_and_retains_failures(self) -> None:
+        requirements = (REPO_ROOT / "requirements-release.txt").read_text(
+            encoding="utf-8"
+        )
+        policy = (REPO_ROOT / "fixtures" / "release" / "gate-policy.json").read_text(
+            encoding="utf-8"
+        )
+        workflow = (
+            REPO_ROOT
+            / ".github"
+            / "workflows"
+            / "reusable-exact-candidate-evidence.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertRegex(requirements, r"(?m)^pytest==\d+\.\d+\.\d+$")
+        self.assertIn('"python -m pytest python/tests -q"', policy)
+        capture_marker = "      - name: Capture exact gate outcomes"
+        upload_marker = "      - name: Upload exact gate diagnostics"
+        barrier_marker = "      - name: Enforce exact gate capture"
+        download_marker = "      - name: Download tested canonical package"
+        positions = [
+            workflow.index(marker)
+            for marker in (capture_marker, upload_marker, barrier_marker, download_marker)
+        ]
+        self.assertEqual(positions, sorted(positions))
+
+        capture_block = workflow[positions[0] : positions[1]]
+        upload_block = workflow[positions[1] : positions[2]]
+        barrier_block = workflow[positions[2] : positions[3]]
+        self.assertIn("id: gate-capture", capture_block)
+        self.assertIn("continue-on-error: true", capture_block)
+        self.assertIn("if: always()", upload_block)
+        self.assertIn("aether-release-evidence-gate-diagnostics-", upload_block)
+        self.assertIn(
+            "if: always() && steps.gate-capture.outcome != 'success'",
+            barrier_block,
+        )
+        self.assertIn("run: throw", barrier_block)
+
     def test_container_ci_smoke_has_required_markers(self) -> None:
         module = load_module()
         ok, missing = module.file_contains_all(

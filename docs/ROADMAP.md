@@ -56,12 +56,20 @@ Capacity Planning and the complete operational-readiness suite, but Release
 Readiness rejected its capacity subject before bundle assembly: the M envelope
 recommended 16 operators against the unchanged minimum of 32. Review showed
 that the old concurrency producer created one service per worker and used a
-noisy 4-vCPU plateau as an unscaled node-class cap. The current focused repair
-measures one shared service, separates setup from measurement, derives from raw
+noisy 4-vCPU plateau as an unscaled node-class cap. The merged repair measures
+one shared service, separates setup from measurement, derives from raw
 p95/error evidence and makes the independent subject verifier recompute the
-policy rung. After review and merge, a new protected candidate must pass
-operational readiness, bundle verification, the dependent verdict, and a fresh
-independent verdict.
+policy rung. Its successor passed the repaired capacity gate; full
+qualification still requires bundle verification, the dependent verdict and a
+fresh independent verdict.
+
+That repaired successor, `d0bb67d0388db6305865f83648e766e3786e0f69`,
+passed exact-SHA CI, Supply Chain, Pages, Capacity and operational readiness.
+Its evidence producer failed before bundle assembly because the gate policy
+uses pytest but the reusable workflow did not declare pytest in the pinned
+release dependencies. The next focused repair pins the runner and always
+retains gate diagnostics before failing. After review and merge, qualification
+restarts from a new protected candidate; C4 cannot be rerun or promoted.
 
 The roadmap is no longer about proving the kernel can exist. Its immediate job
 is to repair the correctness and claim boundaries before widening resumes.

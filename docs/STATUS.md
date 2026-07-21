@@ -126,6 +126,18 @@ non-finite, or status-weakened entries; failed readiness runs also retain their
 primary failure in a partial immutable manifest. A new protected candidate must
 pass the complete sequence. This does not widen the controlled-alpha claim.
 
+Protected successor `d0bb67d0388db6305865f83648e766e3786e0f69`
+passed exact-SHA CI, Supply Chain, Pages, the repaired shared-service Capacity
+Planning gate, protected approval, and complete Windows operational readiness.
+Release Readiness run `29863838006` then failed closed before bundle assembly
+because the non-waivable Python boundary invokes pytest while the reusable
+evidence workflow had not declared pytest as a release dependency. No official
+bundle or dependent verdict exists. The immutable coordinates and disposition
+are in `docs/evidence/RELEASE_READINESS_D0BB67D.md`. The focused repair pins
+the test runner and retains exact gate diagnostics before an explicit fail
+barrier; a new protected candidate is required. The external claim remains
+controlled alpha.
+
 R5.1-R5.6 are now implemented locally. The service has strict dependency and
 package gates, verified transport modes, independent namespace admission,
 capability-negotiated clients, exact operational verdict automation, and
@@ -327,6 +339,13 @@ Still open:
   therefore could not qualify the supported one-service boundary. The
   immutable coordinates and disposition are recorded in
   `docs/evidence/RELEASE_READINESS_64797AF.md`; this candidate cannot promote
+- candidate `d0bb67d0388db6305865f83648e766e3786e0f69` passed exact-SHA CI,
+  Supply Chain, Pages, the repaired shared-service Capacity gate, protected
+  approval and complete Windows operational readiness. Release Readiness run
+  `29863838006` then failed the non-waivable Python boundary before bundle
+  assembly because the evidence workflow did not declare its pytest runner.
+  No official bundle or dependent verdict exists; the immutable coordinates
+  and disposition are in `docs/evidence/RELEASE_READINESS_D0BB67D.md`
 - post-v1 DSL ergonomics and document modularity beyond the current canonical surface
 - production hardening for the optional Postgres journal deployment path beyond current parity/concurrency coverage
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
@@ -335,18 +354,17 @@ Still open:
 
 ## Immediate focus
 
-The quiesced backup/restore and current verified-TLS Postgres marker repairs
-passed on protected candidate `64797af68261bc72618487e47f8f44fae3a11d28`.
-That candidate's Release Readiness suite was green, but candidate-subject
-construction exposed the next fail-closed blocker: the capacity model measured
-separate services per worker and applied a noisy 4-vCPU throughput plateau as
-an unscaled M-class cap. The immediate work is the focused shared-service
-capacity producer and raw-evidence verifier repair. The 32-worker, 2,000 ms,
-zero-error and zero-503 policies remain unchanged. After independent review and
-merge, qualification must restart from a new protected SHA/tree under
-`docs/REMEDIATION_PROGRAMME.md`. Feature broadening across policy, service
-execution, append, proof identity, or release claims stays frozen until the
-relevant repaired contract is green:
+The shared-service capacity producer and raw-evidence verifier repair passed on
+protected candidate `d0bb67d0388db6305865f83648e766e3786e0f69`, which also
+passed protected approval and the complete Windows operational-readiness
+suite. Its exact-candidate producer then failed before bundle assembly because
+the pytest runner required by the non-waivable Python gate was not declared in
+the reusable workflow's pinned dependencies. The immediate work is the focused
+pytest dependency and failed-gate diagnostic-retention repair. After
+independent review and merge, qualification must restart from a new protected
+SHA/tree under `docs/REMEDIATION_PROGRAMME.md`; C4 remains permanently failed.
+Feature broadening across policy, service execution, append, proof identity, or
+release claims stays frozen until the relevant repaired contract is green:
 
 - keep the temporary controlled-alpha claim identical across status, roadmap, limitations, commercialization, and site source
 - preserve the now-green local R1-R3 semantic, proof-identity, and append-admission contracts while qualifying them through immutable exact-candidate evidence
