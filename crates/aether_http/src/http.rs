@@ -3795,6 +3795,16 @@ mod concurrency_tests {
         sync::{mpsc, Arc, Mutex},
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
+    use tokio::sync::oneshot;
+
+    const START_SIGNAL_TIMEOUT: Duration = Duration::from_secs(15);
+
+    async fn wait_for_blocking_start(receiver: oneshot::Receiver<()>, label: &str) {
+        tokio::time::timeout(START_SIGNAL_TIMEOUT, receiver)
+            .await
+            .unwrap_or_else(|_| panic!("{label}: timeout"))
+            .unwrap_or_else(|_| panic!("{label}: sender dropped"));
+    }
 
     fn directory(label: &str) -> Arc<NamespaceServiceDirectory> {
         let nonce = SystemTime::now()
@@ -3865,7 +3875,7 @@ mod concurrency_tests {
         let services = directory("independent");
         let blocked_namespace = NamespaceId::new("blocked").expect("namespace");
         let free_namespace = NamespaceId::new("free").expect("namespace");
-        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (started_tx, started_rx) = oneshot::channel();
         let (release_tx, release_rx) = mpsc::sync_channel(1);
 
         let blocked = {
@@ -3884,9 +3894,7 @@ mod concurrency_tests {
                     .await
             })
         };
-        started_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("blocked namespace started");
+        wait_for_blocking_start(started_rx, "blocked namespace started").await;
 
         let active = services.active_namespaces().expect("directory status");
         assert!(active.contains(&blocked_namespace));
@@ -3968,7 +3976,7 @@ mod concurrency_tests {
             .with_namespace_work_limits(1, 0);
         let state = HttpKernelState::with_sqlite_namespaces(data_root, options);
 
-        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (started_tx, started_rx) = oneshot::channel();
         let (release_tx, release_rx) = mpsc::sync_channel(1);
         let running = {
             let executor = state.blocking.clone();
@@ -3982,9 +3990,7 @@ mod concurrency_tests {
                     .await
             })
         };
-        started_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("work saturated executor");
+        wait_for_blocking_start(started_rx, "work saturated executor").await;
 
         assert_eq!(health().await.status, "ok");
         assert_eq!(state.status_snapshot().expect("status").status, "ok");
@@ -4007,7 +4013,7 @@ mod concurrency_tests {
         let services = directory("ordered");
         let namespace = NamespaceId::new("ordered").expect("namespace");
         let order = Arc::new(Mutex::new(Vec::new()));
-        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (started_tx, started_rx) = oneshot::channel();
         let (release_tx, release_rx) = mpsc::sync_channel(1);
 
         let first = {
@@ -4028,9 +4034,7 @@ mod concurrency_tests {
                     .await
             })
         };
-        started_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("first operation started");
+        wait_for_blocking_start(started_rx, "first operation started").await;
         let second = {
             let executor = executor.clone();
             let services = Arc::clone(&services);
@@ -4068,7 +4072,7 @@ mod concurrency_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn executor_saturation_and_panics_fail_boundedly() {
         let saturated = BoundedBlockingExecutor::new(1, 0, 30_000);
-        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (started_tx, started_rx) = oneshot::channel();
         let (release_tx, release_rx) = mpsc::sync_channel(1);
         let running = {
             let executor = saturated.clone();
@@ -4082,9 +4086,7 @@ mod concurrency_tests {
                     .await
             })
         };
-        started_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("worker started");
+        wait_for_blocking_start(started_rx, "worker started").await;
         assert!(matches!(
             saturated.run(|| Ok(())).await,
             Err(HttpError::NamespaceBusy { .. })
@@ -4117,7 +4119,7 @@ mod concurrency_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn queued_operations_time_out_before_start_while_started_work_completes() {
         let executor = BoundedBlockingExecutor::new(1, 1, 20);
-        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (started_tx, started_rx) = oneshot::channel();
         let (release_tx, release_rx) = mpsc::sync_channel(1);
         let running = {
             let executor = executor.clone();
@@ -4131,9 +4133,7 @@ mod concurrency_tests {
                     .await
             })
         };
-        started_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("first operation started");
+        wait_for_blocking_start(started_rx, "first operation started").await;
 
         let second_started = Arc::new(Mutex::new(false));
         let marker = Arc::clone(&second_started);
