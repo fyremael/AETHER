@@ -722,14 +722,56 @@ class ReleaseSubjectTests(unittest.TestCase):
             }[artifact_id]
 
         policy = self.evidence.load_json(REPO_ROOT / "fixtures" / "release" / "gate-policy.json")
+        producer_workflow = {
+            "artifact_name": (
+                "aether-release-evidence-"
+                + self.candidate["commit_sha"]
+                + "-42-1"
+            ),
+            "attempt": 1,
+            "host": "github-windows-latest",
+            "job_id": "exact-candidate-evidence",
+            "repository": "fyremael/AETHER",
+            "run_id": "42",
+            "runner": "Windows",
+            "tool_versions": {"verifier": "aether-release-evidence-verifier-v3"},
+            "workflow_file": ".github/workflows/reusable-exact-candidate-evidence.yml",
+        }
         self.verify_module.verify_subject_github_outcomes(
             envelopes,
-            {"run_id": "42", "attempt": 1},
+            producer_workflow,
             self.candidate,
             policy,
             api=api,
             download_artifact=download,
         )
+
+        readiness_manifest["workflow"]["run_id"] = "43"
+        qualification_archive = build_qualification_archive()
+        with self.assertRaisesRegex(ValueError, "readiness workflow binding differs"):
+            self.verify_module.verify_subject_github_outcomes(
+                envelopes,
+                producer_workflow,
+                self.candidate,
+                policy,
+                api=api,
+                download_artifact=download,
+            )
+        readiness_manifest["workflow"]["run_id"] = "42"
+
+        readiness_manifest["workflow"]["attempt"] = 2
+        qualification_archive = build_qualification_archive()
+        with self.assertRaisesRegex(ValueError, "readiness workflow binding differs"):
+            self.verify_module.verify_subject_github_outcomes(
+                envelopes,
+                producer_workflow,
+                self.candidate,
+                policy,
+                api=api,
+                download_artifact=download,
+            )
+        readiness_manifest["workflow"]["attempt"] = 1
+        qualification_archive = build_qualification_archive()
 
         original_pack = json.loads(
             json.dumps(envelopes["capacity"]["observation"]["details"]["concurrency_pack"])
@@ -741,7 +783,7 @@ class ReleaseSubjectTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "capacity concurrency pack differs"):
             self.verify_module.verify_subject_github_outcomes(
                 envelopes,
-                {"run_id": "42", "attempt": 1},
+                producer_workflow,
                 self.candidate,
                 policy,
                 api=api,
@@ -765,7 +807,7 @@ class ReleaseSubjectTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "transport-tls GitHub job did not pass"):
             self.verify_module.verify_subject_github_outcomes(
                 envelopes,
-                {"run_id": "42", "attempt": 1},
+                producer_workflow,
                 self.candidate,
                 policy,
                 api=api,

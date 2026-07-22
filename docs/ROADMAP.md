@@ -71,6 +71,16 @@ release dependencies. The next focused repair pins the runner and always
 retains gate diagnostics before failing. After review and merge, qualification
 restarts from a new protected candidate; C4 cannot be rerun or promoted.
 
+Its successor, `7c9a0763627e9c11f88ad72520116ddd8e15ac71`, passed exact-SHA
+CI, Supply Chain, Pages, Capacity, operational readiness, gate capture and all
+18-subject bundle production. The dependent verifier then failed because it
+compared the readiness caller's exact run/attempt binding to the reusable
+producer's full workflow envelope. No dependent verdict was emitted. The
+focused repair validates the full producer separately and compares only its
+exact run/attempt projection to the readiness binding. After review and merge,
+qualification restarts from a new protected candidate; C5 cannot be rerun or
+promoted.
+
 The roadmap is no longer about proving the kernel can exist. Its immediate job
 is to repair the correctness and claim boundaries before widening resumes.
 

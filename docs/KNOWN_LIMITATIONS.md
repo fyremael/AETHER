@@ -123,6 +123,15 @@ ordinary feature backlog:
   emitted, and the candidate is permanently failed. The release dependency is
   now pinned and future failed gate outputs are retained before an explicit
   failure barrier; a new candidate remains required.
+- Protected candidate `7c9a0763627e9c11f88ad72520116ddd8e15ac71`
+  passed exact-SHA CI, Supply Chain, Pages, shared-service Capacity, protected
+  approval, operational readiness, gate capture and all 18-subject bundle
+  assembly. Its dependent verifier compared the readiness caller's exact
+  run/attempt binding with the reusable producer's full workflow envelope and
+  failed before uploading a verdict. The producer's internal passed
+  computation cannot replace that missing verdict. The candidate is
+  permanently failed; a reviewed binding-projection repair and new full
+  qualification are required.
 - Candidate `64797af68261bc72618487e47f8f44fae3a11d28`'s diagnostic `M`
   envelope recommended `4,096`
   pilot-board tasks, 16 mixed operators and 10,000 durable replay entities.
