@@ -138,6 +138,20 @@ the test runner and retains exact gate diagnostics before an explicit fail
 barrier; a new protected candidate is required. The external claim remains
 controlled alpha.
 
+Protected successor `7c9a0763627e9c11f88ad72520116ddd8e15ac71`
+then passed exact-SHA CI, Supply Chain, Pages, the shared-service Capacity
+gate, protected approval, complete Windows operational readiness, exact gate
+capture and all 18-subject bundle assembly. Release Readiness run
+`29881660086` failed in its dependent verifier because it compared the
+readiness caller's exact run/attempt binding to the reusable producer's full
+workflow envelope. No dependent verdict was uploaded, so the producer's
+internal `computed_verdict: passed` is diagnostic only and cannot promote.
+The immutable coordinates and disposition are in
+`docs/evidence/RELEASE_READINESS_7C9A076.md`. The focused repair preserves full
+producer validation while comparing the readiness binding to the exact
+run/attempt projection; a new protected candidate is required. The external
+claim remains controlled alpha.
+
 R5.1-R5.6 are now implemented locally. The service has strict dependency and
 package gates, verified transport modes, independent namespace admission,
 capability-negotiated clients, exact operational verdict automation, and
@@ -346,6 +360,13 @@ Still open:
   assembly because the evidence workflow did not declare its pytest runner.
   No official bundle or dependent verdict exists; the immutable coordinates
   and disposition are in `docs/evidence/RELEASE_READINESS_D0BB67D.md`
+- candidate `7c9a0763627e9c11f88ad72520116ddd8e15ac71` passed exact-SHA CI,
+  Supply Chain, Pages, Capacity, protected approval, complete operational
+  readiness and 18-subject bundle production. Release Readiness run
+  `29881660086` failed in the dependent verifier because caller run/attempt
+  identity was incorrectly compared with the producer's full workflow
+  envelope. No dependent verdict exists; the immutable coordinates and
+  disposition are in `docs/evidence/RELEASE_READINESS_7C9A076.md`
 - post-v1 DSL ergonomics and document modularity beyond the current canonical surface
 - production hardening for the optional Postgres journal deployment path beyond current parity/concurrency coverage
 - production-hardened kernel service integrations beyond the current minimal HTTP boundary
@@ -354,15 +375,15 @@ Still open:
 
 ## Immediate focus
 
-The shared-service capacity producer and raw-evidence verifier repair passed on
-protected candidate `d0bb67d0388db6305865f83648e766e3786e0f69`, which also
-passed protected approval and the complete Windows operational-readiness
-suite. Its exact-candidate producer then failed before bundle assembly because
-the pytest runner required by the non-waivable Python gate was not declared in
-the reusable workflow's pinned dependencies. The immediate work is the focused
-pytest dependency and failed-gate diagnostic-retention repair. After
-independent review and merge, qualification must restart from a new protected
-SHA/tree under `docs/REMEDIATION_PROGRAMME.md`; C4 remains permanently failed.
+The pytest dependency and gate-diagnostic repair passed on protected candidate
+`7c9a0763627e9c11f88ad72520116ddd8e15ac71`, as did CI, Supply Chain, Pages,
+Capacity, operational readiness, exact gate capture and 18-subject bundle
+production. Its dependent verifier exposed a caller/producer workflow-binding
+type mismatch and uploaded no verdict. The immediate work is the focused
+run/attempt projection repair plus cross-run/attempt regression coverage.
+After independent review and merge, qualification must restart from a new
+protected SHA/tree under `docs/REMEDIATION_PROGRAMME.md`; C5 remains
+permanently failed.
 Feature broadening across policy, service execution, append, proof identity, or
 release claims stays frozen until the relevant repaired contract is green:
 

@@ -401,7 +401,14 @@ def verify_subject_github_outcomes(
         },
         "qualification readiness is cross-candidate",
     )
-    require(readiness_manifest.get("workflow") == workflow, "qualification readiness workflow binding differs")
+    readiness_workflow = {
+        "run_id": str(workflow["run_id"]),
+        "attempt": workflow["attempt"],
+    }
+    require(
+        readiness_manifest.get("workflow") == readiness_workflow,
+        "qualification readiness workflow binding differs",
+    )
     required_readiness_outputs = {
         "commercial_policy",
         "customer_workflow",
