@@ -39,6 +39,27 @@ class ReleasePreflightTests(unittest.TestCase):
         self.assertFalse(release_qualification.tooling_path_allowed("scripts/release_preflight.py.bak", rules))
         self.assertFalse(release_qualification.tooling_path_allowed(".github/workflows-old/ci.yml", rules))
 
+    def test_current_release_control_files_are_explicitly_allowlisted(self) -> None:
+        policy = release_preflight.evidence.load_json(
+            REPO_ROOT / "fixtures" / "release" / "gate-policy.json"
+        )
+        rules = policy["qualification_tooling_allowed_paths"]
+        release_control_files = {
+            "python/tests/test_release_evidence.py",
+            "python/tests/test_release_preflight.py",
+            "python/tests/test_release_subjects.py",
+            "scripts/release_evidence.py",
+            "scripts/release_preflight.py",
+            "scripts/release_qualification.py",
+            "scripts/release_subjects.py",
+        }
+        self.assertTrue(
+            all(release_qualification.tooling_path_allowed(path, rules) for path in release_control_files)
+        )
+        self.assertFalse(
+            release_qualification.tooling_path_allowed("scripts/release_subjects.py.bak", rules)
+        )
+
     def test_projected_gate_sources_are_explicit_and_fail_closed(self) -> None:
         self.assertEqual(
             release_qualification.projected_gate_source({"id": "security.supply_chain"}),
