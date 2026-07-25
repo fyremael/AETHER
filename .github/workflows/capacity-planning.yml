@@ -33,7 +33,7 @@ jobs:
           ./scripts/run-perturbation-sweep.ps1 -HostManifestPath fixtures/performance/hosts/github-windows-latest.json -SkipHardening
 
       - name: Upload perturbation artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: capacity-perturbation-windows
           path: |
@@ -59,7 +59,7 @@ jobs:
           ./scripts/run-performance-report.ps1 -Suite full_stack -HostManifestPath fixtures/performance/hosts/github-ubuntu-latest.json
 
       - name: Upload Ubuntu perf artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: capacity-perf-ubuntu
           path: |
@@ -130,7 +130,7 @@ jobs:
           & cargo @arguments
 
       - name: Upload matrix summary
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: capacity-matrix-summary
           path: |
@@ -207,7 +207,7 @@ jobs:
           Copy-Item -LiteralPath $immutableReport -Destination artifacts/performance/capacity/latest.md
 
       - name: Upload capacity report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: capacity-report-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -216,7 +216,7 @@ jobs:
 
       - name: Upload capacity input inventory
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: capacity-input-inventory
           path: artifacts/performance/capacity/diagnostics/input-inventory.json
@@ -278,7 +278,7 @@ jobs:
             --github-output "$GITHUB_OUTPUT"
 
       - name: Upload tracker artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: capacity-tracking
           path: |
