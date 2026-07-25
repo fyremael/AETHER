@@ -27,9 +27,20 @@ WORKFLOWS = {
 }
 
 
+def projected_gate_source(gate: dict[str, Any]) -> tuple[str, str]:
+    source = evidence.PROJECTED_GATE_SOURCES.get(gate["id"])
+    require(source is not None, f"gate {gate['id']} has no reviewed prerequisite projection")
+    return source["run_key"], source["job_key"]
+
+
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise evidence.EvidenceError(message)
+
+
+def tooling_path_allowed(path: str, rules: list[str]) -> bool:
+    """Match directory rules by prefix and file rules exactly."""
+    return any(path.startswith(rule) if rule.endswith("/") else path == rule for rule in rules)
 
 
 def gh_api(endpoint: str, *, binary: bool = False) -> Any:
@@ -109,10 +120,41 @@ def fetch_artifact(repository: str, run: dict[str, Any], name: str, destination:
 
 
 def fetch_inputs(args: argparse.Namespace) -> int:
+    require(
+        args.candidate_ref == "refs/heads/main",
+        "release candidates must retain their protected main source ref",
+    )
     protected_main = gh_api(f"repos/{args.repository}/git/ref/heads/main")
     require(
-        protected_main.get("object", {}).get("sha") == args.candidate_sha,
-        "protected main advanced; restart qualification with the new candidate",
+        protected_main.get("object", {}).get("sha") == args.qualification_tooling_sha,
+        "protected main advanced beyond the selected qualification tooling revision",
+    )
+    ancestry = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", args.candidate_sha, args.qualification_tooling_sha],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    require(
+        ancestry.returncode == 0,
+        "candidate is not an ancestor of the protected qualification tooling revision",
+    )
+    policy = evidence.load_json(Path(args.policy))
+    evidence.validate_policy(policy)
+    changed = subprocess.run(
+        ["git", "diff", "--name-only", args.candidate_sha, args.qualification_tooling_sha],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ).stdout.splitlines()
+    allowed = policy.get("qualification_tooling_allowed_paths", [])
+    require(allowed, "qualification tooling path policy is missing")
+    product_changes = sorted(path for path in changed if not tooling_path_allowed(path, allowed))
+    require(
+        not product_changes,
+        "tooling revision contains product changes outside the release-control boundary: "
+        + ", ".join(product_changes),
     )
     output = Path(args.output_dir).resolve()
     if output.exists():
@@ -164,12 +206,19 @@ def fetch_inputs(args: argparse.Namespace) -> int:
     require(len(package_files) == 1, "canonical package artifact does not contain exactly one expected package")
     package_sha = evidence.sha256_file(package_files[0])
     manifest = {
-        "schema_version": "aether.release-qualification-inputs.v1",
+        "schema_version": "aether.release-qualification-inputs.v2",
         "repository": args.repository,
         "candidate_repository": args.candidate_repository,
         "candidate_commit_sha": args.candidate_sha,
         "candidate_tree_sha": args.candidate_tree_sha,
         "candidate_ref": args.candidate_ref,
+        "qualification_tooling": {
+            "repository": args.candidate_repository,
+            "commit_sha": args.qualification_tooling_sha,
+            "tree_sha": args.qualification_tooling_tree_sha,
+            "ref": args.qualification_tooling_ref,
+            "dirty": False,
+        },
         "package_path": package_files[0].relative_to(output).as_posix(),
         "package_sha256": package_sha,
         "runs": runs,
@@ -214,6 +263,7 @@ def make_subject(
     subject_id: str,
     observation: dict[str, Any],
     candidate: dict[str, Any],
+    qualification_tooling: dict[str, Any],
     package_name: str,
     package_sha: str,
     producer: dict[str, Any],
@@ -228,6 +278,7 @@ def make_subject(
         "subject_identity": "",
         "subject_id": subject_id,
         "candidate": candidate,
+        "qualification_tooling": qualification_tooling,
         "producer": producer,
         "observed_status": "passed",
         "package": {"name": package_name, "sha256": package_sha},
@@ -243,6 +294,7 @@ def make_subject(
         payload,
         expected_subject_id=subject_id,
         candidate=candidate,
+        qualification_tooling=qualification_tooling,
         package_sha256=package_sha,
         now=generated,
         gate_policy=gate_policy,
@@ -271,13 +323,26 @@ def build_subjects(args: argparse.Namespace) -> int:
         "ref": args.candidate_ref,
         "dirty": False,
     }
+    qualification_tooling = manifest.get("qualification_tooling")
+    require(isinstance(qualification_tooling, dict), "qualification tooling identity is missing")
+    require(
+        qualification_tooling
+        == {
+            "repository": args.candidate_repository,
+            "commit_sha": args.qualification_tooling_sha,
+            "tree_sha": args.qualification_tooling_tree_sha,
+            "ref": args.qualification_tooling_ref,
+            "dirty": False,
+        },
+        "qualification tooling identity differs from the fetched-input manifest",
+    )
     require(manifest.get("candidate_commit_sha") == candidate["commit_sha"], "qualification inputs are cross-candidate")
     require(manifest.get("candidate_tree_sha") == candidate["tree_sha"], "qualification input tree mismatch")
     require(manifest.get("candidate_repository") == candidate["repository"], "qualification input repository mismatch")
     package = Path(args.package).resolve()
     package_sha = evidence.sha256_file(package)
     require(package_sha == manifest.get("package_sha256"), "tested package is not the canonical Supply Chain package")
-    require(readiness_manifest.get("schema_version") == "aether.release-readiness-evidence.v1", "readiness evidence schema is invalid")
+    require(readiness_manifest.get("schema_version") == "aether.release-readiness-evidence.v2", "readiness evidence schema is invalid")
     require(readiness_manifest.get("status") == "passed", "operational readiness did not pass")
     require(
         readiness_manifest.get("candidate")
@@ -287,6 +352,10 @@ def build_subjects(args: argparse.Namespace) -> int:
             "ref": candidate["ref"],
         },
         "readiness evidence is cross-candidate",
+    )
+    require(
+        readiness_manifest.get("qualification_tooling") == qualification_tooling,
+        "readiness evidence used different qualification tooling",
     )
     require(readiness_manifest.get("workflow") == {"run_id": str(args.run_id), "attempt": args.attempt}, "readiness evidence run mismatch")
     require(readiness_manifest.get("package", {}).get("sha256") == package_sha, "readiness evidence tested another package")
@@ -561,6 +630,7 @@ def build_subjects(args: argparse.Namespace) -> int:
             subject_id=subject_id,
             observation=observation,
             candidate=candidate,
+            qualification_tooling=qualification_tooling,
             package_name=package.name,
             package_sha=package_sha,
             producer=producer,
@@ -604,6 +674,11 @@ def build_provenance_subject(args: argparse.Namespace) -> int:
         "host": args.host,
     }
     qualification_inputs = evidence.load_json(Path(args.qualification_inputs))
+    qualification_tooling = qualification_inputs.get("qualification_tooling")
+    require(isinstance(qualification_tooling, dict), "provenance qualification tooling identity is missing")
+    require(qualification_tooling.get("commit_sha") == args.qualification_tooling_sha, "provenance tooling SHA mismatch")
+    require(qualification_tooling.get("tree_sha") == args.qualification_tooling_tree_sha, "provenance tooling tree mismatch")
+    require(qualification_tooling.get("ref") == args.qualification_tooling_ref, "provenance tooling ref mismatch")
     require(qualification_inputs.get("candidate_commit_sha") == candidate["commit_sha"], "provenance qualification inputs are cross-candidate")
     require(qualification_inputs.get("package_sha256") == package_sha, "provenance qualification inputs bind another package")
     supply_run = qualification_inputs["runs"]["supply_chain"]
@@ -618,6 +693,7 @@ def build_provenance_subject(args: argparse.Namespace) -> int:
         subject_id="package-provenance",
         observation=observation,
         candidate=candidate,
+        qualification_tooling=qualification_tooling,
         package_name=package.name,
         package_sha=package_sha,
         producer=producer,
@@ -629,12 +705,129 @@ def build_provenance_subject(args: argparse.Namespace) -> int:
     return 0
 
 
+def project_gate_evidence(args: argparse.Namespace) -> int:
+    """Project exact-SHA prerequisite outcomes without rerunning generic suites."""
+    root = Path(__file__).resolve().parents[1]
+    manifest_path = Path(args.qualification_inputs).resolve()
+    manifest = evidence.load_json(manifest_path)
+    policy_path = (root / args.policy).resolve()
+    policy = evidence.load_json(policy_path)
+    evidence.validate_policy(policy)
+    require(
+        manifest.get("schema_version") == "aether.release-qualification-inputs.v2",
+        "qualification input manifest does not use the two-identity contract",
+    )
+    candidate = {
+        "repository": manifest["candidate_repository"],
+        "commit_sha": manifest["candidate_commit_sha"],
+        "tree_sha": manifest["candidate_tree_sha"],
+        "ref": manifest["candidate_ref"],
+        "dirty": False,
+    }
+    qualification_tooling = manifest["qualification_tooling"]
+    artifact_name = (
+        f"{policy['official_artifact_prefix']}-{candidate['commit_sha']}-tooling-"
+        f"{qualification_tooling['commit_sha']}-{args.run_id}-{args.attempt}"
+    )
+    workflow = {
+        "workflow_file": policy["official_workflow"],
+        "run_id": str(args.run_id),
+        "attempt": args.attempt,
+        "job_id": policy["official_job"],
+        "runner": args.runner,
+        "host": args.host,
+        "repository": args.repository,
+        "artifact_name": artifact_name,
+        "tool_versions": evidence.tool_versions(),
+    }
+    output = Path(args.output_dir).resolve()
+    if output.exists():
+        shutil.rmtree(output)
+    envelopes_dir = output / "envelopes"
+    logs_dir = output / "outputs"
+    envelopes_dir.mkdir(parents=True)
+    logs_dir.mkdir(parents=True)
+    generated = evidence.utc_now()
+    for gate in sorted(policy["gates"], key=lambda item: item["id"]):
+        run_key, job_key = projected_gate_source(gate)
+        run = manifest["runs"][run_key]
+        job = manifest["jobs"][job_key]
+        projection = {
+            "kind": "prerequisite_job",
+            "workflow_file": run["workflow_file"],
+            "run_id": str(run["id"]),
+            "attempt": run["attempt"],
+            "head_sha": run["head_sha"],
+            "job_id": job["id"],
+            "job_name": job["name"],
+            "conclusion": job["conclusion"],
+        }
+        log_path = logs_dir / f"{gate['id']}.json"
+        evidence.write_canonical_json(log_path, projection)
+        envelope = {
+            "schema_version": evidence.ENVELOPE_VERSION,
+            "evidence_id": "",
+            "gate_id": gate["id"],
+            "official": True,
+            "candidate": candidate,
+            "qualification_tooling": qualification_tooling,
+            "workflow": workflow,
+            "evidence_source": projection,
+            "command": gate["commands"],
+            "working_directory": gate.get("working_directory", "."),
+            "started_at": evidence.iso(generated),
+            "ended_at": evidence.iso(generated),
+            "exit_code": 0,
+            "attempt_history": [{
+                "attempt": 1,
+                "started_at": evidence.iso(generated),
+                "ended_at": evidence.iso(generated),
+                "exit_code": 0,
+                "status": "passed",
+                "failure_class": "none",
+            }],
+            "inputs": [
+                evidence.descriptor(manifest_path, name="qualification-inputs", display_path="qualification-inputs.json"),
+                evidence.descriptor(policy_path, name="gate-policy", display_path="fixtures/release/gate-policy.json"),
+            ],
+            "observed_status": "passed",
+            "metrics": {"projected_exact_sha_prerequisite": True},
+            "output": evidence.descriptor(
+                log_path,
+                name=f"{gate['id']}-projection",
+                display_path=f"outputs/{gate['id']}.json",
+                media_type="application/json",
+            ),
+            "valid_until": evidence.iso(
+                generated + timedelta(hours=int(policy.get("validity_hours", 24)))
+            ),
+        }
+        envelope["evidence_id"] = evidence.identity_digest(envelope, "evidence_id")
+        evidence.write_canonical_json(envelopes_dir / f"{gate['id']}.json", envelope)
+    evidence.write_canonical_json(
+        output / "capture-manifest.json",
+        {
+            "schema_version": "aether.release-evidence-capture.v2",
+            "candidate": candidate,
+            "qualification_tooling": qualification_tooling,
+            "workflow": workflow,
+            "official": True,
+            "policy_sha256": evidence.sha256_file(policy_path),
+        },
+    )
+    print(output)
+    return 0
+
+
 def common_candidate(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--repository", required=True)
     parser.add_argument("--candidate-repository", required=True)
     parser.add_argument("--candidate-sha", required=True)
     parser.add_argument("--candidate-tree-sha", required=True)
     parser.add_argument("--candidate-ref", required=True)
+    parser.add_argument("--qualification-tooling-sha", required=True)
+    parser.add_argument("--qualification-tooling-tree-sha", required=True)
+    parser.add_argument("--qualification-tooling-ref", required=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -647,6 +840,7 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--pages-run-id", required=True)
     fetch.add_argument("--capacity-run-id", required=True)
     fetch.add_argument("--output-dir", required=True)
+    fetch.add_argument("--policy", default="fixtures/release/gate-policy.json")
     fetch.set_defaults(func=fetch_inputs)
     build = commands.add_parser("build-subjects")
     common_candidate(build)
@@ -672,6 +866,16 @@ def build_parser() -> argparse.ArgumentParser:
     provenance.add_argument("--runner", default="Windows")
     provenance.add_argument("--host", default="github-windows-latest")
     provenance.set_defaults(func=build_provenance_subject)
+    project = commands.add_parser("project-gate-evidence")
+    project.add_argument("--repository", required=True)
+    project.add_argument("--qualification-inputs", required=True)
+    project.add_argument("--output-dir", required=True)
+    project.add_argument("--policy", default="fixtures/release/gate-policy.json")
+    project.add_argument("--run-id", required=True)
+    project.add_argument("--attempt", type=int, required=True)
+    project.add_argument("--runner", default="Windows")
+    project.add_argument("--host", default="github-windows-latest")
+    project.set_defaults(func=project_gate_evidence)
     return parser
 
 

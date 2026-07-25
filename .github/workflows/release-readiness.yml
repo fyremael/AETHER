@@ -3,20 +3,29 @@ name: Release Readiness
 on:
   workflow_dispatch:
     inputs:
+      candidate_sha:
+        description: Product candidate commit SHA selected from protected main history
+        required: true
+        type: string
+      candidate_ref:
+        description: Protected source ref recorded when the candidate prerequisite runs were produced
+        required: true
+        default: refs/heads/main
+        type: string
       ci_run_id:
-        description: Successful CI run ID for this exact protected main SHA
+        description: Successful CI run ID for the exact product candidate SHA
         required: true
         type: string
       supply_chain_run_id:
-        description: Successful Supply Chain run ID for this exact protected main SHA
+        description: Successful Supply Chain run ID for the exact product candidate SHA
         required: true
         type: string
       pages_run_id:
-        description: Successful Pages run ID for this exact protected main SHA
+        description: Successful Pages run ID for the exact product candidate SHA
         required: true
         type: string
       capacity_run_id:
-        description: Successful Capacity Planning run ID for this exact protected main SHA
+        description: Successful Capacity Planning run ID for the exact product candidate SHA
         required: true
         type: string
 
@@ -24,7 +33,7 @@ env:
   CARGO_TERM_COLOR: always
 
 concurrency:
-  group: release-readiness-${{ github.ref }}
+  group: release-readiness-${{ inputs.candidate_sha }}
   cancel-in-progress: false
 
 permissions:
@@ -32,149 +41,192 @@ permissions:
   contents: read
 
 jobs:
-  protected-release-approval:
-    name: Protected release approval
+  qualification-preflight:
+    name: Qualification preflight
     runs-on: ubuntu-latest
-    environment: release
-    permissions:
-      contents: read
-
-    steps:
-      - name: Record protected approval boundary
-        run: echo "release environment approval granted for $GITHUB_SHA"
-
-  release-readiness:
-    name: Release Readiness (Windows)
-    runs-on: windows-latest
-    needs: protected-release-approval
     permissions:
       actions: read
       contents: read
 
     steps:
-      - name: Checkout
+      - name: Checkout qualification tooling
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
+      - name: Install pinned preflight dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-release.txt
+
+      - name: Validate static release-control contracts
+        run: python scripts/release_preflight.py --out artifacts/release/preflight/static.json
+
+      - name: Download and verify exact prerequisite artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          candidate_tree="$(git rev-parse '${{ inputs.candidate_sha }}^{tree}')"
+          tooling_tree="$(git rev-parse 'HEAD^{tree}')"
+          candidate_repository="$(git config --get remote.origin.url)"
+          python scripts/release_qualification.py fetch-inputs \
+            --repository "${{ github.repository }}" \
+            --candidate-repository "$candidate_repository" \
+            --candidate-sha "${{ inputs.candidate_sha }}" \
+            --candidate-tree-sha "$candidate_tree" \
+            --candidate-ref "${{ inputs.candidate_ref }}" \
+            --qualification-tooling-sha "${{ github.sha }}" \
+            --qualification-tooling-tree-sha "$tooling_tree" \
+            --qualification-tooling-ref "${{ github.ref }}" \
+            --ci-run-id "${{ inputs.ci_run_id }}" \
+            --supply-chain-run-id "${{ inputs.supply_chain_run_id }}" \
+            --pages-run-id "${{ inputs.pages_run_id }}" \
+            --capacity-run-id "${{ inputs.capacity_run_id }}" \
+            --output-dir artifacts/release/qualification-inputs
+
+      - name: Validate capacity, identity, subject, and workflow projections
+        run: |
+          python scripts/release_preflight.py \
+            --input-dir artifacts/release/qualification-inputs \
+            --out artifacts/release/preflight/inputs.json
+
+      - name: Run synthetic assemble and verifier contract tests
+        run: |
+          python -m pytest \
+            python/tests/test_release_evidence.py \
+            python/tests/test_release_subjects.py \
+            python/tests/test_release_readiness_contract.py \
+            python/tests/test_release_preflight.py -q
+
+      - name: Upload immutable preflight inputs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-preflight-${{ inputs.candidate_sha }}-tooling-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/release/qualification-inputs
+            artifacts/release/preflight
+          if-no-files-found: error
+
+  protected-release-approval:
+    name: Protected release approval
+    needs: qualification-preflight
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - name: Record protected approval boundary
+        run: echo "release approval granted for product ${{ inputs.candidate_sha }} using tooling ${{ github.sha }}"
+
+  release-readiness:
+    name: Release Readiness (Windows)
+    runs-on: windows-latest
+    needs: [qualification-preflight, protected-release-approval]
+
+    steps:
+      - name: Checkout qualification tooling
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Recheck protected tooling identity after approval
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $protected = gh api repos/${{ github.repository }}/git/ref/heads/main --jq .object.sha
+          if ($protected -ne "${{ github.sha }}") { throw "protected main advanced while release approval was pending" }
+          git merge-base --is-ancestor "${{ inputs.candidate_sha }}" "${{ github.sha }}"
+          if ($LASTEXITCODE -ne 0) { throw "candidate is not an ancestor of qualification tooling" }
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26.5"
           cache-dependency-path: go/go.sum
-
-      - name: Install stable toolchain
+      - name: Install stable toolchain and pinned evidence dependencies
         run: |
-          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup toolchain install stable --profile minimal
           rustup default stable
-
-      - name: Install pinned release evidence dependencies
-        run: python -m pip install --disable-pip-version-check -r requirements-release.txt
-
-      - name: Download and verify exact prerequisite artifacts
+          python -m pip install --disable-pip-version-check -r requirements-release.txt
+      - name: Download preflight-verified inputs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-preflight-${{ inputs.candidate_sha }}-tooling-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/release/preflight-download
+      - name: Stage immutable qualification inputs
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CI_RUN_ID: ${{ inputs.ci_run_id }}
-          SUPPLY_CHAIN_RUN_ID: ${{ inputs.supply_chain_run_id }}
-          PAGES_RUN_ID: ${{ inputs.pages_run_id }}
-          CAPACITY_RUN_ID: ${{ inputs.capacity_run_id }}
         run: |
-          $tree = (git rev-parse "HEAD^{tree}").Trim()
-          $candidateRepository = (git config --get remote.origin.url).Trim()
-          python scripts/release_qualification.py fetch-inputs `
-            --repository "${{ github.repository }}" `
-            --candidate-repository $candidateRepository `
-            --candidate-sha "${{ github.sha }}" `
-            --candidate-tree-sha $tree `
-            --candidate-ref "refs/heads/main" `
-            --ci-run-id $env:CI_RUN_ID `
-            --supply-chain-run-id $env:SUPPLY_CHAIN_RUN_ID `
-            --pages-run-id $env:PAGES_RUN_ID `
-            --capacity-run-id $env:CAPACITY_RUN_ID `
-            --output-dir artifacts/release/qualification-inputs
-
+          Copy-Item -Recurse -Force artifacts/release/preflight-download/qualification-inputs artifacts/release/qualification-inputs
       - name: Seed CI host baselines
         shell: pwsh
         run: |
           ./scripts/run-performance-baseline.ps1 -Suite core_kernel -HostManifestPath fixtures/performance/hosts/github-windows-latest.json -OutputPath artifacts/performance/baselines/core_kernel/github-windows-latest.json
           ./scripts/run-performance-baseline.ps1 -Suite service_in_process -HostManifestPath fixtures/performance/hosts/github-windows-latest.json -OutputPath artifacts/performance/baselines/service_in_process/github-windows-latest.json
-
-      - name: Run release-readiness suite
+      - name: Run package-bound operational qualification
         shell: pwsh
         run: |
-          $package = Get-ChildItem artifacts/release/qualification-inputs -Recurse -Filter "aether-pilot-service-windows-x86_64.zip"
-          if ($package.Count -ne 1) { throw "canonical package is missing or ambiguous" }
+          $manifest = Get-Content artifacts/release/qualification-inputs/qualification-inputs.json -Raw | ConvertFrom-Json
+          $package = Join-Path artifacts/release/qualification-inputs $manifest.package_path
           ./scripts/run-release-readiness.ps1 `
             -HostManifestPath fixtures/performance/hosts/github-windows-latest.json `
-            -CandidatePackageZip $package.FullName `
-            -CandidateSha "${{ github.sha }}" `
-            -CandidateRef "refs/heads/main" `
-            -EvidenceManifestPath "artifacts/qa/release-readiness/release-readiness-evidence-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}.json" `
+            -CandidatePackageZip $package `
+            -CandidateSha "${{ inputs.candidate_sha }}" `
+            -CandidateRef "${{ inputs.candidate_ref }}" `
+            -QualificationToolingSha "${{ github.sha }}" `
+            -QualificationToolingRef "${{ github.ref }}" `
+            -EvidenceManifestPath "artifacts/qa/release-readiness/release-readiness-evidence-${{ inputs.candidate_sha }}-${{ github.run_id }}-${{ github.run_attempt }}.json" `
             -CommercialBetaCandidate
-
       - name: Build candidate-bound release subjects
         shell: pwsh
         run: |
-          $tree = (git rev-parse "HEAD^{tree}").Trim()
-          $candidateRepository = (git config --get remote.origin.url).Trim()
-          $package = Get-ChildItem artifacts/release/qualification-inputs -Recurse -Filter "aether-pilot-service-windows-x86_64.zip"
-          if ($package.Count -ne 1) { throw "canonical package is missing or ambiguous" }
+          $manifest = Get-Content artifacts/release/qualification-inputs/qualification-inputs.json -Raw | ConvertFrom-Json
+          $package = Join-Path artifacts/release/qualification-inputs $manifest.package_path
           python scripts/release_qualification.py build-subjects `
             --repository "${{ github.repository }}" `
-            --candidate-repository $candidateRepository `
-            --candidate-sha "${{ github.sha }}" `
-            --candidate-tree-sha $tree `
-            --candidate-ref "refs/heads/main" `
+            --candidate-repository $manifest.candidate_repository `
+            --candidate-sha "${{ inputs.candidate_sha }}" `
+            --candidate-tree-sha $manifest.candidate_tree_sha `
+            --candidate-ref "${{ inputs.candidate_ref }}" `
+            --qualification-tooling-sha "${{ github.sha }}" `
+            --qualification-tooling-tree-sha $manifest.qualification_tooling.tree_sha `
+            --qualification-tooling-ref "${{ github.ref }}" `
             --input-dir artifacts/release/qualification-inputs `
-            --readiness-manifest "artifacts/qa/release-readiness/release-readiness-evidence-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}.json" `
-            --package $package.FullName `
+            --readiness-manifest "artifacts/qa/release-readiness/release-readiness-evidence-${{ inputs.candidate_sha }}-${{ github.run_id }}-${{ github.run_attempt }}.json" `
+            --package $package `
             --output-dir artifacts/release/qualification-subjects `
             --readiness-output-dir artifacts/release/qualification-readiness `
             --run-id "${{ github.run_id }}" `
             --attempt "${{ github.run_attempt }}"
-
       - name: Upload exact qualification inputs and subjects
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: release-qualification-subjects-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: release-qualification-subjects-${{ inputs.candidate_sha }}-tooling-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             artifacts/release/qualification-inputs
             artifacts/release/qualification-subjects
             artifacts/release/qualification-readiness
           if-no-files-found: error
-
-      - name: Upload release-readiness artifacts
+      - name: Upload release-readiness diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: release-readiness-artifacts
+          name: release-readiness-artifacts-${{ inputs.candidate_sha }}-tooling-${{ github.sha }}
           path: |
             artifacts/qa/release-readiness
             artifacts/pilot/reports
             artifacts/performance
             artifacts/pilot/launch
             artifacts/pilot/packages
-            artifacts/pages-preview-release
           if-no-files-found: warn
 
-      - name: Publish workflow summary
-        if: always()
-        shell: pwsh
-        run: |
-          if (Test-Path artifacts/qa/release-readiness/latest.md) {
-            Get-Content artifacts/qa/release-readiness/latest.md | Add-Content -Path $env:GITHUB_STEP_SUMMARY
-          } else {
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Release-readiness summary was not generated."
-          }
-
   exact-candidate-evidence:
-    needs:
-      - protected-release-approval
-      - release-readiness
+    needs: [qualification-preflight, protected-release-approval, release-readiness]
     uses: ./.github/workflows/reusable-exact-candidate-evidence.yml
     permissions:
       actions: read
@@ -183,6 +235,8 @@ jobs:
       attestations: write
       artifact-metadata: write
     with:
-      candidate_sha: ${{ github.sha }}
-      candidate_ref: refs/heads/main
-      qualification_subject_artifact: release-qualification-subjects-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+      candidate_sha: ${{ inputs.candidate_sha }}
+      candidate_ref: ${{ inputs.candidate_ref }}
+      qualification_tooling_sha: ${{ github.sha }}
+      qualification_tooling_ref: ${{ github.ref }}
+      qualification_subject_artifact: release-qualification-subjects-${{ inputs.candidate_sha }}-tooling-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}

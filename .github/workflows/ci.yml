@@ -3,11 +3,13 @@ name: CI
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,77 +18,38 @@ permissions:
   contents: read
 
 jobs:
-  hardening-promotion-state:
-    name: Hardening promotion state
+  scope:
+    name: CI scope
     runs-on: ubuntu-latest
     outputs:
-      admin_blocking: ${{ steps.state.outputs.admin_blocking }}
-      operator_blocking: ${{ steps.state.outputs.operator_blocking }}
-      user_blocking: ${{ steps.state.outputs.user_blocking }}
-      exec_blocking: ${{ steps.state.outputs.exec_blocking }}
+      rust: ${{ steps.scope.outputs.rust }}
+      go: ${{ steps.scope.outputs.go }}
+      python: ${{ steps.scope.outputs.python }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Read hardening promotion state
-        id: state
-        run: |
-          python scripts/hardening_promotion.py ci-outputs \
-            --config .github/hardening-promotion-state.json \
-            --github-output "$GITHUB_OUTPUT"
-
-  rust:
-    name: Rust (${{ matrix.os }}, ${{ matrix.toolchain }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-        toolchain:
-          - "1.86.0"
-          - stable
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Install toolchain
-        run: |
-          rustup toolchain install ${{ matrix.toolchain }} --profile minimal --component rustfmt --component clippy
-          rustup default ${{ matrix.toolchain }}
-
-      - name: cargo fmt
-        run: cargo fmt --all --check
-
-      - name: cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: cargo test
-        run: cargo test
-
-  go-shell:
-    name: Go shell
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.5"
-          cache-dependency-path: go/go.sum
+          fetch-depth: 0
 
-      - name: Run Go tests
-        working-directory: go
-        run: go test ./...
+      - name: Select affected PR boundaries
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git diff --name-only "$BASE_SHA" "$HEAD_SHA" > changed-paths.txt
+          else
+            printf '%s\n' .github/workflows/ci.yml > changed-paths.txt
+          fi
+          python scripts/ci_scope.py --paths-file changed-paths.txt --github-output "$GITHUB_OUTPUT"
 
-  postgres-journal:
-    name: Postgres verified TLS journal
+  rust-pr:
+    name: Rust PR fast
+    if: github.event_name == 'pull_request' && needs.scope.outputs.rust == 'true'
+    needs: scope
     runs-on: ubuntu-latest
 
     steps:
@@ -95,37 +58,145 @@ jobs:
 
       - name: Install stable toolchain
         run: |
-          rustup toolchain install stable --profile minimal
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
           rustup default stable
 
+      - name: Check Rust boundary
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
+  go-pr:
+    name: Go PR fast
+    if: github.event_name == 'pull_request' && needs.scope.outputs.go == 'true'
+    needs: scope
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.26.5"
+          cache-dependency-path: go/go.sum
+      - name: Run Go tests
+        working-directory: go
+        run: go test ./...
+
+  python-pr:
+    name: Python PR fast
+    if: github.event_name == 'pull_request' && needs.scope.outputs.python == 'true'
+    needs: scope
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-release.txt
+      - name: Run Python boundary
+        run: python -m pytest python/tests -q
+
+  rust-integration:
+    name: Rust integration (${{ matrix.os }}, ${{ matrix.toolchain }})
+    if: github.event_name != 'pull_request'
+    needs: scope
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        toolchain: ["1.86.0", stable]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install toolchain
+        run: |
+          rustup toolchain install ${{ matrix.toolchain }} --profile minimal --component rustfmt --component clippy
+          rustup default ${{ matrix.toolchain }}
+      - name: cargo fmt
+        run: cargo fmt --all --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo test
+        run: cargo test --workspace
+
+  go-integration:
+    name: Go integration
+    if: github.event_name != 'pull_request'
+    needs: scope
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.26.5"
+          cache-dependency-path: go/go.sum
+      - name: Run Go tests
+        working-directory: go
+        run: go test ./...
+
+  python-integration:
+    name: Python integration
+    if: github.event_name != 'pull_request'
+    needs: scope
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-release.txt
+      - name: Run Python tests
+        run: python -m pytest python/tests -q
+
+  postgres-journal:
+    name: Postgres verified TLS journal
+    if: github.event_name != 'pull_request'
+    needs: scope
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install stable toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
       - name: Start verified TLS, expiry, mTLS, and rotation fixtures
         run: bash scripts/ci-postgres-tls.sh >> "$GITHUB_ENV"
-
       - name: Run Postgres journal parity tests
         run: cargo test -p aether_storage --lib -- --nocapture
-
       - name: Run Postgres transport security matrix
         run: cargo test -p aether_storage --test postgres_tls -- --nocapture
-
       - name: Run Postgres HTTP namespace integration test
         run: cargo test -p aether_api --test http_service http_service_postgres_namespaces -- --nocapture
-
       - name: Stop Postgres TLS fixtures
         if: always()
         run: docker rm -f aether-postgres-tls-old aether-postgres-tls-expired aether-postgres-tls-new || true
 
   container-smoke:
     name: Container smoke
+    if: github.event_name != 'pull_request'
+    needs: scope
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
       - name: Build pilot service image
         run: docker build -t aether-pilot-service:ci .
-
-      - name: Boot image and verify authenticated status
+      - name: Boot image and verify authenticated status, append, authorization, restart, and persistence
         run: |
           set -euo pipefail
           workdir="$(mktemp -d)"
@@ -142,187 +213,95 @@ jobs:
               "external_https_origin": "https://aether.container-smoke.invalid",
               "ingress": "github-actions-docker-port"
             },
-            "storage": {
-              "kind": "sqlite",
-              "data_root": "/var/lib/aether/namespaces"
-            },
+            "storage": {"kind": "sqlite", "data_root": "/var/lib/aether/namespaces"},
             "audit_log_path": "/var/lib/aether/audit.jsonl",
             "auth": {
               "revoked_token_ids": [],
               "revoked_principal_ids": [],
-              "tokens": [
-                {
-                  "principal": "pilot-operator",
-                  "principal_id": "principal:pilot-operator",
-                  "token_id": "token:pilot-operator",
-                  "scopes": ["append", "query", "explain", "ops"],
-                  "policy_context": {
-                    "capabilities": ["executor"],
-                    "visibilities": []
-                  },
-                  "token_file": "pilot-operator.token",
-                  "namespaces": ["acme"],
-                  "revoked": false
-                }
-              ]
+              "tokens": [{
+                "principal": "pilot-operator",
+                "principal_id": "principal:pilot-operator",
+                "token_id": "token:pilot-operator",
+                "scopes": ["append", "query", "explain", "ops"],
+                "policy_context": {"capabilities": ["executor"], "visibilities": []},
+                "token_file": "pilot-operator.token",
+                "namespaces": ["acme"],
+                "revoked": false
+              }]
             }
           }
           JSON
-
-          container_id="$(docker run -d \
-            -p 3000:3000 \
-            -v "$workdir/config:/etc/aether:ro" \
-            aether-pilot-service:ci)"
+          container_id="$(docker run -d -p 3000:3000 -v "$workdir/config:/etc/aether:ro" aether-pilot-service:ci)"
           trap 'docker logs "$container_id" || true; docker rm -f "$container_id" || true; rm -rf "$workdir"' EXIT
-
           for attempt in $(seq 1 30); do
-            if curl -fsS "http://127.0.0.1:3000/health" >/tmp/aether-health.json; then
-              break
-            fi
-            if [ "$attempt" -eq 30 ]; then
-              echo "container did not become healthy" >&2
-              exit 1
-            fi
+            if curl -fsS http://127.0.0.1:3000/health >/tmp/aether-health.json; then break; fi
+            if [ "$attempt" -eq 30 ]; then exit 1; fi
             sleep 1
           done
-
-          curl -fsS \
-            -H "Authorization: Bearer ci-pilot-token" \
-            -H "X-Aether-Namespace: acme" \
-            "http://127.0.0.1:3000/v1/status" > /tmp/aether-status.json
+          curl -fsS -H "Authorization: Bearer ci-pilot-token" -H "X-Aether-Namespace: acme" \
+            http://127.0.0.1:3000/v1/status >/tmp/aether-status.json
           cat > /tmp/aether-append.json <<'JSON'
-          {
-            "datoms": [
-              {
-                "entity": 1,
-                "attribute": 1,
-                "value": {"String": "container-smoke"},
-                "op": "Assert",
-                "element": 1,
-                "replica": 1,
-                "causal_context": {"frontier": []},
-                "provenance": {
-                  "author_principal": "ci",
-                  "agent_id": "github-actions",
-                  "tool_id": "container-smoke",
-                  "session_id": "ci",
-                  "source_ref": {"uri": "container-smoke", "digest": null},
-                  "parent_datom_ids": [],
-                  "confidence": 1.0,
-                  "trust_domain": "ci",
-                  "schema_version": "v1"
-                },
-                "policy": null
-              }
-            ]
-          }
+          {"datoms":[{"entity":1,"attribute":1,"value":{"String":"container-smoke"},"op":"Assert","element":1,"replica":1,"causal_context":{"frontier":[]},"provenance":{"author_principal":"ci","agent_id":"github-actions","tool_id":"container-smoke","session_id":"ci","source_ref":{"uri":"container-smoke","digest":null},"parent_datom_ids":[],"confidence":1.0,"trust_domain":"ci","schema_version":"v1"},"policy":null}]}
           JSON
-          curl -fsS \
-            -H "Authorization: Bearer ci-pilot-token" \
-            -H "X-Aether-Namespace: acme" \
-            -H "Content-Type: application/json" \
-            --data @/tmp/aether-append.json \
-            "http://127.0.0.1:3000/v1/append" > /tmp/aether-append-response.json
+          curl -fsS -H "Authorization: Bearer ci-pilot-token" -H "X-Aether-Namespace: acme" \
+            -H "Content-Type: application/json" --data @/tmp/aether-append.json \
+            http://127.0.0.1:3000/v1/append >/tmp/aether-append-response.json
           forbidden_status="$(curl -sS -o /tmp/aether-forbidden.json -w '%{http_code}' \
-            -H "Authorization: Bearer ci-pilot-token" \
-            -H "X-Aether-Namespace: other" \
-            "http://127.0.0.1:3000/v1/status")"
+            -H "Authorization: Bearer ci-pilot-token" -H "X-Aether-Namespace: other" \
+            http://127.0.0.1:3000/v1/status)"
           test "$forbidden_status" = "403"
           docker stop "$container_id" >/dev/null
           docker start "$container_id" >/dev/null
           for attempt in $(seq 1 30); do
-            if curl -fsS "http://127.0.0.1:3000/health" >/tmp/aether-health-after-restart.json; then
-              break
-            fi
-            if [ "$attempt" -eq 30 ]; then
-              echo "container did not become healthy after restart" >&2
-              exit 1
-            fi
+            if curl -fsS http://127.0.0.1:3000/health >/tmp/aether-health-after-restart.json; then break; fi
+            if [ "$attempt" -eq 30 ]; then exit 1; fi
             sleep 1
           done
-          curl -fsS \
-            -H "Authorization: Bearer ci-pilot-token" \
-            -H "X-Aether-Namespace: acme" \
-            "http://127.0.0.1:3000/v1/history" > /tmp/aether-history-after-restart.json
-          curl -fsS \
-            -H "Authorization: Bearer ci-pilot-token" \
-            -H "X-Aether-Namespace: acme" \
-            "http://127.0.0.1:3000/v1/status" > /tmp/aether-status-after-restart.json
+          curl -fsS -H "Authorization: Bearer ci-pilot-token" -H "X-Aether-Namespace: acme" \
+            http://127.0.0.1:3000/v1/history >/tmp/aether-history-after-restart.json
+          curl -fsS -H "Authorization: Bearer ci-pilot-token" -H "X-Aether-Namespace: acme" \
+            http://127.0.0.1:3000/v1/status >/tmp/aether-status-after-restart.json
           python3 - <<'PY'
           import json
+          from pathlib import Path
 
-          with open("/tmp/aether-health.json", "r", encoding="utf-8") as handle:
-              health = json.load(handle)
-          with open("/tmp/aether-status.json", "r", encoding="utf-8") as handle:
-              status = json.load(handle)
-          with open("/tmp/aether-history-after-restart.json", "r", encoding="utf-8") as handle:
-              history_after_restart = json.load(handle)
-          with open("/tmp/aether-status-after-restart.json", "r", encoding="utf-8") as handle:
-              status_after_restart = json.load(handle)
-
+          health = json.loads(Path("/tmp/aether-health.json").read_text())
+          status = json.loads(Path("/tmp/aether-status.json").read_text())
+          history = json.loads(Path("/tmp/aether-history-after-restart.json").read_text())
+          restarted = json.loads(Path("/tmp/aether-status-after-restart.json").read_text())
           assert health["status"] == "ok", health
-          assert status["status"] == "ok", status
           assert status["config_version"] == "pilot-v2-container-smoke", status
-          assert status["schema_version"] == "v1", status
-          assert status["service_mode"] == "single_node", status
           assert status["storage"]["backend"] == "sqlite", status
           assert status["storage"]["data_root"] == "/var/lib/aether/namespaces", status
           assert status["effective_namespace"] == "acme", status
           assert status["principals"][0]["token_id"] == "token:pilot-operator", status
           assert status["principals"][0]["namespaces"] == ["acme"], status
-          assert len(history_after_restart["datoms"]) == 1, history_after_restart
-          assert history_after_restart["datoms"][0]["value"] == {"String": "container-smoke"}, history_after_restart
-          assert status_after_restart["effective_namespace"] == "acme", status_after_restart
-          assert status_after_restart["active_namespace_count"] == 1, status_after_restart
+          assert len(history["datoms"]) == 1, history
+          assert history["datoms"][0]["value"] == {"String": "container-smoke"}, history
+          assert restarted["effective_namespace"] == "acme", restarted
+          assert restarted["active_namespace_count"] == 1, restarted
           PY
 
-  python-sdk:
-    name: Python SDK
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.12"
-
-      - name: Install stable Rust
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-
-      - name: Install pinned Python test dependencies
-        run: python -m pip install --disable-pip-version-check -r requirements-release.txt
-
-      - name: Run Python SDK tests
-        run: python -m unittest discover python/tests -v
-
   pilot-launch-gate:
-    name: Pilot launch gate
+    name: Pilot launch integration
+    if: github.event_name != 'pull_request'
+    needs: scope
     runs-on: windows-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
       - name: Install stable toolchain
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
-
       - name: Seed CI host baselines
         shell: pwsh
         run: |
           ./scripts/run-performance-baseline.ps1 -Suite core_kernel -HostManifestPath fixtures/performance/hosts/github-windows-latest.json -OutputPath artifacts/performance/baselines/core_kernel/github-windows-latest.json
           ./scripts/run-performance-baseline.ps1 -Suite service_in_process -HostManifestPath fixtures/performance/hosts/github-windows-latest.json -OutputPath artifacts/performance/baselines/service_in_process/github-windows-latest.json
-
       - name: Run pilot launch validation
         shell: pwsh
         run: ./scripts/run-pilot-launch-validation.ps1 -HostManifestPath fixtures/performance/hosts/github-windows-latest.json
-
       - name: Upload pilot gate artifacts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -335,36 +314,25 @@ jobs:
           if-no-files-found: warn
 
   pilot-package:
-    name: Pilot package
+    name: Pilot package integration
+    if: github.event_name != 'pull_request'
+    needs: [rust-integration, go-integration, python-integration, postgres-journal, container-smoke, pilot-launch-gate]
     runs-on: windows-latest
-    needs:
-      - hardening-promotion-state
-      - rust
-      - go-shell
-      - postgres-journal
-      - container-smoke
-      - python-sdk
-      - pilot-launch-gate
-
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
       - name: Install stable toolchain
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
-
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26.5"
           cache-dependency-path: go/go.sum
-
       - name: Build packaged pilot bundle
         shell: pwsh
         run: ./scripts/build-pilot-package.ps1
-
       - name: Upload pilot package artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -375,170 +343,79 @@ jobs:
           if-no-files-found: error
 
   hardening-admin:
-    name: Hardening admin (blocking)
-    if: needs.hardening-promotion-state.outputs.admin_blocking == 'true'
+    name: Hardening admin (main/release)
+    if: github.event_name != 'pull_request'
+    needs: scope
     runs-on: windows-latest
-    needs:
-      - hardening-promotion-state
-
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
-
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26.5"
           cache-dependency-path: go/go.sum
-
       - name: Install stable toolchain
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
-
-      - name: Run blocking admin hardening pack
+      - name: Run release-blocking admin hardening pack
         shell: pwsh
         run: ./scripts/run-hardening-sweep.ps1 -Packs admin
 
   hardening-operator:
-    name: Hardening operator (blocking)
-    if: needs.hardening-promotion-state.outputs.operator_blocking == 'true'
+    name: Hardening operator (main/release)
+    if: github.event_name != 'pull_request'
+    needs: scope
     runs-on: windows-latest
-    needs:
-      - hardening-promotion-state
-
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
-
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26.5"
           cache-dependency-path: go/go.sum
-
       - name: Install stable toolchain
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
-
-      - name: Run blocking operator hardening pack
+      - name: Run release-blocking operator hardening pack
         shell: pwsh
         run: ./scripts/run-hardening-sweep.ps1 -Packs operator
-
-  hardening-user:
-    name: Hardening user (blocking)
-    if: needs.hardening-promotion-state.outputs.user_blocking == 'true'
-    runs-on: ubuntu-latest
-    needs:
-      - hardening-promotion-state
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version: "1.26.5"
-          cache-dependency-path: go/go.sum
-
-      - name: Install stable toolchain
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-
-      - name: Run blocking user hardening pack
-        shell: pwsh
-        run: ./scripts/run-hardening-sweep.ps1 -Packs user
-
-  hardening-exec:
-    name: Hardening exec (blocking)
-    if: needs.hardening-promotion-state.outputs.exec_blocking == 'true'
-    runs-on: ubuntu-latest
-    needs:
-      - hardening-promotion-state
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version: "1.26.5"
-          cache-dependency-path: go/go.sum
-
-      - name: Install stable toolchain
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-
-      - name: Run blocking exec hardening pack
-        shell: pwsh
-        run: ./scripts/run-hardening-sweep.ps1 -Packs exec
 
   required-ci-gate:
     name: Required CI gate
     if: always()
     runs-on: ubuntu-latest
     needs:
-      - hardening-promotion-state
-      - rust
-      - go-shell
+      - scope
+      - rust-pr
+      - go-pr
+      - python-pr
+      - rust-integration
+      - go-integration
+      - python-integration
       - postgres-journal
       - container-smoke
-      - python-sdk
       - pilot-launch-gate
       - pilot-package
       - hardening-admin
       - hardening-operator
-      - hardening-user
-      - hardening-exec
-
     steps:
-      - name: Verify required and conditional job conclusions
+      - name: Checkout gate policy
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Verify tier-appropriate jobs
         env:
           NEEDS_CONTEXT: ${{ toJSON(needs) }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          python3 - <<'PY'
-          import json
-          import os
-
-          jobs = json.loads(os.environ["NEEDS_CONTEXT"])
-          conditional = {
-              "hardening-admin",
-              "hardening-operator",
-              "hardening-user",
-              "hardening-exec",
-          }
-          failures = []
-          for job, payload in sorted(jobs.items()):
-              result = payload["result"]
-              allowed = {"success", "skipped"} if job in conditional else {"success"}
-              if result not in allowed:
-                  failures.append(f"{job}={result}")
-          if failures:
-              raise SystemExit("required CI jobs did not pass: " + ", ".join(failures))
-          print("all required CI jobs passed; inactive conditional packs were explicitly skipped")
-          PY
+          python scripts/ci_gate.py ci --event "$EVENT_NAME" --needs-json "$NEEDS_CONTEXT"

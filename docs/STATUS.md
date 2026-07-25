@@ -1,5 +1,20 @@
 # STATUS
 
+## Release-control reset (2026-07-21)
+
+Release control now separates immutable product/package identity from immutable
+qualification-tooling identity. PR CI is cancelable and affected-scope, while
+full OS/MSRV, Postgres, container, pilot package, and admin/operator hardening
+run on protected-main integration. The protected check names remain `Required
+CI gate` and `Required Supply Chain gate`.
+
+Release Readiness starts with deterministic preflight for dependencies,
+schemas, subject cardinality, prerequisite projections, package digest,
+capacity acceptance, and synthetic assemble/verifier contracts. Generic
+quality evidence is projected from exact-SHA prerequisite outcomes and
+independently requeried; package-bound operational qualification still runs.
+Hosted proof remains required before any commercial-beta claim.
+
 ## Current state
 
 The repository has advanced from a pure specification bundle to a functioning

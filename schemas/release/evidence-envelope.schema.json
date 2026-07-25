@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aether.dev/schemas/release/evidence-envelope-v1.json",
+  "$id": "https://aether.dev/schemas/release/evidence-envelope-v2.json",
   "title": "AETHER release evidence envelope",
   "type": "object",
   "additionalProperties": false,
@@ -10,6 +10,7 @@
     "gate_id",
     "official",
     "candidate",
+    "qualification_tooling",
     "workflow",
     "command",
     "started_at",
@@ -23,12 +24,28 @@
     "valid_until"
   ],
   "properties": {
-    "schema_version": { "const": "aether.release-evidence-envelope.v1" },
+    "schema_version": { "const": "aether.release-evidence-envelope.v2" },
     "evidence_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "gate_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]+$" },
     "official": { "type": "boolean" },
     "candidate": { "$ref": "#/$defs/candidate" },
+    "qualification_tooling": { "$ref": "#/$defs/candidate" },
     "workflow": { "$ref": "#/$defs/workflow" },
+    "evidence_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "workflow_file", "run_id", "attempt", "head_sha", "job_id", "job_name", "conclusion"],
+      "properties": {
+        "kind": { "const": "prerequisite_job" },
+        "workflow_file": { "type": "string", "minLength": 1 },
+        "run_id": { "type": "string", "pattern": "^[0-9]+$" },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "head_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "job_id": { "type": "integer", "minimum": 1 },
+        "job_name": { "type": "string", "minLength": 1 },
+        "conclusion": { "const": "success" }
+      }
+    },
     "command": {
       "type": "array",
       "minItems": 1,
@@ -77,6 +94,8 @@
         "job_id",
         "runner",
         "host",
+        "repository",
+        "artifact_name",
         "tool_versions"
       ],
       "properties": {
@@ -86,6 +105,8 @@
         "job_id": { "type": "string", "minLength": 1 },
         "runner": { "type": "string", "minLength": 1 },
         "host": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string", "minLength": 1 },
+        "artifact_name": { "type": "string", "minLength": 1 },
         "tool_versions": {
           "type": "object",
           "minProperties": 1,

@@ -51,6 +51,7 @@ class ReleaseSubjectTests(unittest.TestCase):
             "ref": "refs/heads/main",
             "dirty": False,
         }
+        self.qualification_tooling = dict(self.candidate)
         self.package_sha = "c" * 64
         self.gate_policy = self.evidence.load_json(
             REPO_ROOT / "fixtures" / "release" / "gate-policy.json"
@@ -193,6 +194,7 @@ class ReleaseSubjectTests(unittest.TestCase):
             "subject_identity": "",
             "subject_id": subject_id,
             "candidate": self.candidate,
+            "qualification_tooling": self.qualification_tooling,
             "producer": {
                 "workflow_file": ".github/workflows/release-readiness.yml",
                 "workflow_name": "Release Readiness",
@@ -228,6 +230,7 @@ class ReleaseSubjectTests(unittest.TestCase):
             payload,
             expected_subject_id=subject_id,
             candidate=self.candidate,
+            qualification_tooling=self.qualification_tooling,
             package_sha256=self.package_sha,
             now=self.now,
             gate_policy=self.gate_policy,
@@ -245,6 +248,7 @@ class ReleaseSubjectTests(unittest.TestCase):
                 None,
                 expected_subject_id="capacity",
                 candidate=self.candidate,
+                qualification_tooling=self.qualification_tooling,
                 package_sha256=self.package_sha,
                 now=self.now,
                 gate_policy=self.gate_policy,
@@ -591,13 +595,14 @@ class ReleaseSubjectTests(unittest.TestCase):
             }
             readiness_files[f"qualification-readiness/{output_name}-{original_name}"] = content
         readiness_manifest = {
-            "schema_version": "aether.release-readiness-evidence.v1",
+            "schema_version": "aether.release-readiness-evidence.v2",
             "status": "passed",
             "candidate": {
                 "commit_sha": self.candidate["commit_sha"],
                 "tree_sha": self.candidate["tree_sha"],
                 "ref": self.candidate["ref"],
             },
+            "qualification_tooling": self.qualification_tooling,
             "workflow": {"run_id": "42", "attempt": 1},
             "outputs": readiness_outputs,
         }
@@ -625,6 +630,8 @@ class ReleaseSubjectTests(unittest.TestCase):
         qualification_name = (
             "release-qualification-subjects-"
             + self.candidate["commit_sha"]
+            + "-tooling-"
+            + self.qualification_tooling["commit_sha"]
             + "-42-1"
         )
         run_payloads = {
@@ -726,6 +733,8 @@ class ReleaseSubjectTests(unittest.TestCase):
             "artifact_name": (
                 "aether-release-evidence-"
                 + self.candidate["commit_sha"]
+                + "-tooling-"
+                + self.qualification_tooling["commit_sha"]
                 + "-42-1"
             ),
             "attempt": 1,
@@ -734,13 +743,14 @@ class ReleaseSubjectTests(unittest.TestCase):
             "repository": "fyremael/AETHER",
             "run_id": "42",
             "runner": "Windows",
-            "tool_versions": {"verifier": "aether-release-evidence-verifier-v3"},
+            "tool_versions": {"verifier": "aether-release-evidence-verifier-v4"},
             "workflow_file": ".github/workflows/reusable-exact-candidate-evidence.yml",
         }
         self.verify_module.verify_subject_github_outcomes(
             envelopes,
             producer_workflow,
             self.candidate,
+            self.qualification_tooling,
             policy,
             api=api,
             download_artifact=download,
@@ -753,6 +763,7 @@ class ReleaseSubjectTests(unittest.TestCase):
                 envelopes,
                 producer_workflow,
                 self.candidate,
+                self.qualification_tooling,
                 policy,
                 api=api,
                 download_artifact=download,
@@ -766,6 +777,7 @@ class ReleaseSubjectTests(unittest.TestCase):
                 envelopes,
                 producer_workflow,
                 self.candidate,
+                self.qualification_tooling,
                 policy,
                 api=api,
                 download_artifact=download,
@@ -785,6 +797,7 @@ class ReleaseSubjectTests(unittest.TestCase):
                 envelopes,
                 producer_workflow,
                 self.candidate,
+                self.qualification_tooling,
                 policy,
                 api=api,
                 download_artifact=download,
@@ -809,6 +822,7 @@ class ReleaseSubjectTests(unittest.TestCase):
                 envelopes,
                 producer_workflow,
                 self.candidate,
+                self.qualification_tooling,
                 policy,
                 api=api,
                 download_artifact=download,

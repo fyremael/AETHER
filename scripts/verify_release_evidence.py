@@ -47,6 +47,10 @@ def verify_candidate(candidate: dict[str, Any]) -> None:
     require(candidate.get("dirty") is False, "dirty candidate evidence is forbidden")
 
 
+def verify_qualification_tooling(tooling: dict[str, Any]) -> None:
+    verify_candidate(tooling)
+
+
 def verify_time_window(envelope: dict[str, Any], now: datetime) -> None:
     started = evidence.parse_time(envelope["started_at"])
     ended = evidence.parse_time(envelope["ended_at"])
@@ -78,6 +82,7 @@ def verify_envelope(
     envelope: dict[str, Any],
     gate: dict[str, Any],
     candidate: dict[str, Any],
+    qualification_tooling: dict[str, Any],
     workflow: dict[str, Any],
     official: bool,
     policy: dict[str, Any],
@@ -89,6 +94,10 @@ def verify_envelope(
     require(envelope.get("observed_status") != "skipped", f"skipped gate evidence is incomplete: {gate['id']}")
     require(envelope.get("observed_status") not in {"ready", "accepted_risk", "ci_blocking"}, "authored status used as evidence")
     require(envelope.get("candidate") == candidate, f"{gate['id']} candidate mismatch")
+    require(
+        envelope.get("qualification_tooling") == qualification_tooling,
+        f"{gate['id']} qualification tooling mismatch",
+    )
     require(envelope.get("workflow") == workflow, f"{gate['id']} workflow mismatch")
     require(envelope.get("official") is official, f"{gate['id']} official/local classification mismatch")
     require(envelope.get("command") == gate.get("commands"), f"{gate['id']} command mismatch")
@@ -108,9 +117,62 @@ def verify_envelope(
     output = verify_descriptor(root, envelope["output"], f"{gate['id']} output")
     require(output.suffix == ".log" or envelope["output"].get("media_type"), f"{gate['id']} output media type missing")
     input_names = {item.get("path") for item in envelope.get("inputs", [])}
-    require(set(gate.get("inputs", [])).issubset(input_names), f"{gate['id']} input digests are incomplete")
-    if official:
+    source = envelope.get("evidence_source")
+    if source is None:
+        require(set(gate.get("inputs", [])).issubset(input_names), f"{gate['id']} input digests are incomplete")
+    else:
+        require(source.get("kind") == "prerequisite_job", f"{gate['id']} evidence source is unknown")
+        expected_source = evidence.PROJECTED_GATE_SOURCES.get(gate["id"])
+        require(expected_source is not None, f"{gate['id']} has no reviewed prerequisite projection")
+        require(
+            source.get("workflow_file") == expected_source["workflow_file"],
+            f"{gate['id']} prerequisite workflow is not authorized",
+        )
+        require(
+            source.get("job_name") == expected_source["job_name"],
+            f"{gate['id']} prerequisite job is not authorized",
+        )
+        require(source.get("head_sha") == candidate["commit_sha"], f"{gate['id']} prerequisite is cross-candidate")
+        require(source.get("conclusion") == "success", f"{gate['id']} prerequisite did not pass")
+        require(str(source.get("run_id", "")).isdigit(), f"{gate['id']} prerequisite run is invalid")
+        require(isinstance(source.get("attempt"), int) and source["attempt"] > 0, f"{gate['id']} prerequisite attempt is invalid")
+        require(isinstance(source.get("job_id"), int) and source["job_id"] > 0, f"{gate['id']} prerequisite job is invalid")
+        require(bool(source.get("workflow_file")) and bool(source.get("job_name")), f"{gate['id']} prerequisite projection is incomplete")
+    if official and source is None:
         require(policy["official_workflow"] in input_names, f"{gate['id']} did not digest the workflow at the candidate")
+
+
+def verify_projected_gate_github_outcomes(
+    envelopes: list[dict[str, Any]],
+    candidate: dict[str, Any],
+    policy: dict[str, Any],
+    *,
+    api: Callable[[str], Any] | None = None,
+) -> None:
+    api = api or github_api
+    repository = policy["official_repository"]
+    runs: dict[tuple[str, int], tuple[dict[str, Any], list[dict[str, Any]]]] = {}
+    for envelope in envelopes:
+        source = envelope.get("evidence_source")
+        require(isinstance(source, dict), f"{envelope['gate_id']} lacks projected prerequisite evidence")
+        key = (str(source["run_id"]), source["attempt"])
+        if key not in runs:
+            run = api(f"repos/{repository}/actions/runs/{key[0]}/attempts/{key[1]}")
+            require(run.get("id") == int(key[0]), "projected prerequisite run does not exist")
+            require(run.get("run_attempt") == key[1], "projected prerequisite attempt mismatch")
+            require(run.get("head_sha") == candidate["commit_sha"], "projected prerequisite is cross-candidate")
+            require(run.get("head_branch") == "main", "projected prerequisite is not a protected main run")
+            require(run.get("status") == "completed" and run.get("conclusion") == "success", "projected prerequisite run did not pass")
+            jobs = api(f"repos/{repository}/actions/runs/{key[0]}/attempts/{key[1]}/jobs?per_page=100").get("jobs", [])
+            runs[key] = (run, jobs)
+        run, jobs = runs[key]
+        require(str(run.get("path", "")).split("@", 1)[0] == source["workflow_file"], "projected prerequisite workflow mismatch")
+        matching = [
+            job for job in jobs
+            if job.get("id") == source["job_id"] and job.get("name") == source["job_name"]
+        ]
+        require(len(matching) == 1, f"{envelope['gate_id']} projected prerequisite job is missing")
+        require(matching[0].get("status") == "completed" and matching[0].get("conclusion") == "success", f"{envelope['gate_id']} projected prerequisite job did not pass")
 
 
 def waiver_subject_digest(waiver: dict[str, Any]) -> str:
@@ -228,10 +290,14 @@ def verify_official_workflow(workflow: dict[str, Any], policy: dict[str, Any]) -
 
 
 def expected_artifact_name(
-    workflow: dict[str, Any], candidate: dict[str, Any], policy: dict[str, Any]
+    workflow: dict[str, Any],
+    candidate: dict[str, Any],
+    qualification_tooling: dict[str, Any],
+    policy: dict[str, Any],
 ) -> str:
     return (
-        f"{policy['official_artifact_prefix']}-{candidate['commit_sha']}-"
+        f"{policy['official_artifact_prefix']}-{candidate['commit_sha']}-tooling-"
+        f"{qualification_tooling['commit_sha']}-"
         f"{workflow['run_id']}-{workflow['attempt']}"
     )
 
@@ -240,6 +306,7 @@ def verify_github_outcome(
     bundle: Path,
     workflow: dict[str, Any],
     candidate: dict[str, Any],
+    qualification_tooling: dict[str, Any],
     policy: dict[str, Any],
     *,
     api: Callable[[str], Any] = github_api,
@@ -251,13 +318,13 @@ def verify_github_outcome(
     attempt = workflow["attempt"]
     protected_main = api(f"repos/{repository}/git/ref/heads/main")
     require(
-        protected_main.get("object", {}).get("sha") == candidate["commit_sha"],
-        "protected main advanced beyond the qualified candidate",
+        protected_main.get("object", {}).get("sha") == qualification_tooling["commit_sha"],
+        "protected main advanced beyond the qualification tooling revision",
     )
     run = api(f"repos/{repository}/actions/runs/{run_id}/attempts/{attempt}")
     require(run.get("id") == int(run_id), "declared GitHub run does not exist in the official repository")
     require(run.get("run_attempt") == attempt, "GitHub run attempt mismatch")
-    require(run.get("head_sha") == candidate["commit_sha"], "GitHub run is for a different candidate")
+    require(run.get("head_sha") == qualification_tooling["commit_sha"], "GitHub run used different qualification tooling")
     require(
         run.get("repository", {}).get("full_name") == repository,
         "GitHub run repository mismatch",
@@ -283,7 +350,7 @@ def verify_github_outcome(
         "official producer job did not complete successfully",
     )
 
-    artifact_name = expected_artifact_name(workflow, candidate, policy)
+    artifact_name = expected_artifact_name(workflow, candidate, qualification_tooling, policy)
     require(workflow.get("artifact_name") == artifact_name, "declared official artifact name mismatch")
     artifacts = api(f"repos/{repository}/actions/runs/{run_id}/artifacts?per_page=100")
     matching_artifacts = [
@@ -302,7 +369,7 @@ def verify_github_outcome(
     )
     artifact_sha = artifact.get("workflow_run", {}).get("head_sha")
     if artifact_sha is not None:
-        require(artifact_sha == candidate["commit_sha"], "official artifact belongs to a different candidate")
+        require(artifact_sha == qualification_tooling["commit_sha"], "official artifact belongs to different qualification tooling")
 
     archive_bytes = download_artifact(repository, artifact["id"])
     require(len(archive_bytes) == artifact["size_in_bytes"], "downloaded official artifact byte size mismatch")
@@ -339,6 +406,7 @@ def verify_subject_github_outcomes(
     subject_envelopes: dict[str, dict[str, Any]],
     workflow: dict[str, Any],
     candidate: dict[str, Any],
+    qualification_tooling: dict[str, Any],
     policy: dict[str, Any],
     *,
     api: Callable[[str], Any] = github_api,
@@ -351,7 +419,8 @@ def verify_subject_github_outcomes(
         ".github/workflows/reusable-exact-candidate-evidence.yml",
     }
     qualification_artifact_name = (
-        f"release-qualification-subjects-{candidate['commit_sha']}-"
+        f"release-qualification-subjects-{candidate['commit_sha']}-tooling-"
+        f"{qualification_tooling['commit_sha']}-"
         f"{workflow['run_id']}-{workflow['attempt']}"
     )
     qualification_artifacts = api(
@@ -390,7 +459,7 @@ def verify_subject_github_outcomes(
         readiness_manifest = json.loads(readiness_manifests[0])
     except json.JSONDecodeError as exc:
         raise evidence.EvidenceError("qualification readiness manifest is invalid JSON") from exc
-    require(readiness_manifest.get("schema_version") == "aether.release-readiness-evidence.v1", "qualification readiness schema is invalid")
+    require(readiness_manifest.get("schema_version") == "aether.release-readiness-evidence.v2", "qualification readiness schema is invalid")
     require(readiness_manifest.get("status") == "passed", "qualification readiness did not pass")
     require(
         readiness_manifest.get("candidate")
@@ -400,6 +469,10 @@ def verify_subject_github_outcomes(
             "ref": candidate["ref"],
         },
         "qualification readiness is cross-candidate",
+    )
+    require(
+        readiness_manifest.get("qualification_tooling") == qualification_tooling,
+        "qualification readiness tooling binding differs",
     )
     readiness_workflow = {
         "run_id": str(workflow["run_id"]),
@@ -694,6 +767,7 @@ def verify_package_provenance(
     subject_envelope: dict[str, Any],
     workflow: dict[str, Any],
     candidate: dict[str, Any],
+    qualification_tooling: dict[str, Any],
     policy: dict[str, Any],
     *,
     runner: Callable[[list[str]], Any] = verify_attestation,
@@ -727,11 +801,11 @@ def verify_package_provenance(
             "--signer-workflow",
             signer_workflow,
             "--signer-digest",
-            candidate["commit_sha"],
+            qualification_tooling["commit_sha"],
             "--source-digest",
-            candidate["commit_sha"],
+            qualification_tooling["commit_sha"],
             "--source-ref",
-            candidate["ref"],
+            qualification_tooling["ref"],
             "--deny-self-hosted-runners",
             "--format",
             "json",
@@ -741,7 +815,7 @@ def verify_package_provenance(
     package_digest = evidence.sha256_file(package)
     expected_repository_uri = f"https://github.com/{repository}"
     expected_signer_uri = (
-        f"{expected_repository_uri}/{policy['official_attestation_workflow']}@{candidate['ref']}"
+        f"{expected_repository_uri}/{policy['official_attestation_workflow']}@{qualification_tooling['ref']}"
     )
     expected_invocation = (
         f"{expected_repository_uri}/actions/runs/{workflow['run_id']}/attempts/{workflow['attempt']}"
@@ -756,13 +830,13 @@ def verify_package_provenance(
             continue
         checks = {
             "source repository": certificate.get("sourceRepositoryURI") == expected_repository_uri,
-            "source digest": certificate.get("sourceRepositoryDigest") == candidate["commit_sha"],
-            "source ref": certificate.get("sourceRepositoryRef") == candidate["ref"],
+            "source digest": certificate.get("sourceRepositoryDigest") == qualification_tooling["commit_sha"],
+            "source ref": certificate.get("sourceRepositoryRef") == qualification_tooling["ref"],
             "workflow repository": certificate.get("githubWorkflowRepository") == repository,
-            "workflow digest": certificate.get("githubWorkflowSHA") == candidate["commit_sha"],
-            "workflow ref": certificate.get("githubWorkflowRef") == candidate["ref"],
+            "workflow digest": certificate.get("githubWorkflowSHA") == qualification_tooling["commit_sha"],
+            "workflow ref": certificate.get("githubWorkflowRef") == qualification_tooling["ref"],
             "signer URI": certificate.get("buildSignerURI") == expected_signer_uri,
-            "signer digest": certificate.get("buildSignerDigest") == candidate["commit_sha"],
+            "signer digest": certificate.get("buildSignerDigest") == qualification_tooling["commit_sha"],
             "run invocation": certificate.get("runInvocationURI") == expected_invocation,
             "runner environment": certificate.get("runnerEnvironment") == "github-hosted",
             "predicate type": statement.get("predicateType") == "https://slsa.dev/provenance/v1",
@@ -823,6 +897,8 @@ def verify_bundle(
     expected_commit_sha: str | None = None,
     expected_tree_sha: str | None = None,
     expected_ref: str | None = None,
+    expected_tooling_sha: str | None = None,
+    expected_tooling_ref: str | None = None,
     require_official: bool = False,
     now: datetime | None = None,
 ) -> dict[str, Any]:
@@ -837,6 +913,18 @@ def verify_bundle(
         require(manifest.get("verifier") == {"version": evidence.VERIFIER_VERSION, "algorithm": evidence.ALGORITHM}, "unknown verifier version")
         candidate = manifest.get("candidate")
         verify_candidate(candidate)
+        qualification_tooling = manifest.get("qualification_tooling")
+        verify_qualification_tooling(qualification_tooling)
+        if expected_tooling_sha:
+            require(
+                qualification_tooling["commit_sha"] == expected_tooling_sha,
+                "bundle tooling SHA does not match expected qualification tooling",
+            )
+        if expected_tooling_ref:
+            require(
+                qualification_tooling["ref"] == expected_tooling_ref,
+                "bundle tooling ref does not match expected qualification tooling",
+            )
         if expected_commit_sha:
             require(candidate["commit_sha"] == expected_commit_sha, "bundle commit SHA does not match expected candidate")
         if expected_tree_sha:
@@ -870,7 +958,17 @@ def verify_bundle(
             require(item.get("gate_id") == gate_id, "manifest/envelope gate mismatch")
             require(item.get("evidence_id") == envelope.get("evidence_id"), "manifest/envelope identity mismatch")
             require(item.get("observed_status") == envelope.get("observed_status"), "manifest concealed evidence status")
-            verify_envelope(root, envelope, gates[gate_id], candidate, workflow, official, policy, now)
+            verify_envelope(
+                root,
+                envelope,
+                gates[gate_id],
+                candidate,
+                qualification_tooling,
+                workflow,
+                official,
+                policy,
+                now,
+            )
             envelopes.append(envelope)
         require(seen_gate_ids == set(gates), f"missing evidence gates: {sorted(set(gates) - seen_gate_ids)}")
         waiver_payloads: list[dict[str, Any]] = []
@@ -904,6 +1002,7 @@ def verify_bundle(
                     evidence.load_json(subject_paths[subject_id]),
                     expected_subject_id=subject_id,
                     candidate=candidate,
+                    qualification_tooling=qualification_tooling,
                     package_sha256=package_digest,
                     now=now,
                     gate_policy=policy,
@@ -919,6 +1018,7 @@ def verify_bundle(
             )
         official_artifact = None
         if official:
+            verify_projected_gate_github_outcomes(envelopes, candidate, policy)
             require(
                 "package-provenance" in subject_paths,
                 "official bundle is missing signed package provenance",
@@ -928,15 +1028,19 @@ def verify_bundle(
                 subject_envelopes["package-provenance"],
                 workflow,
                 candidate,
+                qualification_tooling,
                 policy,
             )
             verify_subject_github_outcomes(
                 subject_envelopes,
                 workflow,
                 candidate,
+                qualification_tooling,
                 policy,
             )
-            official_artifact = verify_github_outcome(bundle, workflow, candidate, policy)
+            official_artifact = verify_github_outcome(
+                bundle, workflow, candidate, qualification_tooling, policy
+            )
         verdict, blockers = evidence.compute_verdict(
             policy,
             envelopes,
@@ -951,6 +1055,7 @@ def verify_bundle(
             "schema_version": "aether.release-evidence-verdict.v1",
             "bundle_id": manifest["bundle_id"],
             "candidate": candidate,
+            "qualification_tooling": qualification_tooling,
             "policy_id": policy["policy_id"],
             "official": official,
             "computed_verdict": verdict,
@@ -973,6 +1078,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-commit-sha")
     parser.add_argument("--expected-tree-sha")
     parser.add_argument("--expected-ref")
+    parser.add_argument("--expected-tooling-sha")
+    parser.add_argument("--expected-tooling-ref")
     parser.add_argument("--require-official", action="store_true")
     parser.add_argument("--require-passed", action="store_true")
     parser.add_argument("--out")
@@ -987,6 +1094,8 @@ def main() -> int:
             expected_commit_sha=args.expected_commit_sha,
             expected_tree_sha=args.expected_tree_sha,
             expected_ref=args.expected_ref,
+            expected_tooling_sha=args.expected_tooling_sha,
+            expected_tooling_ref=args.expected_tooling_ref,
             require_official=args.require_official,
         )
         if args.out:
