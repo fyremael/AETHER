@@ -13,9 +13,9 @@ aether_runtime = { path = "../aether_runtime" }
 aether_service_core = { path = "../aether_service_core" }
 aether_sidecar = { path = "../aether_sidecar" }
 aether_storage = { path = "../aether_storage" }
-axum = { version = "=0.7.9", features = ["json"] }
+axum = { version = "=0.8.9", features = ["json"] }
 rand.workspace = true
 serde.workspace = true
 serde_json = "1.0.133"
 thiserror.workspace = true
-tokio = { version = "=1.44.2", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
+tokio = { version = "=1.53.1", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }

@@ -16,7 +16,7 @@ aether_schema = { path = "../aether_schema" }
 aether_sidecar = { path = "../aether_sidecar" }
 aether_storage = { path = "../aether_storage" }
 rand.workspace = true
-rusqlite = { version = "=0.32.1", features = ["bundled"] }
+rusqlite = { version = "=0.40.1", features = ["bundled"] }
 serde.workspace = true
 serde_json = "1.0.133"
 sha2.workspace = true
