@@ -1,5 +1,15 @@
 # KNOWN_LIMITATIONS
 
+- Release evidence v2 is prospective. Historical v1 bundles remain auditable
+  with their original revision but are rejected by the v2 verifier; no automatic
+  migration can manufacture an unrecorded tooling identity.
+- A tooling repair may reverify an older product only while its commit remains
+  an ancestor of protected main and its exact prerequisite artifacts remain
+  available. This cannot rescue a genuine product/runtime failure.
+- PR routing reduces development cost, but protected-main integration retains
+  the full matrix and exact-SHA admin/operator hardening. Hosted timing and
+  branch-protection behavior are not proven by local tests.
+
 The unrestricted v1 single-node kernel slice remains implemented, but the
 policy-aware portion of semantic closure is reopened. The active external claim
 is:

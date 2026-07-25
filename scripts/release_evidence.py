@@ -23,10 +23,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-ENVELOPE_VERSION = "aether.release-evidence-envelope.v1"
-BUNDLE_VERSION = "aether.release-evidence-bundle.v1"
+ENVELOPE_VERSION = "aether.release-evidence-envelope.v2"
+BUNDLE_VERSION = "aether.release-evidence-bundle.v2"
 POLICY_VERSION = "aether.release-gate-policy.v1"
-VERIFIER_VERSION = "aether-release-evidence-verifier-v3"
+VERIFIER_VERSION = "aether-release-evidence-verifier-v4"
 ALGORITHM = "sha256-canonical-json-v1"
 OBSERVED_STATUSES = {"passed", "failed", "error", "skipped"}
 NON_WAIVABLE_CORE = {
@@ -37,6 +37,37 @@ NON_WAIVABLE_CORE = {
     "quality.rust_fmt_clippy_all_targets",
     "quality.go_boundary",
     "quality.python_boundary",
+}
+
+# Official v2 gate evidence is projected only from these explicitly reviewed
+# protected-main aggregate jobs. New policy gates must add a mapping here; they
+# cannot silently inherit the generic CI result.
+PROJECTED_GATE_SOURCES = {
+    gate_id: {
+        "run_key": "ci",
+        "job_key": "ci_gate",
+        "workflow_file": ".github/workflows/ci.yml",
+        "job_name": "Required CI gate",
+    }
+    for gate_id in {
+        "architecture.boundaries_recovered",
+        "operations.beta_service",
+        "quality.go_boundary",
+        "quality.python_boundary",
+        "quality.rust_fmt_clippy_all_targets",
+        "release.evidence_integrity",
+        "security.transport",
+        "semantic.full_acceptance",
+        "semantic.policy_noninterference",
+        "semantic.trace_handle_identity",
+        "storage.transactional_schema_append",
+    }
+}
+PROJECTED_GATE_SOURCES["security.supply_chain"] = {
+    "run_key": "supply_chain",
+    "job_key": "supply_gate",
+    "workflow_file": ".github/workflows/supply-chain.yml",
+    "job_name": "Required Supply Chain gate",
 }
 
 
@@ -227,6 +258,11 @@ def validate_policy(policy: dict[str, Any]) -> None:
         value = policy.get(field)
         if not isinstance(value, expected_type) or not value:
             raise EvidenceError(f"gate policy requires non-empty {field}")
+    allowed_tooling_paths = policy.get("qualification_tooling_allowed_paths")
+    if not isinstance(allowed_tooling_paths, list) or not allowed_tooling_paths:
+        raise EvidenceError("gate policy requires qualification tooling allowed paths")
+    if not all(isinstance(path, str) and path for path in allowed_tooling_paths):
+        raise EvidenceError("qualification tooling allowed paths are invalid")
     seen: set[str] = set()
     for gate in gates:
         gate_id = gate.get("id")
@@ -241,6 +277,8 @@ def validate_policy(policy: dict[str, Any]) -> None:
             raise EvidenceError(f"gate {gate_id} has invalid retry policy")
         if not isinstance(gate.get("commands"), list) or not gate["commands"]:
             raise EvidenceError(f"gate {gate_id} requires exact commands")
+        if gate_id not in PROJECTED_GATE_SOURCES:
+            raise EvidenceError(f"gate {gate_id} has no reviewed prerequisite projection")
     non_waivable = set(policy.get("non_waivable_gate_ids", []))
     if not NON_WAIVABLE_CORE.issubset(non_waivable):
         missing = sorted(NON_WAIVABLE_CORE - non_waivable)
@@ -281,6 +319,7 @@ def execute_gate(
     root: Path,
     gate: dict[str, Any],
     candidate: dict[str, Any],
+    qualification_tooling: dict[str, Any],
     workflow: dict[str, Any],
     official: bool,
     output_root: Path,
@@ -339,6 +378,7 @@ def execute_gate(
         "gate_id": gate_id,
         "official": official,
         "candidate": candidate,
+        "qualification_tooling": qualification_tooling,
         "workflow": workflow,
         "command": gate["commands"],
         "working_directory": working_directory,
@@ -373,6 +413,7 @@ def capture(args: argparse.Namespace) -> int:
     policy = load_json(policy_path)
     validate_policy(policy)
     candidate = candidate_identity(root, args.ref)
+    qualification_tooling = candidate_identity(root, args.tooling_ref or args.ref)
     workflow = workflow_identity(args)
     official = bool(args.official)
     if official:
@@ -417,6 +458,7 @@ def capture(args: argparse.Namespace) -> int:
             root,
             gate,
             candidate,
+            qualification_tooling,
             workflow,
             official,
             output_root,
@@ -428,6 +470,7 @@ def capture(args: argparse.Namespace) -> int:
     capture_manifest = {
         "schema_version": "aether.release-evidence-capture.v1",
         "candidate": candidate,
+        "qualification_tooling": qualification_tooling,
         "workflow": workflow,
         "official": official,
         "policy_sha256": sha256_file(policy_path),
@@ -535,10 +578,16 @@ def assemble(args: argparse.Namespace) -> int:
     loaded = load_envelopes(evidence_dir)
     envelopes = [payload for _, payload in loaded]
     candidate = envelopes[0]["candidate"]
+    qualification_tooling = envelopes[0]["qualification_tooling"]
     workflow = envelopes[0]["workflow"]
     official = bool(envelopes[0]["official"])
-    if any(item["candidate"] != candidate or item["workflow"] != workflow for item in envelopes):
-        raise EvidenceError("evidence envelopes do not bind one candidate and workflow")
+    if any(
+        item["candidate"] != candidate
+        or item["qualification_tooling"] != qualification_tooling
+        or item["workflow"] != workflow
+        for item in envelopes
+    ):
+        raise EvidenceError("evidence envelopes do not bind one candidate, qualification toolchain, and workflow")
     package_path = Path(args.package).resolve()
     if not package_path.is_file():
         raise EvidenceError(f"package does not exist: {package_path}")
@@ -611,6 +660,7 @@ def assemble(args: argparse.Namespace) -> int:
                 load_json(source),
                 expected_subject_id=subject_id,
                 candidate=candidate,
+                qualification_tooling=qualification_tooling,
                 package_sha256=package_digest,
                 now=utc_now(),
                 gate_policy=policy,
@@ -642,6 +692,7 @@ def assemble(args: argparse.Namespace) -> int:
             "bundle_id": "",
             "official": official,
             "candidate": candidate,
+            "qualification_tooling": qualification_tooling,
             "policy": policy_descriptor,
             "workflow": workflow,
             "evidence": sorted(evidence_descriptors, key=lambda item: item["gate_id"]),
@@ -671,6 +722,7 @@ def build_parser() -> argparse.ArgumentParser:
     capture_parser.add_argument("--output-dir")
     capture_parser.add_argument("--gate", action="append")
     capture_parser.add_argument("--ref")
+    capture_parser.add_argument("--tooling-ref")
     capture_parser.add_argument("--workflow-file")
     capture_parser.add_argument("--run-id")
     capture_parser.add_argument("--attempt", type=int)

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aether.dev/schemas/release/readiness-evidence-v2.json",
+  "title": "AETHER package-bound operational readiness evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "failure", "candidate", "qualification_tooling", "workflow", "package", "outputs"],
+  "properties": {
+    "schema_version": {"const": "aether.release-readiness-evidence.v2"},
+    "status": {"enum": ["passed", "failed"]},
+    "failure": {"type": ["string", "null"]},
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit_sha", "tree_sha", "ref"],
+      "properties": {
+        "commit_sha": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+        "tree_sha": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+        "ref": {"const": "refs/heads/main"}
+      }
+    },
+    "qualification_tooling": {"$ref": "https://aether.dev/schemas/release/evidence-envelope-v2.json#/$defs/candidate"},
+    "workflow": {"type": "object", "required": ["run_id", "attempt"]},
+    "package": {"type": "object", "required": ["path", "sha256"]},
+    "outputs": {"type": "object", "minProperties": 9}
+  }
+}

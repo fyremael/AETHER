@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aether.dev/schemas/release/evidence-bundle-v1.json",
+  "$id": "https://aether.dev/schemas/release/evidence-bundle-v2.json",
   "title": "AETHER immutable release evidence bundle manifest",
   "type": "object",
   "additionalProperties": false,
@@ -9,6 +9,7 @@
     "bundle_id",
     "official",
     "candidate",
+    "qualification_tooling",
     "policy",
     "workflow",
     "evidence",
@@ -23,12 +24,13 @@
     "verifier"
   ],
   "properties": {
-    "schema_version": { "const": "aether.release-evidence-bundle.v1" },
+    "schema_version": { "const": "aether.release-evidence-bundle.v2" },
     "bundle_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "official": { "type": "boolean" },
-    "candidate": { "$ref": "https://aether.dev/schemas/release/evidence-envelope-v1.json#/$defs/candidate" },
+    "candidate": { "$ref": "https://aether.dev/schemas/release/evidence-envelope-v2.json#/$defs/candidate" },
+    "qualification_tooling": { "$ref": "https://aether.dev/schemas/release/evidence-envelope-v2.json#/$defs/candidate" },
     "policy": { "$ref": "#/$defs/file" },
-    "workflow": { "$ref": "https://aether.dev/schemas/release/evidence-envelope-v1.json#/$defs/workflow" },
+    "workflow": { "$ref": "https://aether.dev/schemas/release/evidence-envelope-v2.json#/$defs/workflow" },
     "evidence": {
       "type": "array",
       "minItems": 1,
@@ -71,7 +73,7 @@
       "additionalProperties": false,
       "required": ["version", "algorithm"],
       "properties": {
-        "version": { "const": "aether-release-evidence-verifier-v2" },
+        "version": { "const": "aether-release-evidence-verifier-v4" },
         "algorithm": { "const": "sha256-canonical-json-v1" }
       }
     }

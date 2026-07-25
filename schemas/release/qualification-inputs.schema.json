@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aether.dev/schemas/release/qualification-inputs-v2.json",
+  "title": "AETHER immutable qualification inputs",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "repository", "candidate_repository", "candidate_commit_sha",
+    "candidate_tree_sha", "candidate_ref", "qualification_tooling", "package_path",
+    "package_sha256", "runs", "jobs", "artifacts"
+  ],
+  "properties": {
+    "schema_version": {"const": "aether.release-qualification-inputs.v2"},
+    "repository": {"type": "string", "minLength": 1},
+    "candidate_repository": {"type": "string", "minLength": 1},
+    "candidate_commit_sha": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+    "candidate_tree_sha": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+    "candidate_ref": {"const": "refs/heads/main"},
+    "qualification_tooling": {"$ref": "https://aether.dev/schemas/release/evidence-envelope-v2.json#/$defs/candidate"},
+    "package_path": {"type": "string", "minLength": 1},
+    "package_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "runs": {"type": "object", "required": ["ci", "supply_chain", "pages", "capacity"]},
+    "jobs": {"type": "object", "required": ["ci_gate", "transport_tls", "supply_gate", "codeql_go", "codeql_python"]},
+    "artifacts": {"type": "object", "required": ["canonical_package", "supply_chain_evidence", "pages", "capacity"]}
+  }
+}

@@ -1,5 +1,15 @@
 # ROADMAP
 
+## Immediate: prove release-control v2
+
+- confirm stable required check names and event-specific skip policy on a PR
+  and protected-main integration run;
+- run preflight for a previously selected product SHA with a newer tooling SHA
+  and confirm the package digest remains unchanged;
+- complete one hosted readiness run and independently verify its v2 bundle
+  before reopening commercial-beta promotion;
+- measure runner minutes after dependency grouping and affected-path routing.
+
 This document is the forward-looking companion to `docs/STATUS.md`.
 
 `STATUS` answers “what exists now.” `ROADMAP` answers “what should we build

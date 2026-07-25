@@ -5,6 +5,8 @@ param(
     [string]$CandidatePackageZip,
     [string]$CandidateSha,
     [string]$CandidateRef = "refs/heads/main",
+    [string]$QualificationToolingSha,
+    [string]$QualificationToolingRef = "refs/heads/main",
     [string]$EvidenceManifestPath,
     [switch]$CommercialBetaCandidate
 )
@@ -241,11 +243,12 @@ try {
     Close-Runner 1
 }
 
-$commit = if ($git) {
+$toolingCommit = if ($git) {
     (& $git.Source -C $repoRoot rev-parse HEAD).Trim()
 } else {
     "<git unavailable>"
 }
+$commit = if ($CandidateSha) { $CandidateSha } else { $toolingCommit }
 
 function Get-FileReceipt([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -262,8 +265,8 @@ function Get-FileReceipt([string]$Path) {
         byte_size = (Get-Item -LiteralPath $resolved).Length
     }
 }
-if ($CandidateSha -and $commit -ne $CandidateSha) {
-    Write-Host "Checked-out commit $commit does not match candidate $CandidateSha." -ForegroundColor Red
+if ($QualificationToolingSha -and $toolingCommit -ne $QualificationToolingSha) {
+    Write-Host "Checked-out commit $toolingCommit does not match qualification tooling $QualificationToolingSha." -ForegroundColor Red
     Close-Runner 1
 }
 if ($CandidatePackageZip) {
@@ -645,7 +648,8 @@ $manifestParent = Split-Path -Parent $EvidenceManifestPath
 if ($manifestParent) {
     New-Item -ItemType Directory -Force -Path $manifestParent | Out-Null
 }
-$treeSha = if ($git) { (& $git.Source -C $repoRoot rev-parse "HEAD^{tree}").Trim() } else { "" }
+$treeSha = if ($git) { (& $git.Source -C $repoRoot rev-parse "$commit^{tree}").Trim() } else { "" }
+$toolingTreeSha = if ($git) { (& $git.Source -C $repoRoot rev-parse "$toolingCommit^{tree}").Trim() } else { "" }
 $manifestStatus = if ($failed) { "failed" } else { "passed" }
 $readinessOutputPaths = [ordered]@{
     performance_beta = $performanceBetaJsonPath
@@ -667,13 +671,20 @@ foreach ($output in $readinessOutputPaths.GetEnumerator()) {
     }
 }
 $readinessEvidence = [ordered]@{
-    schema_version = "aether.release-readiness-evidence.v1"
+    schema_version = "aether.release-readiness-evidence.v2"
     status = $manifestStatus
     failure = if ($failed) { $failureMessage } else { $null }
     candidate = [ordered]@{
         commit_sha = $commit
         tree_sha = $treeSha
         ref = $CandidateRef
+    }
+    qualification_tooling = [ordered]@{
+        repository = (& $git.Source -C $repoRoot config --get remote.origin.url).Trim()
+        commit_sha = $toolingCommit
+        tree_sha = $toolingTreeSha
+        ref = $QualificationToolingRef
+        dirty = $false
     }
     workflow = [ordered]@{
         run_id = [string]$env:GITHUB_RUN_ID

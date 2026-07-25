@@ -54,6 +54,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "ref": "refs/tags/v-test",
             "dirty": False,
         }
+        self.qualification_tooling = dict(self.candidate)
         self.workflow = {
             "workflow_file": "local",
             "run_id": "local-test",
@@ -105,6 +106,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "gate_id": gate["id"],
             "official": False,
             "candidate": self.candidate,
+            "qualification_tooling": self.qualification_tooling,
             "workflow": self.workflow,
             "command": gate["commands"],
             "working_directory": gate.get("working_directory", "."),
@@ -156,6 +158,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "repository": self.policy["official_repository"],
             "artifact_name": (
                 f"{self.policy['official_artifact_prefix']}-{self.candidate['commit_sha']}-"
+                f"tooling-{self.qualification_tooling['commit_sha']}-"
                 f"{run_id}-{attempt}"
             ),
             "tool_versions": {"test": "1"},
@@ -209,6 +212,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 envelope,
                 gate,
                 self.candidate,
+                self.qualification_tooling,
                 self.workflow,
                 False,
                 self.policy,
@@ -221,6 +225,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 envelope,
                 gate,
                 self.candidate,
+                self.qualification_tooling,
                 self.workflow,
                 False,
                 self.policy,
@@ -318,6 +323,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             self.bundle,
             workflow,
             self.candidate,
+            self.qualification_tooling,
             self.policy,
             api=responses.__getitem__,
             download_artifact=lambda _repository, _artifact_id: artifact_archive,
@@ -330,6 +336,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 self.bundle,
                 workflow,
                 self.candidate,
+                self.qualification_tooling,
                 self.policy,
                 api=advanced.__getitem__,
                 download_artifact=lambda _repository, _artifact_id: artifact_archive,
@@ -341,6 +348,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 self.bundle,
                 arbitrary,
                 self.candidate,
+                self.qualification_tooling,
                 self.policy,
                 api=lambda endpoint: (
                     responses[f"repos/{repository}/git/ref/heads/main"]
@@ -360,6 +368,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 forged,
                 workflow,
                 self.candidate,
+                self.qualification_tooling,
                 self.policy,
                 api=responses.__getitem__,
                 download_artifact=lambda _repository, _artifact_id: artifact_archive,
@@ -420,6 +429,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             provenance_subject,
             workflow,
             self.candidate,
+            self.qualification_tooling,
             self.policy,
             runner=accepted,
         )
@@ -434,6 +444,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 provenance_subject,
                 workflow,
                 self.candidate,
+                self.qualification_tooling,
                 self.policy,
                 runner=lambda _command: verification,
             )
@@ -454,6 +465,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 envelope,
                 gate,
                 self.candidate,
+                self.qualification_tooling,
                 self.workflow,
                 False,
                 self.policy,
@@ -468,6 +480,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 capacity,
                 capacity_gate,
                 self.candidate,
+                self.qualification_tooling,
                 self.workflow,
                 False,
                 self.policy,
@@ -482,6 +495,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 pages,
                 pages_gate,
                 self.candidate,
+                self.qualification_tooling,
                 self.workflow,
                 False,
                 self.policy,

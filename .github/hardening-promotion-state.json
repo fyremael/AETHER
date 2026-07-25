@@ -12,7 +12,7 @@
   "groups": {
     "admin": {
       "label": "Admin package boot, auth reload, backup/restore, and restart/replay",
-      "workflow_target": "CI",
+      "workflow_target": "CI main/release integration",
       "blocking": true,
       "promoted_at": "2026-07-03T03:30:00Z",
       "promotion_evidence": {
@@ -31,7 +31,7 @@
     },
     "operator": {
       "label": "Operator report, delta, explain, and redaction checks",
-      "workflow_target": "CI",
+      "workflow_target": "CI main/release integration",
       "blocking": true,
       "promoted_at": "2026-07-03T03:30:00Z",
       "promotion_evidence": {
@@ -50,7 +50,7 @@
     },
     "user": {
       "label": "User SDK, HTTP, notebook, and onboarding checks",
-      "workflow_target": "CI",
+      "workflow_target": "QA Hardening scheduled diagnostics",
       "blocking": false,
       "manual_validation": {
         "confirmed": true,
@@ -60,7 +60,7 @@
     },
     "exec": {
       "label": "Exec demo and Pages narrative consistency checks",
-      "workflow_target": "CI",
+      "workflow_target": "QA Hardening scheduled diagnostics",
       "blocking": false,
       "manual_validation": {
         "confirmed": true,

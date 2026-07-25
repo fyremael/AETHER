@@ -20,7 +20,7 @@ from typing import Any
 import release_evidence as evidence
 
 
-SUBJECT_VERSION = "aether.release-subject.v1"
+SUBJECT_VERSION = "aether.release-subject.v2"
 SUBJECT_STATUSES = {"passed", "failed", "error", "skipped"}
 SHA40 = re.compile(r"^[a-f0-9]{40}$")
 SHA64 = re.compile(r"^[a-f0-9]{64}$")
@@ -283,6 +283,13 @@ def create_envelope(args: argparse.Namespace) -> dict[str, Any]:
         "ref": args.ref,
         "dirty": False,
     }
+    qualification_tooling = {
+        "repository": args.tooling_repository,
+        "commit_sha": args.tooling_commit_sha,
+        "tree_sha": args.tooling_tree_sha,
+        "ref": args.tooling_ref,
+        "dirty": False,
+    }
     producer = {
         "workflow_file": args.workflow_file,
         "workflow_name": args.workflow_name,
@@ -303,6 +310,7 @@ def create_envelope(args: argparse.Namespace) -> dict[str, Any]:
         "subject_identity": "",
         "subject_id": args.subject_id,
         "candidate": candidate,
+        "qualification_tooling": qualification_tooling,
         "producer": producer,
         "observed_status": args.status,
         "package": {"name": args.package_name, "sha256": args.package_sha256},
@@ -468,6 +476,7 @@ def verify_envelope(
     *,
     expected_subject_id: str,
     candidate: dict[str, Any],
+    qualification_tooling: dict[str, Any],
     package_sha256: str,
     now: datetime,
     gate_policy: dict[str, Any] | None = None,
@@ -477,6 +486,10 @@ def verify_envelope(
     require(payload.get("subject_id") == expected_subject_id, f"release subject ID mismatch: {expected_subject_id}")
     require(payload.get("subject_identity") == evidence.identity_digest(payload, "subject_identity"), f"{expected_subject_id} identity mismatch")
     require(payload.get("candidate") == candidate, f"{expected_subject_id} candidate mismatch")
+    require(
+        payload.get("qualification_tooling") == qualification_tooling,
+        f"{expected_subject_id} qualification tooling mismatch",
+    )
     require(payload.get("observed_status") in SUBJECT_STATUSES, f"{expected_subject_id} status is invalid")
     require(payload.get("observed_status") == "passed", f"{expected_subject_id} did not pass")
     package = payload.get("package")
@@ -548,6 +561,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--commit-sha", required=True)
     parser.add_argument("--tree-sha", required=True)
     parser.add_argument("--ref", required=True)
+    parser.add_argument("--tooling-repository", required=True)
+    parser.add_argument("--tooling-commit-sha", required=True)
+    parser.add_argument("--tooling-tree-sha", required=True)
+    parser.add_argument("--tooling-ref", required=True)
     parser.add_argument("--package-name", required=True)
     parser.add_argument("--package-sha256", required=True)
     parser.add_argument("--workflow-file", required=True)
@@ -570,8 +587,16 @@ def main() -> int:
     args = build_parser().parse_args()
     try:
         payload = create_envelope(args)
-        if not SHA40.fullmatch(args.commit_sha) or not SHA40.fullmatch(args.tree_sha):
-            raise evidence.EvidenceError("candidate commit and tree must be full lowercase SHA-1 values")
+        if not all(
+            SHA40.fullmatch(value)
+            for value in (
+                args.commit_sha,
+                args.tree_sha,
+                args.tooling_commit_sha,
+                args.tooling_tree_sha,
+            )
+        ):
+            raise evidence.EvidenceError("candidate and tooling identities must use full lowercase SHA-1 values")
         if not SHA64.fullmatch(args.package_sha256):
             raise evidence.EvidenceError("package digest must be a lowercase SHA-256 value")
         evidence.write_canonical_json(Path(args.output), payload)

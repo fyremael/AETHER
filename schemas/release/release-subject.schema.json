@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aether.dev/schemas/release/release-subject-v1.json",
+  "$id": "https://aether.dev/schemas/release/release-subject-v2.json",
   "title": "AETHER candidate-bound release subject",
   "type": "object",
   "additionalProperties": false,
@@ -9,6 +9,7 @@
     "subject_identity",
     "subject_id",
     "candidate",
+    "qualification_tooling",
     "producer",
     "observed_status",
     "package",
@@ -20,10 +21,22 @@
     "observation"
   ],
   "properties": {
-    "schema_version": { "const": "aether.release-subject.v1" },
+    "schema_version": { "const": "aether.release-subject.v2" },
     "subject_identity": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "subject_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]+$" },
     "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "commit_sha", "tree_sha", "ref", "dirty"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "commit_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "tree_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "ref": { "type": "string", "minLength": 1 },
+        "dirty": { "const": false }
+      }
+    },
+    "qualification_tooling": {
       "type": "object",
       "additionalProperties": false,
       "required": ["repository", "commit_sha", "tree_sha", "ref", "dirty"],

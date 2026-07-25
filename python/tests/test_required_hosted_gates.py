@@ -28,17 +28,24 @@ class RequiredHostedGateTests(unittest.TestCase):
         self.assertIn("name: Required CI gate", block)
         self.assertIn("if: always()", block)
         for required in (
-            "rust",
-            "go-shell",
+            "scope",
+            "rust-pr",
+            "go-pr",
+            "python-pr",
+            "rust-integration",
+            "go-integration",
+            "python-integration",
             "postgres-journal",
             "container-smoke",
-            "python-sdk",
             "pilot-launch-gate",
             "pilot-package",
+            "hardening-admin",
+            "hardening-operator",
         ):
             self.assertIn(f"- {required}", block)
-        self.assertIn('allowed = {"success", "skipped"} if job in conditional', block)
-        self.assertIn('else {"success"}', block)
+        self.assertIn("scripts/ci_gate.py ci", block)
+        gate = (REPO_ROOT / "scripts" / "ci_gate.py").read_text(encoding="utf-8")
+        self.assertIn('"success" if scopes[scope] == "true" else "skipped"', gate)
 
     def test_supply_chain_aggregate_requires_every_job(self) -> None:
         block = job_block("supply-chain.yml", "required-supply-chain-gate")
@@ -47,7 +54,7 @@ class RequiredHostedGateTests(unittest.TestCase):
         self.assertIn("if: always()", block)
         for required in ("package", "dependency-and-package", "codeql"):
             self.assertIn(f"- {required}", block)
-        self.assertIn('payload["result"] != "success"', block)
+        self.assertIn("scripts/ci_gate.py supply-chain", block)
 
     def test_release_work_is_downstream_of_protected_approval(self) -> None:
         approval = job_block("release-readiness.yml", "protected-release-approval")
@@ -56,9 +63,10 @@ class RequiredHostedGateTests(unittest.TestCase):
 
         self.assertIn("environment: release", approval)
         self.assertIn("name: Protected release approval", approval)
-        self.assertIn("- protected-release-approval", exact)
-        self.assertIn("- release-readiness", exact)
-        self.assertIn("needs: protected-release-approval", readiness)
+        self.assertIn("protected-release-approval", exact)
+        self.assertIn("release-readiness", exact)
+        self.assertIn("protected-release-approval", readiness)
+        self.assertIn("qualification-preflight", approval)
 
 
 if __name__ == "__main__":

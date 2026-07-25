@@ -9,6 +9,11 @@ updates:
       timezone: America/Vancouver
     open-pull-requests-limit: 5
     labels: [dependencies, rust]
+    groups:
+      rust-production:
+        dependency-type: production
+      rust-development:
+        dependency-type: development
 
   - package-ecosystem: gomod
     directory: /go
@@ -19,6 +24,9 @@ updates:
       timezone: America/Vancouver
     open-pull-requests-limit: 5
     labels: [dependencies, go]
+    groups:
+      go-dependencies:
+        patterns: ["*"]
 
   - package-ecosystem: pip
     directory: /
@@ -29,6 +37,9 @@ updates:
       timezone: America/Vancouver
     open-pull-requests-limit: 5
     labels: [dependencies, python]
+    groups:
+      python-dependencies:
+        patterns: ["*"]
 
   - package-ecosystem: github-actions
     directory: /
@@ -39,3 +50,6 @@ updates:
       timezone: America/Vancouver
     open-pull-requests-limit: 5
     labels: [dependencies, github-actions]
+    groups:
+      github-actions:
+        patterns: ["*"]
