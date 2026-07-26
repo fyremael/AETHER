@@ -17,7 +17,17 @@ schemas, subject cardinality, prerequisite projections, package digest,
 capacity acceptance, and synthetic assemble/verifier contracts. Generic
 quality evidence is projected from exact-SHA prerequisite outcomes and
 independently requeried; package-bound operational qualification still runs.
-Hosted proof remains required before any commercial-beta claim.
+Hosted qualification run `30176613797` passed on its first attempt for product
+`4e5dd1e0144299b356b6292f275f18f304f49f5f` using protected tooling
+`b7a9daccd239b7c5a028f3f344309628a19bf54d`. The independent verifier
+reported `passed` with no blockers, package digest
+`075a019716ccc86f8829d1aec7a044d23ec6b479673ac5dc148711c30435f1ac`,
+and evidence-bundle digest
+`646da8acc671c30fecb04ed36b657b63e417876c9f2faa49e745147b1977c301`.
+The fail-closed main-routing change was then validated by protected-main CI
+run `30182860543`, Supply Chain run `30182860551`, and Pages run
+`30182860552`, all green on attempt 1 at
+`eec7236086d96766916b326359e76083c8338291`.
 
 ## Current state
 
