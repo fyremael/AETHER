@@ -50,7 +50,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
-use sysinfo::{ProcessesToUpdate, System};
+use sysinfo::System;
 use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 use tower::util::ServiceExt;
 
@@ -709,7 +709,7 @@ pub fn collect_host_snapshot() -> PerfHostSnapshot {
         .to_string(),
         arch: env::consts::ARCH.into(),
         cpu_brand,
-        physical_cores: System::physical_core_count(),
+        physical_cores: system.physical_core_count(),
         logical_cores: Some(system.cpus().len()),
         total_memory_bytes: Some(system.total_memory()),
         execution_environment: PerfExecutionEnvironment::detect(),

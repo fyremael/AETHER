@@ -1174,13 +1174,13 @@ where
     let monitor = thread::spawn(move || {
         let mut system = System::new_all();
         while monitor_running.load(AtomicOrdering::Relaxed) {
-            system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+            system.refresh_process(pid);
             if let Some(process) = system.process(pid) {
                 monitor_peak.fetch_max(process.memory(), AtomicOrdering::Relaxed);
             }
             thread::sleep(Duration::from_millis(10));
         }
-        system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+        system.refresh_process(pid);
         if let Some(process) = system.process(pid) {
             monitor_peak.fetch_max(process.memory(), AtomicOrdering::Relaxed);
         }
