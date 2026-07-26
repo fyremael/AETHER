@@ -19,9 +19,9 @@ aether_schema = { path = "../aether_schema" }
 aether_service_core = { path = "../aether_service_core" }
 aether_sidecar = { path = "../aether_sidecar" }
 aether_storage = { path = "../aether_storage" }
-axum = { version = "=0.7.9", features = ["json"] }
+axum = { version = "=0.8.9", features = ["json"] }
 serde.workspace = true
 serde_json = "1.0.133"
-sysinfo = "=0.30.13"
-tokio = { version = "=1.44.2", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
+sysinfo = "=0.38.0"
+tokio = { version = "=1.53.1", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
 tower = { version = "=0.5.3", features = ["util"] }
