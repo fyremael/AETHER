@@ -25,6 +25,7 @@ jobs:
       rust: ${{ steps.scope.outputs.rust }}
       go: ${{ steps.scope.outputs.go }}
       python: ${{ steps.scope.outputs.python }}
+      product_integration: ${{ steps.scope.outputs.product_integration }}
 
     steps:
       - name: Checkout
@@ -38,11 +39,20 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
         run: |
           if [ "$EVENT_NAME" = "pull_request" ]; then
             git diff --name-only "$BASE_SHA" "$HEAD_SHA" > changed-paths.txt
+          elif [ "$EVENT_NAME" = "push" ] &&
+               [ -n "$BEFORE_SHA" ] &&
+               ! printf '%s' "$BEFORE_SHA" | grep -Eq '^0+$' &&
+               git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+            git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA" > changed-paths.txt
           else
-            printf '%s\n' .github/workflows/ci.yml > changed-paths.txt
+            # Manual dispatch and uncertain push ancestry deliberately run the
+            # full product integration matrix.
+            printf '%s\n' __full_product_integration__ > changed-paths.txt
           fi
           python scripts/ci_scope.py --paths-file changed-paths.txt --github-output "$GITHUB_OUTPUT"
 
@@ -105,7 +115,7 @@ jobs:
 
   rust-integration:
     name: Rust integration (${{ matrix.os }}, ${{ matrix.toolchain }})
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && needs.scope.outputs.product_integration == 'true'
     needs: scope
     runs-on: ${{ matrix.os }}
     strategy:
@@ -130,7 +140,7 @@ jobs:
 
   go-integration:
     name: Go integration
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && needs.scope.outputs.product_integration == 'true'
     needs: scope
     runs-on: ubuntu-latest
     steps:
@@ -147,7 +157,7 @@ jobs:
 
   python-integration:
     name: Python integration
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && needs.scope.outputs.product_integration == 'true'
     needs: scope
     runs-on: ubuntu-latest
     steps:
@@ -164,7 +174,7 @@ jobs:
 
   postgres-journal:
     name: Postgres verified TLS journal
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && needs.scope.outputs.product_integration == 'true'
     needs: scope
     runs-on: ubuntu-latest
     steps:
@@ -188,7 +198,7 @@ jobs:
 
   container-smoke:
     name: Container smoke
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && needs.scope.outputs.product_integration == 'true'
     needs: scope
     runs-on: ubuntu-latest
     steps:
@@ -284,7 +294,7 @@ jobs:
 
   pilot-launch-gate:
     name: Pilot launch integration
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && needs.scope.outputs.product_integration == 'true'
     needs: scope
     runs-on: windows-latest
     steps:
@@ -315,8 +325,8 @@ jobs:
 
   pilot-package:
     name: Pilot package integration
-    if: github.event_name != 'pull_request'
-    needs: [rust-integration, go-integration, python-integration, postgres-journal, container-smoke, pilot-launch-gate]
+    if: github.event_name != 'pull_request' && needs.scope.outputs.product_integration == 'true'
+    needs: [scope, rust-integration, go-integration, python-integration, postgres-journal, container-smoke, pilot-launch-gate]
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -344,7 +354,7 @@ jobs:
 
   hardening-admin:
     name: Hardening admin (main/release)
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && needs.scope.outputs.product_integration == 'true'
     needs: scope
     runs-on: windows-latest
     steps:
@@ -369,7 +379,7 @@ jobs:
 
   hardening-operator:
     name: Hardening operator (main/release)
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && needs.scope.outputs.product_integration == 'true'
     needs: scope
     runs-on: windows-latest
     steps:

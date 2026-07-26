@@ -6,9 +6,12 @@
 - A tooling repair may reverify an older product only while its commit remains
   an ancestor of protected main and its exact prerequisite artifacts remain
   available. This cannot rescue a genuine product/runtime failure.
-- PR routing reduces development cost, but protected-main integration retains
-  the full matrix and exact-SHA admin/operator hardening. Hosted timing and
-  branch-protection behavior are not proven by local tests.
+- PR routing and exact-path protected-main routing reduce development cost.
+  Qualification-tooling/docs-only pushes skip the product matrix, while
+  product, unknown, manual, uncertain-history, and CI-routing changes run it.
+  This relies on maintaining a deliberately narrow explicit allowlist; newly
+  added release-control files run full integration until reviewed and added.
+  Hosted timing and branch-protection behavior are not proven by local tests.
 
 The unrestricted v1 single-node kernel slice remains implemented, but the
 policy-aware portion of semantic closure is reopened. The active external claim

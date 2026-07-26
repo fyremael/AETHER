@@ -3,10 +3,14 @@
 ## Release-control reset (2026-07-21)
 
 Release control now separates immutable product/package identity from immutable
-qualification-tooling identity. PR CI is cancelable and affected-scope, while
-full OS/MSRV, Postgres, container, pilot package, and admin/operator hardening
-run on protected-main integration. The protected check names remain `Required
-CI gate` and `Required Supply Chain gate`.
+qualification-tooling identity. PR CI is cancelable and affected-scope.
+Protected-main CI derives the exact push range and runs the full OS/MSRV,
+Postgres, container, pilot package, and admin/operator product matrix unless
+every changed path is an explicitly enumerated qualification-tooling file or
+documentation path. Manual dispatch, missing/zero push ancestry, new paths,
+and changes to the CI scoping architecture itself fail closed to the full
+matrix. The protected check names remain `Required CI gate` and `Required
+Supply Chain gate`.
 
 Release Readiness starts with deterministic preflight for dependencies,
 schemas, subject cardinality, prerequisite projections, package digest,

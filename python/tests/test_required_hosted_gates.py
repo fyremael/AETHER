@@ -22,6 +22,31 @@ def job_block(workflow: str, job_id: str) -> str:
 
 
 class RequiredHostedGateTests(unittest.TestCase):
+    def test_ci_push_scope_uses_exact_push_range_and_fails_closed(self) -> None:
+        workflow = (
+            REPO_ROOT / ".github" / "workflows" / "ci.yml"
+        ).read_text(encoding="utf-8")
+        scope = job_block("ci.yml", "scope")
+
+        self.assertIn("BEFORE_SHA: ${{ github.event.before }}", scope)
+        self.assertIn("CURRENT_SHA: ${{ github.sha }}", scope)
+        self.assertIn(
+            'git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA"', scope
+        )
+        self.assertIn("grep -Eq '^0+$'", scope)
+        self.assertIn("git cat-file -e", scope)
+        self.assertIn("__full_product_integration__", scope)
+        self.assertIn(
+            "product_integration: ${{ steps.scope.outputs.product_integration }}",
+            scope,
+        )
+        self.assertEqual(
+            workflow.count(
+                "needs.scope.outputs.product_integration == 'true'"
+            ),
+            9,
+        )
+
     def test_ci_aggregate_is_stable_and_fail_closed(self) -> None:
         block = job_block("ci.yml", "required-ci-gate")
 
@@ -45,7 +70,10 @@ class RequiredHostedGateTests(unittest.TestCase):
             self.assertIn(f"- {required}", block)
         self.assertIn("scripts/ci_gate.py ci", block)
         gate = (REPO_ROOT / "scripts" / "ci_gate.py").read_text(encoding="utf-8")
-        self.assertIn('"success" if scopes[scope] == "true" else "skipped"', gate)
+        self.assertIn(
+            '"skipped" if product_integration == "false" else "success"',
+            gate,
+        )
 
     def test_supply_chain_aggregate_requires_every_job(self) -> None:
         block = job_block("supply-chain.yml", "required-supply-chain-gate")

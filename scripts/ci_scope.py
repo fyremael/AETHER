@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Select the fast PR boundaries affected by a set of changed paths."""
+"""Select fast language boundaries and protected-main product integration."""
 
 from __future__ import annotations
 
@@ -15,6 +15,42 @@ RELEASE_CONTROL_PREFIXES = (
     "scripts/",
     "requirements-release.txt",
 )
+
+PRODUCT_INTEGRATION_EXEMPT_FILES = frozenset(
+    {
+        ".github/dependabot.yml",
+        ".github/hardening-promotion-state.json",
+        ".github/workflows/release-readiness.yml",
+        ".github/workflows/reusable-exact-candidate-evidence.yml",
+        "fixtures/release/gate-policy.json",
+        "python/tests/test_release_evidence.py",
+        "python/tests/test_release_preflight.py",
+        "python/tests/test_release_subjects.py",
+        "requirements-release.txt",
+        "scripts/release_evidence.py",
+        "scripts/release_preflight.py",
+        "scripts/release_qualification.py",
+        "scripts/release_subjects.py",
+        "scripts/run-release-readiness.ps1",
+        "scripts/verify_release_evidence.py",
+    }
+)
+PRODUCT_INTEGRATION_EXEMPT_PREFIXES = (
+    "docs/",
+    "schemas/release/",
+)
+
+
+def product_integration_required(paths: set[str]) -> bool:
+    """Fail closed unless every changed path is explicitly non-product."""
+
+    if not paths:
+        return True
+    return not all(
+        path in PRODUCT_INTEGRATION_EXEMPT_FILES
+        or path.startswith(PRODUCT_INTEGRATION_EXEMPT_PREFIXES)
+        for path in paths
+    )
 
 
 def select_scopes(paths: Iterable[str]) -> dict[str, bool]:
@@ -35,6 +71,7 @@ def select_scopes(paths: Iterable[str]) -> dict[str, bool]:
             or path.startswith(("python/", "notebooks/"))
             for path in normalized
         ),
+        "product_integration": product_integration_required(normalized),
     }
 
 
