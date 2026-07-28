@@ -12,6 +12,12 @@
   This relies on maintaining a deliberately narrow explicit allowlist; newly
   added release-control files run full integration until reviewed and added.
   Hosted timing and branch-protection behavior are not proven by local tests.
+- The Python HTTP client integration fixture gives its prerequisite Cargo build
+  a five-minute deadline before the separate 90-second service-readiness
+  deadline begins. A cold build can therefore remain expensive, but it now
+  fails with a bounded build diagnostic instead of blocking on a live process
+  pipe. CI orchestration should still avoid running competing Cargo builds in
+  the same target directory when that concurrency provides no useful coverage.
 
 The unrestricted v1 single-node kernel slice remains implemented, but the
 policy-aware portion of semantic closure is reopened. The active external claim

@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import io
+import json
 import os
 import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import TextIO
+from unittest import mock
 from urllib import error, request
 
 
@@ -28,39 +33,99 @@ from aether_sdk import (  # noqa: E402
 )
 
 
+def _build_http_test_server() -> Path:
+    completed = subprocess.run(
+        [
+            "cargo",
+            "build",
+            "-p",
+            "aether_api",
+            "--example",
+            "http_kernel_service",
+            "--message-format=json-render-diagnostics",
+        ],
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=os.environ.copy(),
+        timeout=300,
+        check=False,
+    )
+    output = completed.stdout or ""
+    if completed.returncode != 0:
+        raise RuntimeError(f"failed to build AETHER test server:\n{output}")
+
+    executable: Path | None = None
+    for line in output.splitlines():
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        target = message.get("target", {})
+        if (
+            message.get("reason") == "compiler-artifact"
+            and target.get("name") == "http_kernel_service"
+            and message.get("executable")
+        ):
+            executable = Path(message["executable"])
+
+    if executable is None or not executable.is_file():
+        raise RuntimeError(
+            "cargo did not report the built http_kernel_service executable"
+        )
+    return executable
+
+
+def _read_server_log(server_log: TextIO) -> str:
+    server_log.flush()
+    server_log.seek(0)
+    return server_log.read()
+
+
+def _stop_server(server: subprocess.Popen[str], server_log: TextIO) -> None:
+    try:
+        if server.poll() is None:
+            server.terminate()
+            try:
+                server.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait(timeout=10)
+    finally:
+        server_log.close()
+
+
 @unittest.skipUnless(shutil.which("cargo"), "cargo is required for HTTP client integration tests")
 class AetherHttpClientIntegrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls._port = cls._free_port()
         cls._base_url = f"http://127.0.0.1:{cls._port}"
-        cls._server = subprocess.Popen(
-            [
-                "cargo",
-                "run",
-                "-p",
-                "aether_api",
-                "--example",
-                "http_kernel_service",
-                "--",
-                f"127.0.0.1:{cls._port}",
-            ],
-            cwd=REPO_ROOT,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            env=os.environ.copy(),
-        )
-        cls._wait_for_server(cls._base_url, cls._server)
+        cls._server_log = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")
+        cls._server: subprocess.Popen[str] | None = None
+        try:
+            server_executable = _build_http_test_server()
+            cls._server = subprocess.Popen(
+                [str(server_executable), f"127.0.0.1:{cls._port}"],
+                cwd=REPO_ROOT,
+                stdout=cls._server_log,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env=os.environ.copy(),
+            )
+            cls._wait_for_server(cls._base_url, cls._server, cls._server_log)
+        except BaseException:
+            if cls._server is None:
+                cls._server_log.close()
+            else:
+                _stop_server(cls._server, cls._server_log)
+            raise
 
     @classmethod
     def tearDownClass(cls) -> None:
-        cls._server.terminate()
-        try:
-            cls._server.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            cls._server.kill()
-            cls._server.wait(timeout=10)
+        if cls._server is not None:
+            _stop_server(cls._server, cls._server_log)
 
     def test_client_runs_documents_and_sidecar_queries(self) -> None:
         client = AetherClient(self._base_url)
@@ -356,11 +421,15 @@ query current_cut {
             return int(sock.getsockname()[1])
 
     @staticmethod
-    def _wait_for_server(base_url: str, server: subprocess.Popen[str]) -> None:
+    def _wait_for_server(
+        base_url: str,
+        server: subprocess.Popen[str],
+        server_log: TextIO,
+    ) -> None:
         deadline = time.time() + 90.0
         while time.time() < deadline:
             if server.poll() is not None:
-                output = server.stdout.read() if server.stdout else ""
+                output = _read_server_log(server_log)
                 raise RuntimeError(f"AETHER test server exited early:\n{output}")
             try:
                 with request.urlopen(f"{base_url}/health", timeout=1.0) as response:
@@ -369,8 +438,38 @@ query current_cut {
             except (error.URLError, TimeoutError):
                 time.sleep(1.0)
 
-        output = server.stdout.read() if server.stdout else ""
-        raise RuntimeError(f"AETHER test server did not become ready:\n{output}")
+        raise RuntimeError("AETHER test server did not become ready within 90 seconds")
+
+
+class HttpServerLifecycleTests(unittest.TestCase):
+    def test_stop_server_closes_log_after_graceful_exit(self) -> None:
+        server = mock.Mock()
+        server.poll.return_value = None
+        server.wait.return_value = 0
+        server_log = io.StringIO()
+
+        _stop_server(server, server_log)
+
+        server.terminate.assert_called_once_with()
+        server.kill.assert_not_called()
+        self.assertTrue(server_log.closed)
+
+    def test_stop_server_kills_process_that_ignores_termination(self) -> None:
+        server = mock.Mock()
+        server.poll.return_value = None
+        server.wait.side_effect = [
+            subprocess.TimeoutExpired(cmd="http_kernel_service", timeout=10),
+            0,
+        ]
+        server_log = io.StringIO()
+
+        _stop_server(server, server_log)
+
+        server.terminate.assert_called_once_with()
+        server.kill.assert_called_once_with()
+        self.assertEqual(server.wait.call_count, 2)
+        self.assertTrue(server_log.closed)
+
 
 
 if __name__ == "__main__":

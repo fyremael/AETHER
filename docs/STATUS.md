@@ -29,6 +29,22 @@ run `30182860543`, Supply Chain run `30182860551`, and Pages run
 `30182860552`, all green on attempt 1 at
 `eec7236086d96766916b326359e76083c8338291`.
 
+## Python alternate-runner lifecycle repair (2026-07-27)
+
+The Python HTTP client integration fixture no longer starts the service through
+`cargo run` with an unread output pipe. It performs a bounded build first,
+launches the reported service executable directly, writes service output to a
+file-backed temporary log, and guarantees terminate/kill/wait/close cleanup
+from both failed class setup and normal teardown. This removes the path where a
+Cargo lock could exhaust the 90-second readiness deadline and a live
+`stdout.read()` could then wait indefinitely for EOF.
+
+Lifecycle regression tests cover graceful termination and forced-kill cleanup.
+The repaired fixture passed from a fresh Cargo target after 251.9 seconds,
+crossing the former 90-second failure boundary without leaking a process or
+file handle. The complete alternate runner passed 125 tests under Python
+development warnings, and the pytest surface passed the same 125 tests.
+
 ## Current state
 
 The repository has advanced from a pure specification bundle to a functioning
