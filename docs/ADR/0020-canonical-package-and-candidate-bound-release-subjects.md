@@ -37,7 +37,9 @@ manifest before their subject envelopes are accepted.
 Commercial promotion is a separate generated record. The ledger remains
 policy-only. `aether.commercial-beta-promotion.v1` requires byte-identical
 official and independently recomputed passing verdicts and records the exact
-candidate and artifact receipts. It preserves four distinct GA blockers.
+candidate, qualification-tooling identity, and artifact receipts. Verdict
+artifact lookup uses the same candidate-plus-tooling SHA contract as the
+reusable evidence workflow. It preserves four distinct GA blockers.
 
 ## Consequences
 

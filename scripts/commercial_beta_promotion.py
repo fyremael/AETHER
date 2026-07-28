@@ -37,7 +37,14 @@ def verify_verdict_pair(official: dict[str, Any], independent: dict[str, Any]) -
         require(verdict.get("official") is True, f"{label} diagnostic verdict cannot promote beta")
         require(verdict.get("computed_verdict") == "passed", f"{label} verdict did not pass")
         require(verdict.get("blockers") == [], f"{label} verdict retains blockers")
-    for field in ("bundle_id", "candidate", "policy_id", "package_sha256", "verifier"):
+    for field in (
+        "bundle_id",
+        "candidate",
+        "qualification_tooling",
+        "policy_id",
+        "package_sha256",
+        "verifier",
+    ):
         require(official.get(field) == independent.get(field), f"official and independent verdicts disagree on {field}")
     candidate = official["candidate"]
     require(candidate.get("ref") == "refs/heads/main", "only protected main candidates can promote beta")
@@ -54,9 +61,12 @@ def verify_dependent_verdict_artifact(
     repository = verdict["official_repository"]
     workflow = verdict["workflow"]
     candidate = verdict["candidate"]
-    name = (
-        f"aether-release-evidence-verdict-{candidate['commit_sha']}-"
-        f"{workflow['run_id']}-{workflow['attempt']}"
+    qualification_tooling = verdict["qualification_tooling"]
+    release_verify.verify_qualification_tooling(qualification_tooling)
+    name = release_verify.expected_verdict_artifact_name(
+        workflow,
+        candidate,
+        qualification_tooling,
     )
     payload = api(f"repos/{repository}/actions/runs/{workflow['run_id']}/artifacts?per_page=100")
     matches = [item for item in payload.get("artifacts", []) if item.get("name") == name]
@@ -121,6 +131,7 @@ def generate(
         "promotion_id": "",
         "stage": "commercial_beta",
         "candidate": candidate,
+        "qualification_tooling": canonical["qualification_tooling"],
         "policy_id": canonical["policy_id"],
         "package_sha256": canonical["package_sha256"],
         "workflow": canonical["workflow"],
@@ -170,6 +181,8 @@ def verify_record(record: Any) -> dict[str, Any]:
     require(record.get("stage") == "commercial_beta", "promotion record stage is invalid")
     candidate = record.get("candidate", {})
     require(candidate.get("ref") == "refs/heads/main" and candidate.get("dirty") is False, "promotion candidate is not protected main")
+    qualification_tooling = record.get("qualification_tooling", {})
+    release_verify.verify_qualification_tooling(qualification_tooling)
     require(bool(SHA64.fullmatch(str(record.get("package_sha256", "")))), "promotion package digest is invalid")
     require(record.get("independent_verification", {}).get("byte_for_byte_equal") is True, "independent verdict bytes disagree")
     ga = record.get("ga", {})

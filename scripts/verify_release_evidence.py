@@ -302,6 +302,18 @@ def expected_artifact_name(
     )
 
 
+def expected_verdict_artifact_name(
+    workflow: dict[str, Any],
+    candidate: dict[str, Any],
+    qualification_tooling: dict[str, Any],
+) -> str:
+    return (
+        f"aether-release-evidence-verdict-{candidate['commit_sha']}-tooling-"
+        f"{qualification_tooling['commit_sha']}-"
+        f"{workflow['run_id']}-{workflow['attempt']}"
+    )
+
+
 def verify_github_outcome(
     bundle: Path,
     workflow: dict[str, Any],

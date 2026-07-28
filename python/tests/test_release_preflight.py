@@ -45,9 +45,11 @@ class ReleasePreflightTests(unittest.TestCase):
         )
         rules = policy["qualification_tooling_allowed_paths"]
         release_control_files = {
+            "python/tests/test_commercial_beta_promotion.py",
             "python/tests/test_release_evidence.py",
             "python/tests/test_release_preflight.py",
             "python/tests/test_release_subjects.py",
+            "scripts/commercial_beta_promotion.py",
             "scripts/release_evidence.py",
             "scripts/release_preflight.py",
             "scripts/release_qualification.py",
@@ -59,6 +61,12 @@ class ReleasePreflightTests(unittest.TestCase):
         self.assertFalse(
             release_qualification.tooling_path_allowed("scripts/release_subjects.py.bak", rules)
         )
+
+    def test_release_readiness_preflight_runs_promotion_contract(self) -> None:
+        workflow = (
+            REPO_ROOT / ".github" / "workflows" / "release-readiness.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("python/tests/test_commercial_beta_promotion.py", workflow)
 
     def test_projected_gate_sources_are_explicit_and_fail_closed(self) -> None:
         self.assertEqual(
