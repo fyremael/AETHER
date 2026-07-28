@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import io
 import json
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 
@@ -61,6 +63,13 @@ class CommercialBetaPromotionTests(unittest.TestCase):
                 "ref": "refs/heads/main",
                 "dirty": False,
             },
+            "qualification_tooling": {
+                "repository": "fyremael/AETHER",
+                "commit_sha": "c" * 40,
+                "tree_sha": "d" * 40,
+                "ref": "refs/heads/main",
+                "dirty": False,
+            },
             "policy_id": "commercial-beta-r9-v1",
             "official": True,
             "computed_verdict": "passed",
@@ -75,7 +84,9 @@ class CommercialBetaPromotionTests(unittest.TestCase):
             "official_repository": "fyremael/AETHER",
             "official_artifact": {
                 "artifact_id": 10,
-                "artifact_name": "aether-release-evidence-aaa-42-1",
+                "artifact_name": (
+                    f"aether-release-evidence-{'a' * 40}-tooling-{'c' * 40}-42-1"
+                ),
                 "sha256": "4" * 64,
                 "byte_size": 100,
                 "run_id": "42",
@@ -84,7 +95,9 @@ class CommercialBetaPromotionTests(unittest.TestCase):
         }
         self.official = self.root / "official.json"
         self.independent = self.root / "independent.json"
-        self.bundle = self.root / "aether-release-evidence-aaa-42-1.zip"
+        self.bundle = self.root / (
+            f"aether-release-evidence-{'a' * 40}-tooling-{'c' * 40}-42-1.zip"
+        )
         self.bundle.write_bytes(b"bundle placeholder")
         self.write_verdicts()
 
@@ -111,7 +124,10 @@ class CommercialBetaPromotionTests(unittest.TestCase):
             bundle_verifier=lambda _bundle, **_kwargs: self.evidence.load_json(self.official),
             verdict_artifact_verifier=lambda _verdict, _bytes: {
                 "artifact_id": 11,
-                "artifact_name": "aether-release-evidence-verdict-aaa-42-1",
+                "artifact_name": (
+                    f"aether-release-evidence-verdict-{'a' * 40}-"
+                    f"tooling-{'c' * 40}-42-1"
+                ),
                 "sha256": "5" * 64,
                 "byte_size": 100,
                 "run_id": "42",
@@ -119,10 +135,74 @@ class CommercialBetaPromotionTests(unittest.TestCase):
             },
         )
 
+    def test_dependent_verdict_artifact_binds_product_and_tooling_shas(self) -> None:
+        expected_bytes = self.evidence.canonical_bytes(self.verdict)
+        archive_buffer = io.BytesIO()
+        with zipfile.ZipFile(archive_buffer, "w") as archive:
+            archive.writestr("verified-verdict.json", expected_bytes)
+        archive_bytes = archive_buffer.getvalue()
+        expected_name = (
+            f"aether-release-evidence-verdict-{'a' * 40}-"
+            f"tooling-{'c' * 40}-42-1"
+        )
+
+        def artifact_payload(name: str) -> dict:
+            return {
+                "artifacts": [
+                    {
+                        "id": 11,
+                        "name": name,
+                        "expired": False,
+                        "digest": f"sha256:{self.evidence.sha256_bytes(archive_bytes)}",
+                        "size_in_bytes": len(archive_bytes),
+                    }
+                ]
+            }
+
+        receipt = self.promotion.verify_dependent_verdict_artifact(
+            self.verdict,
+            expected_bytes,
+            api=lambda _endpoint: artifact_payload(expected_name),
+            download_artifact=lambda repository, artifact_id: archive_bytes,
+        )
+
+        self.assertEqual(receipt["artifact_name"], expected_name)
+        self.assertIn(self.verdict["candidate"]["commit_sha"], expected_name)
+        self.assertIn(self.verdict["qualification_tooling"]["commit_sha"], expected_name)
+
+        rejected_names = [
+            f"aether-release-evidence-verdict-{'a' * 40}-42-1",
+            (
+                f"aether-release-evidence-verdict-{'a' * 40}-"
+                f"tooling-{'e' * 40}-42-1"
+            ),
+        ]
+        for rejected_name in rejected_names:
+            with self.subTest(rejected_name=rejected_name):
+                with self.assertRaisesRegex(ValueError, "missing or ambiguous"):
+                    self.promotion.verify_dependent_verdict_artifact(
+                        self.verdict,
+                        expected_bytes,
+                        api=lambda _endpoint, name=rejected_name: artifact_payload(name),
+                        download_artifact=lambda repository, artifact_id: archive_bytes,
+                    )
+
     def test_generates_immutable_record_with_narrow_beta_and_ga_zero_of_four(self) -> None:
         record = self.generate()
         self.promotion.verify_record(record)
         self.assertEqual(record["stage"], "commercial_beta")
+        self.assertEqual(
+            record["candidate"]["commit_sha"],
+            self.verdict["candidate"]["commit_sha"],
+        )
+        self.assertEqual(
+            record["qualification_tooling"]["commit_sha"],
+            self.verdict["qualification_tooling"]["commit_sha"],
+        )
+        self.assertNotEqual(
+            record["candidate"]["commit_sha"],
+            record["qualification_tooling"]["commit_sha"],
+        )
         self.assertEqual(record["ga"]["passed_gates"], 0)
         self.assertEqual(record["ga"]["required_gates"], 4)
         self.assertEqual(len(record["ga"]["blockers"]), 4)

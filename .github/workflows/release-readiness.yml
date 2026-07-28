@@ -97,6 +97,7 @@ jobs:
       - name: Run synthetic assemble and verifier contract tests
         run: |
           python -m pytest \
+            python/tests/test_commercial_beta_promotion.py \
             python/tests/test_release_evidence.py \
             python/tests/test_release_subjects.py \
             python/tests/test_release_readiness_contract.py \
