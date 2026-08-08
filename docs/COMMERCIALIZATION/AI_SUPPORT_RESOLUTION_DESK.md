@@ -69,7 +69,9 @@ Client-facing desk objects:
 
 In the current exemplar:
 
-- inbound support cases are appended as journal facts
+- 13 inbound support cases are appended as 300 journal facts
+- 26 candidate resolutions and 52 assignment attempts exercise the live rules
+- 13 journal-anchored artifact/vector records feed governed evidence back into the desk
 - sidecar artifact and vector search bring back prior-case or runbook evidence
 - planner logic publishes candidate resolutions and escalation options
 - AETHER derives which path is ready
@@ -109,6 +111,11 @@ ML-oriented design-partner conversations.
 ## Truth Boundary
 
 This exemplar is intentionally disciplined.
+
+The scaled runnable profile is at least 10 times the original demo across
+cases, resolutions, evidence records, assignment attempts, and journal datoms.
+It is a functional showcase workload, not a capacity benchmark, soak result,
+concurrency qualification, or production sizing claim.
 
 It does **not** mean:
 

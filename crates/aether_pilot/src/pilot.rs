@@ -6,6 +6,15 @@ pub const COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT: u64 = 5;
 pub const COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT: u64 = 9;
 
 pub fn coordination_pilot_dsl(view: &str, query_body: &str) -> String {
+    coordination_pilot_document_dsl(&format!(
+        r#"query {{
+  {view}
+  {query_body}
+}}"#
+    ))
+}
+
+pub(crate) fn coordination_pilot_document_dsl(query_blocks: &str) -> String {
     format!(
         r#"
 schema v1 {{
@@ -94,10 +103,7 @@ materialize {{
   execution_outcome_rejected_stale
 }}
 
-query {{
-  {view}
-  {query_body}
-}}
+{query_blocks}
 "#
     )
 }

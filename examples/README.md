@@ -8,6 +8,7 @@ Start here:
 
 | Example | Best use | What it teaches |
 | --- | --- | --- |
+| `demo-07-frontier-engineering-control-room.md` | Frontier engineering and technical product showcase | Recursive work readiness, exact product/tooling identity, runner fencing, package evidence, replay, learning updates, and explainable promotion |
 | `demo-06-aether-learn-routing.md` | AETHER-Learn routing proof | No-regret routing ledger plus service-backed routing update reporting |
 | `demo-05-ai-support-resolution-desk.md` | ML-facing design-partner and focus-group walkthrough | A governed support case desk with retrieved evidence, candidate resolutions, selected ownership, replay, and proof |
 | `demo-04-governed-incident-blackboard.md` | Design-partner and sponsor walkthrough | A governed shared workspace for agents and operators, ready-action derivation, authority handoff, replay, and proof in plain language |
@@ -28,5 +29,6 @@ For non-technical Windows operators:
 - double-click `scripts/run-demo-03.cmd`
 - double-click `scripts/run-demo-04.cmd`
 - double-click `scripts/run-demo-05.cmd`
+- double-click `scripts/run-demo-07.cmd`
 
 The DSL parser is now real for the core authoring path. Some examples still use the Rust AST surface where that is the clearest way to isolate a semantic behavior under test.

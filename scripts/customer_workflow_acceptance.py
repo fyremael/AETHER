@@ -32,6 +32,14 @@ REQUIRED_DEMO_MARKERS = [
     "apply-migration-credit",
     "lead-ana",
     "root tuple",
+    "Scale contract: >=10x baseline",
+    "13 governed cases",
+    "26 candidate resolutions",
+    "13 governed evidence records",
+    "52 assignment attempts",
+    "300 journal datoms",
+    "13 current selected resolutions",
+    "39 stale assignment attempts fenced",
 ]
 
 

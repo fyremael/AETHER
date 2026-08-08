@@ -1,6 +1,6 @@
 use crate::{
     pilot::{
-        coordination_pilot_dsl, COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
+        coordination_pilot_document_dsl, COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT,
         COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT,
     },
     ApiError, ExecutionId, HistoryRequest, KernelService, ResolveTraceHandleRequest,
@@ -153,86 +153,96 @@ pub fn build_coordination_pilot_report(
     build_coordination_pilot_report_with_policy(service, None)
 }
 
+fn coordination_pilot_query_blocks(
+    include_pre_heartbeat: bool,
+    include_authorized_as_of: bool,
+) -> String {
+    // One document lets the service cache a single evaluation for every temporal view.
+    // Keep query names stable because they are the contract used to assemble report sections.
+    let mut query_blocks = String::new();
+    if include_pre_heartbeat {
+        query_blocks.push_str(&coordination_named_query(
+            "pre_heartbeat_authorized",
+            &format!("as_of e{}", COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT),
+            "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
+        ));
+    }
+    if include_authorized_as_of {
+        query_blocks.push_str(&coordination_named_query(
+            "as_of_authorized",
+            &format!("as_of e{}", COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT),
+            "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
+        ));
+    }
+    query_blocks.push_str(&coordination_snapshot_query_blocks("current"));
+    query_blocks
+}
+
+fn coordination_snapshot_query_blocks(view: &str) -> String {
+    let mut query_blocks = String::new();
+    query_blocks.push_str(&coordination_named_query(
+        "live_heartbeats",
+        view,
+        "goal live_authority(t, worker, epoch, beat)\n  keep t, worker, epoch, beat",
+    ));
+    query_blocks.push_str(&coordination_named_query(
+        "current_authorized",
+        view,
+        "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
+    ));
+    query_blocks.push_str(&coordination_named_query(
+        "claimable",
+        view,
+        "goal worker_can_claim(t, worker)\n  keep t, worker",
+    ));
+    query_blocks.push_str(&coordination_named_query(
+        "accepted_outcomes",
+        view,
+        "goal execution_outcome_accepted(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
+    ));
+    query_blocks.push_str(&coordination_named_query(
+        "rejected_outcomes",
+        view,
+        "goal execution_outcome_rejected_stale(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
+    ));
+    query_blocks
+}
+
 pub fn build_coordination_pilot_report_with_policy(
     service: &mut dyn KernelService,
     policy_context: Option<PolicyContext>,
 ) -> Result<CoordinationPilotReport, ApiError> {
-    let history_len = service
-        .history(HistoryRequest {
-            policy_context: policy_context.clone(),
-        })?
-        .datoms
-        .len();
-    let pre_heartbeat_authorized = run_report_query(
+    let history = service.history(HistoryRequest {
+        policy_context: policy_context.clone(),
+    })?;
+    let history_len = history.datoms.len();
+    let has_element = |element| {
+        history
+            .datoms
+            .iter()
+            .any(|datom| datom.element.0 == element)
+    };
+    let query_blocks = coordination_pilot_query_blocks(
+        has_element(COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT),
+        has_element(COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT),
+    );
+
+    let mut sections = run_report_queries(
         service,
         RunDocumentRequest {
-            dsl: coordination_pilot_dsl(
-                &format!("as_of e{}", COORDINATION_PILOT_PRE_HEARTBEAT_ELEMENT),
-                "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
-            ),
+            dsl: coordination_pilot_document_dsl(&query_blocks),
             policy_context: policy_context.clone(),
         },
     )?;
-    let as_of_authorized = run_report_query(
-        service,
-        RunDocumentRequest {
-            dsl: coordination_pilot_dsl(
-                &format!("as_of e{}", COORDINATION_PILOT_AUTHORIZED_AS_OF_ELEMENT),
-                "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
-            ),
-            policy_context: policy_context.clone(),
-        },
-    )?;
-    let live_heartbeats = run_report_query(
-        service,
-        RunDocumentRequest {
-            dsl: coordination_pilot_dsl(
-                "current",
-                "goal live_authority(t, worker, epoch, beat)\n  keep t, worker, epoch, beat",
-            ),
-            policy_context: policy_context.clone(),
-        },
-    )?;
-    let current_authorized = run_report_query(
-        service,
-        RunDocumentRequest {
-            dsl: coordination_pilot_dsl(
-                "current",
-                "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
-            ),
-            policy_context: policy_context.clone(),
-        },
-    )?;
-    let claimable = run_report_query(
-        service,
-        RunDocumentRequest {
-            dsl: coordination_pilot_dsl(
-                "current",
-                "goal worker_can_claim(t, worker)\n  keep t, worker",
-            ),
-            policy_context: policy_context.clone(),
-        },
-    )?;
-    let accepted_outcomes = run_report_query(
-        service,
-        RunDocumentRequest {
-            dsl: coordination_pilot_dsl(
-                "current",
-                "goal execution_outcome_accepted(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
-            ),
-            policy_context: policy_context.clone(),
-        },
-    )?;
-    let rejected_outcomes = run_report_query(
-        service,
-        RunDocumentRequest {
-            dsl: coordination_pilot_dsl(
-                "current",
-                "goal execution_outcome_rejected_stale(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
-            ),
-            policy_context: policy_context.clone(),
-        },
-    )?;
+    let pre_heartbeat_authorized = sections
+        .remove("pre_heartbeat_authorized")
+        .unwrap_or_default();
+    let as_of_authorized = sections.remove("as_of_authorized").unwrap_or_default();
+    let live_heartbeats = sections.remove("live_heartbeats").unwrap_or_default();
+    let current_authorized = sections.remove("current_authorized").unwrap_or_default();
+    let claimable = sections.remove("claimable").unwrap_or_default();
+    let accepted_outcomes = sections.remove("accepted_outcomes").unwrap_or_default();
+    let rejected_outcomes = sections.remove("rejected_outcomes").unwrap_or_default();
 
     let trace = current_authorized
         .first()
@@ -612,17 +622,39 @@ fn render_changed_rows(output: &mut String, rows: &[ReportRowChange]) {
     let _ = writeln!(output);
 }
 
-fn run_report_query(
+fn coordination_named_query(name: &str, view: &str, query_body: &str) -> String {
+    format!(
+        r#"
+query {name} {{
+  {view}
+  {query_body}
+}}
+"#
+    )
+}
+
+fn run_report_queries(
     service: &mut dyn KernelService,
     request: RunDocumentRequest,
-) -> Result<Vec<ReportRow>, ApiError> {
+) -> Result<BTreeMap<String, Vec<ReportRow>>, ApiError> {
     match service.run_document(request) {
-        Ok(response) => Ok(into_report_rows(
-            response.query.unwrap_or_default().rows,
-            response.execution.as_ref(),
-        )),
-        Err(ApiError::Validation(message)) if message.starts_with("unknown element ") => {
-            Ok(Vec::new())
+        Ok(response) => {
+            let executions = response.executions;
+            response
+                .queries
+                .into_iter()
+                .map(|query| {
+                    let name = query.name.ok_or_else(|| {
+                        ApiError::Validation("coordination report query is unnamed".into())
+                    })?;
+                    let execution = query.execution_id.as_ref().and_then(|execution_id| {
+                        executions
+                            .iter()
+                            .find(|receipt| receipt.manifest.execution_id == *execution_id)
+                    });
+                    Ok((name, into_report_rows(query.result.rows, execution)))
+                })
+                .collect()
         }
         Err(error) => Err(error),
     }
@@ -644,38 +676,23 @@ fn build_coordination_snapshot(
     policy_context: Option<PolicyContext>,
 ) -> Result<CoordinationSnapshot, ApiError> {
     let history_len = run_report_history_len(service, cut, policy_context.clone())?;
+    let view = cut.view_label();
+    let query_blocks = coordination_snapshot_query_blocks(&view);
+    let mut sections = run_report_queries(
+        service,
+        RunDocumentRequest {
+            dsl: coordination_pilot_document_dsl(&query_blocks),
+            policy_context,
+        },
+    )?;
+
     Ok(CoordinationSnapshot {
         history_len,
-        current_authorized: run_report_query_for_cut(
-            service,
-            cut,
-            "goal execution_authorized(t, worker, epoch)\n  keep t, worker, epoch",
-            policy_context.clone(),
-        )?,
-        claimable: run_report_query_for_cut(
-            service,
-            cut,
-            "goal worker_can_claim(t, worker)\n  keep t, worker",
-            policy_context.clone(),
-        )?,
-        live_heartbeats: run_report_query_for_cut(
-            service,
-            cut,
-            "goal live_authority(t, worker, epoch, beat)\n  keep t, worker, epoch, beat",
-            policy_context.clone(),
-        )?,
-        accepted_outcomes: run_report_query_for_cut(
-            service,
-            cut,
-            "goal execution_outcome_accepted(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
-            policy_context.clone(),
-        )?,
-        rejected_outcomes: run_report_query_for_cut(
-            service,
-            cut,
-            "goal execution_outcome_rejected_stale(t, worker, epoch, status, detail)\n  keep t, worker, epoch, status, detail",
-            policy_context,
-        )?,
+        current_authorized: sections.remove("current_authorized").unwrap_or_default(),
+        claimable: sections.remove("claimable").unwrap_or_default(),
+        live_heartbeats: sections.remove("live_heartbeats").unwrap_or_default(),
+        accepted_outcomes: sections.remove("accepted_outcomes").unwrap_or_default(),
+        rejected_outcomes: sections.remove("rejected_outcomes").unwrap_or_default(),
     })
 }
 
@@ -696,21 +713,6 @@ fn run_report_history_len(
             .map(|index| index + 1)
             .ok_or_else(|| ApiError::Validation(format!("unknown element {}", element.0))),
     }
-}
-
-fn run_report_query_for_cut(
-    service: &mut dyn KernelService,
-    cut: &CoordinationCut,
-    query_body: &str,
-    policy_context: Option<PolicyContext>,
-) -> Result<Vec<ReportRow>, ApiError> {
-    run_report_query(
-        service,
-        RunDocumentRequest {
-            dsl: coordination_pilot_dsl(&cut.view_label(), query_body),
-            policy_context,
-        },
-    )
 }
 
 fn diff_report_rows(
@@ -920,9 +922,14 @@ fn now_millis() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_coordination_pilot_report, build_coordination_pilot_report_with_policy};
+    use super::{
+        build_coordination_pilot_report, build_coordination_pilot_report_with_policy,
+        coordination_pilot_document_dsl, coordination_pilot_query_blocks,
+        coordination_snapshot_query_blocks,
+    };
     use crate::{
         coordination_pilot_seed_history, AppendRequest, InMemoryKernelService, KernelService,
+        RunDocumentRequest,
     };
     use aether_ast::{EntityId, PolicyContext, PolicyEnvelope, Value};
 
@@ -993,6 +1000,44 @@ mod tests {
                 .map(|trace| trace.tuple_count)
                 .unwrap_or(0)
                 > 0
+        );
+    }
+
+    #[test]
+    fn coordination_report_queries_share_temporal_evaluations() {
+        let mut service = InMemoryKernelService::new();
+        service
+            .append(AppendRequest {
+                datoms: coordination_pilot_seed_history(),
+            })
+            .expect("append seed history");
+
+        let report_response = service
+            .run_document(RunDocumentRequest {
+                dsl: coordination_pilot_document_dsl(&coordination_pilot_query_blocks(true, true)),
+                policy_context: None,
+            })
+            .expect("run batched report queries");
+        assert_eq!(report_response.queries.len(), 7);
+        assert_eq!(
+            report_response.executions.len(),
+            3,
+            "current and the two AsOf cuts should each be evaluated once"
+        );
+
+        let snapshot_response = service
+            .run_document(RunDocumentRequest {
+                dsl: coordination_pilot_document_dsl(&coordination_snapshot_query_blocks(
+                    "current",
+                )),
+                policy_context: None,
+            })
+            .expect("run batched snapshot queries");
+        assert_eq!(snapshot_response.queries.len(), 5);
+        assert_eq!(
+            snapshot_response.executions.len(),
+            1,
+            "all snapshot sections should share one temporal evaluation"
         );
     }
 

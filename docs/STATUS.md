@@ -68,6 +68,31 @@ The commercialization layer now also carries an AI support resolution desk app
 pack as the flagship ML-facing end-user application. That pack reuses the
 current pilot, sidecar, replay, and explanation surfaces to make AETHER
 legible in a buyer-relevant support workflow before broader platform language.
+Its runnable showcase now enforces a `>=10x` functional scale contract: 13
+cases, 26 candidate resolutions, 13 governed evidence records, 52 assignment
+attempts, and 300 journal datoms, with bounded console samples and a hero-case
+proof drill-down.
+
+The repository now also carries a service-backed frontier engineering control
+room as its strongest technical product showcase. Demo 07 evaluates a
+24-package recursive work graph, six engineering workers, three competing
+change candidates, and 12 exact prerequisite receipts across four gate lanes.
+It keeps product and qualification-tooling identities separate, fences four
+otherwise successful receipts after a runner-epoch change, preserves exact
+package bytes, replays the decision before and after the repair, derives one
+current promotion, and returns its provenance trace. The canonical local
+package anchor is the SHA-256 and byte length of the executable that actually
+ran; the campaign facts remain deterministic fixtures.
+
+That contract now also has a production-deployed high-level web console,
+**AETHER Orbital**. It continuously advances the deterministic campaign,
+animates semantic topology and authority flow, exposes a causal-journal feed,
+supports exact `AsOf` scrubbing and return to `Current`, and keeps evidence,
+candidate, work-graph, and proof posture visible together. The private
+deployment is
+`https://aether-orbital-control.baltigor.chatgpt.site`; its source is
+`web/frontier-control-room/`. This is an operations-viewing proof, not a live
+GitHub or CI integration.
 
 Post-v1 hardening work is now also underway as an internal-first QA program:
 persona-based sweeps, disclosure guidance, stronger defect intake, and
@@ -359,6 +384,12 @@ Completed:
 - a repeatable perturbation sweep now exists to run the persona pass, full-stack benchmark snapshot, host-aware drift checks, deeper ignored stress workloads, and single-node capacity projections in one artifact pack
 - a typed capacity-planning layer now exists over perturbation and matrix evidence, with measured board/closure/replay/concurrency ladders, concrete hardware-class guidance, explicit scale-out triggers, and a scheduled GitHub tracker workflow
 - a lightweight performance trend index now exists over saved run bundles and tracked accepted baselines so latest/prior/baseline context is visible without manually opening every benchmark artifact
+- AETHER Orbital now has a versioned, fail-closed read-only adapter for real
+  service status, bounded journal/audit tails, current GitHub workflow
+  observations, and optional immutable product/tooling identity evidence. The
+  browser receives a redacted projection only, source state is explicitly
+  live/hybrid/disconnected, and green workflow observations cannot authorize
+  promotion without verified identity binding
 
 Still open:
 

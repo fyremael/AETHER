@@ -192,8 +192,20 @@ Focus:
 
 - keep the front door anchored in operator questions and practical utility before kernel jargon
 - package the AI support resolution desk as the flagship ML-facing working app pack
+- preserve its enforced `>=10x` functional showcase profile without presenting
+  it as capacity, concurrency, soak, or production-sizing evidence
 - keep the governed incident blackboard as the broader governed-workspace reference pattern
-- make adjacent-next agentic stories concrete without widening beyond current proof
+- use the frontier engineering control room as the strongest technical product
+  showcase: dependent work, exact product/tooling identity, current runner
+  authority, immutable package bytes, prerequisite evidence, learning updates,
+  temporal replay, and promotion proof in one bounded view
+- keep that frontier story explicit about its deterministic campaign fixture
+  and external workers; live GitHub orchestration, autonomous software
+  engineering, and delivery qualification remain future integrations
+- operate AETHER Orbital's first read-only adapter for real service status,
+  bounded journal/audit tails, GitHub workflow observations, and optional
+  immutable identity-binding evidence; next harden deployment connectivity and
+  source freshness without considering write-capable operator controls
 
 ## What Is Deliberately Not The Immediate Roadmap
 
