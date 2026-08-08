@@ -76,6 +76,10 @@ class RepositoryControlTests(unittest.TestCase):
                     if key != "private_vulnerability_reporting"
                 }
             },
+            "custom_properties": [
+                {"property_name": name, "value": value}
+                for name, value in self.policy["custom_properties"].items()
+            ],
             "private_vulnerability_reporting": {"enabled": True},
             "environments": {
                 name: {
@@ -134,6 +138,14 @@ class RepositoryControlTests(unittest.TestCase):
         self.assertIn(
             "security setting differs: private_vulnerability_reporting", blockers
         )
+
+    def test_custom_property_projection_is_exact(self) -> None:
+        snapshots = self.passing_snapshots()
+        snapshots["custom_properties"][0]["value"] = "cross-programme"
+
+        blockers = self.module.audit(self.policy, snapshots)
+
+        self.assertIn("custom property projection differs", blockers)
 
 
 if __name__ == "__main__":

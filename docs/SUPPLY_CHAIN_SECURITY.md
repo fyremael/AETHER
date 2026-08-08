@@ -99,4 +99,5 @@ python scripts/verify_repository_controls.py `
 The command is read-only, binds the evidence to the checked-out commit, and
 fails closed when branch protection, aggregate required checks, merge and
 repository settings, Actions restrictions, security analysis, private
-vulnerability reporting, or deployment-environment policy drifts.
+vulnerability reporting, GCL custom-property projection, or
+deployment-environment policy drifts.

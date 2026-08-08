@@ -56,6 +56,8 @@ The post-transfer live readback at tooling head `9218ea0` returned
 - administrator enforcement, locked `main`, and no force push or deletion;
 - GCL organization Actions selection with full-SHA policy;
 - wiki disabled, rebase merge disabled, merge and squash retained;
+- live GCL projection set to `Provider` / `provider` / `none` / `high` /
+  `provider` / public;
 - Dependabot security updates, secret scanning, push protection, and private
   vulnerability reporting enabled;
 - release and Pages environment administrator bypass disabled;

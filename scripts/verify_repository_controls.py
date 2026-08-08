@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_POLICY = ROOT / ".github" / "repository-controls.json"
 
 
-def gh_json(endpoint: str) -> dict[str, Any]:
+def gh_json(endpoint: str) -> Any:
     process = subprocess.run(
         ["gh", "api", endpoint],
         cwd=ROOT,
@@ -51,6 +51,7 @@ def capture_snapshots(policy: dict[str, Any]) -> dict[str, Any]:
             f"repos/{repository}/actions/permissions/selected-actions"
         ),
         "repository": gh_json(f"repos/{repository}"),
+        "custom_properties": gh_json(f"repos/{repository}/properties/values"),
         "private_vulnerability_reporting": gh_json(
             f"repos/{repository}/private-vulnerability-reporting"
         ),
@@ -117,6 +118,20 @@ def audit(policy: dict[str, Any], snapshots: dict[str, Any]) -> list[str]:
     for key, expected in policy["repository_settings"].items():
         if repository.get(key) is not expected:
             blockers.append(f"repository setting differs: {key}")
+
+    custom_properties = snapshots["custom_properties"]
+    if isinstance(custom_properties, dict) and "_error" in custom_properties:
+        blockers.append(
+            f"custom properties unavailable: {custom_properties['_error']}"
+        )
+    else:
+        observed_properties = {
+            item.get("property_name"): item.get("value")
+            for item in custom_properties
+            if isinstance(item, dict)
+        }
+        if observed_properties != policy["custom_properties"]:
+            blockers.append("custom property projection differs")
 
     observed_security = repository.get("security_and_analysis", {})
     for key, expected in policy["security"].items():

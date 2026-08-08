@@ -23,7 +23,15 @@
   "controls": {
     "status": "passed",
     "blockers": [],
-    "private_vulnerability_reporting": "enabled"
+    "private_vulnerability_reporting": "enabled",
+    "custom_properties": {
+      "authority_scope": "provider",
+      "claim_promotion_role": "none",
+      "constitutional_profile": "Provider",
+      "public_programme": "true",
+      "risk_tier": "high",
+      "workflow_profile": "provider"
+    }
   },
   "qualification": {
     "candidate_sha": "62272646689b726bdb54bd94b86f42efc812f618",

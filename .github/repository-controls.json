@@ -39,6 +39,14 @@
     "allow_squash_merge": true,
     "allow_rebase_merge": false
   },
+  "custom_properties": {
+    "authority_scope": "provider",
+    "claim_promotion_role": "none",
+    "constitutional_profile": "Provider",
+    "public_programme": "true",
+    "risk_tier": "high",
+    "workflow_profile": "provider"
+  },
   "security": {
     "dependabot_security_updates": "enabled",
     "secret_scanning": "enabled",
