@@ -23,6 +23,18 @@ def load_module():
 
 
 class SupplyChainTests(unittest.TestCase):
+    GITLEAKS_BASELINE = {
+        "8491bb272cdd3c150e623be030e491977e93b508:.github/workflows/ci.yml:curl-auth-header:241",
+        "8491bb272cdd3c150e623be030e491977e93b508:.github/workflows/ci.yml:curl-auth-header:246",
+        "8491bb272cdd3c150e623be030e491977e93b508:.github/workflows/ci.yml:curl-auth-header:260",
+        "8491bb272cdd3c150e623be030e491977e93b508:.github/workflows/ci.yml:curl-auth-header:262",
+        "b07508bf11bbba1bb8f60c00cb46e4253c4359e7:.github/workflows/ci.yml:curl-auth-header:183",
+        "f7b387dc4ab23f7ac6a71dbaaf10ea9376fc59ee:.github/workflows/ci.yml:curl-auth-header:218",
+        "f7b387dc4ab23f7ac6a71dbaaf10ea9376fc59ee:.github/workflows/ci.yml:curl-auth-header:224",
+        "f7b387dc4ab23f7ac6a71dbaaf10ea9376fc59ee:.github/workflows/ci.yml:curl-auth-header:241",
+        "f7b387dc4ab23f7ac6a71dbaaf10ea9376fc59ee:.github/workflows/ci.yml:curl-auth-header:245",
+    }
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.module = load_module()
@@ -156,6 +168,24 @@ class SupplyChainTests(unittest.TestCase):
         self.assertIn("sha256sum --check --strict", workflow)
         self.assertNotIn("aquasecurity/trivy-action", workflow)
         self.assertNotIn("aquasecurity/setup-trivy", workflow)
+
+    def test_gitleaks_baseline_is_exact_fingerprint_only(self) -> None:
+        lines = [
+            line.strip()
+            for line in (REPO_ROOT / ".gitleaksignore").read_text(
+                encoding="utf-8"
+            ).splitlines()
+            if line.strip()
+        ]
+
+        self.assertEqual(len(lines), len(set(lines)))
+        self.assertEqual(set(lines), self.GITLEAKS_BASELINE)
+        self.assertTrue(
+            all(
+                ":.github/workflows/ci.yml:curl-auth-header:" in fingerprint
+                for fingerprint in lines
+            )
+        )
 
     def test_mutable_action_image_and_write_all_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
