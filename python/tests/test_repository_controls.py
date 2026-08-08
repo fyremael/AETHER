@@ -44,8 +44,18 @@ class RepositoryControlTests(unittest.TestCase):
                 "required_pull_request_reviews": {
                     "required_approving_review_count": branch["minimum_approvals"],
                     "dismiss_stale_reviews": branch["dismiss_stale_reviews"],
+                    "require_code_owner_reviews": branch[
+                        "require_code_owner_reviews"
+                    ],
+                    "require_last_push_approval": branch[
+                        "require_last_push_approval"
+                    ],
+                },
+                "required_conversation_resolution": {
+                    "enabled": branch["required_conversation_resolution"]
                 },
                 "enforce_admins": {"enabled": branch["enforce_admins"]},
+                "lock_branch": {"enabled": branch["lock_branch"]},
                 "allow_force_pushes": {"enabled": branch["allow_force_pushes"]},
                 "allow_deletions": {"enabled": branch["allow_deletions"]},
             },
@@ -59,13 +69,18 @@ class RepositoryControlTests(unittest.TestCase):
                 "patterns_allowed": actions["patterns_allowed"],
             },
             "repository": {
+                **self.policy["repository_settings"],
                 "security_and_analysis": {
-                    key: {"status": status} for key, status in security.items()
+                    key: {"status": status}
+                    for key, status in security.items()
+                    if key != "private_vulnerability_reporting"
                 }
             },
+            "private_vulnerability_reporting": {"enabled": True},
             "environments": {
                 name: {
                     "environment": {
+                        "can_admins_bypass": environment["can_admins_bypass"],
                         "protection_rules": (
                             [
                                 {
@@ -109,6 +124,16 @@ class RepositoryControlTests(unittest.TestCase):
 
         self.assertTrue(any("branch protection unavailable" in item for item in blockers))
         self.assertTrue(any("reviewer count" in item for item in blockers))
+
+    def test_private_vulnerability_reporting_is_required(self) -> None:
+        snapshots = self.passing_snapshots()
+        snapshots["private_vulnerability_reporting"] = {"enabled": False}
+
+        blockers = self.module.audit(self.policy, snapshots)
+
+        self.assertIn(
+            "security setting differs: private_vulnerability_reporting", blockers
+        )
 
 
 if __name__ == "__main__":
