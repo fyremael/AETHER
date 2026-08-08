@@ -1,6 +1,6 @@
 {
   "schema_version": "aether.repository-controls.v1",
-  "repository": "fyremael/AETHER",
+  "repository": "grandchallenge/AETHER",
   "protected_branch": {
     "name": "main",
     "required_status_checks": [
@@ -8,9 +8,13 @@
       "Required Supply Chain gate"
     ],
     "strict": true,
-    "minimum_approvals": 1,
+    "minimum_approvals": 0,
     "dismiss_stale_reviews": true,
+    "require_code_owner_reviews": false,
+    "require_last_push_approval": false,
+    "required_conversation_resolution": true,
     "enforce_admins": true,
+    "lock_branch": true,
     "allow_force_pushes": false,
     "allow_deletions": false
   },
@@ -20,22 +24,44 @@
     "github_owned_allowed": true,
     "verified_allowed": false,
     "patterns_allowed": [
-      "dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88",
-      "zricethezav/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc"
+      "leanprover/*",
+      "ossf/*",
+      "raven-actions/actionlint@*",
+      "azohra/shell-linter@*",
+      "release-drafter/release-drafter@*",
+      "zulip/github-actions-zulip@*"
     ]
+  },
+  "repository_settings": {
+    "has_wiki": false,
+    "delete_branch_on_merge": true,
+    "allow_merge_commit": true,
+    "allow_squash_merge": true,
+    "allow_rebase_merge": false
+  },
+  "custom_properties": {
+    "authority_scope": "provider",
+    "claim_promotion_role": "none",
+    "constitutional_profile": "Provider",
+    "public_programme": "true",
+    "risk_tier": "high",
+    "workflow_profile": "provider"
   },
   "security": {
     "dependabot_security_updates": "enabled",
     "secret_scanning": "enabled",
-    "secret_scanning_push_protection": "enabled"
+    "secret_scanning_push_protection": "enabled",
+    "private_vulnerability_reporting": "enabled"
   },
   "environments": {
     "github-pages": {
       "minimum_reviewers": 0,
+      "can_admins_bypass": false,
       "allowed_branches": ["main"]
     },
     "release": {
       "minimum_reviewers": 1,
+      "can_admins_bypass": false,
       "allowed_branches": ["main"]
     }
   }

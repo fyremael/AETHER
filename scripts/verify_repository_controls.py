@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_POLICY = ROOT / ".github" / "repository-controls.json"
 
 
-def gh_json(endpoint: str) -> dict[str, Any]:
+def gh_json(endpoint: str) -> Any:
     process = subprocess.run(
         ["gh", "api", endpoint],
         cwd=ROOT,
@@ -51,6 +51,10 @@ def capture_snapshots(policy: dict[str, Any]) -> dict[str, Any]:
             f"repos/{repository}/actions/permissions/selected-actions"
         ),
         "repository": gh_json(f"repos/{repository}"),
+        "custom_properties": gh_json(f"repos/{repository}/properties/values"),
+        "private_vulnerability_reporting": gh_json(
+            f"repos/{repository}/private-vulnerability-reporting"
+        ),
         "environments": {},
     }
     for name in sorted(policy["environments"]):
@@ -84,9 +88,17 @@ def audit(policy: dict[str, Any], snapshots: dict[str, Any]) -> list[str]:
             blockers.append("pull-request approval count is below policy")
         if reviews.get("dismiss_stale_reviews") is not branch_policy["dismiss_stale_reviews"]:
             blockers.append("stale-review dismissal differs")
+        for key in ("require_code_owner_reviews", "require_last_push_approval"):
+            if reviews.get(key, False) is not branch_policy[key]:
+                blockers.append(f"pull-request review setting differs: {key}")
+        if (
+            protection.get("required_conversation_resolution", {}).get("enabled")
+            is not branch_policy["required_conversation_resolution"]
+        ):
+            blockers.append("required conversation resolution differs")
         if protection.get("enforce_admins", {}).get("enabled") is not branch_policy["enforce_admins"]:
             blockers.append("administrator enforcement differs")
-        for key in ("allow_force_pushes", "allow_deletions"):
+        for key in ("lock_branch", "allow_force_pushes", "allow_deletions"):
             if protection.get(key, {}).get("enabled") is not branch_policy[key]:
                 blockers.append(f"{key} differs")
 
@@ -102,9 +114,33 @@ def audit(policy: dict[str, Any], snapshots: dict[str, Any]) -> list[str]:
     if set(selected.get("patterns_allowed", [])) != set(actions_policy["patterns_allowed"]):
         blockers.append("selected Actions allowlist differs")
 
-    observed_security = snapshots["repository"].get("security_and_analysis", {})
+    repository = snapshots["repository"]
+    for key, expected in policy["repository_settings"].items():
+        if repository.get(key) is not expected:
+            blockers.append(f"repository setting differs: {key}")
+
+    custom_properties = snapshots["custom_properties"]
+    if isinstance(custom_properties, dict) and "_error" in custom_properties:
+        blockers.append(
+            f"custom properties unavailable: {custom_properties['_error']}"
+        )
+    else:
+        observed_properties = {
+            item.get("property_name"): item.get("value")
+            for item in custom_properties
+            if isinstance(item, dict)
+        }
+        if observed_properties != policy["custom_properties"]:
+            blockers.append("custom property projection differs")
+
+    observed_security = repository.get("security_and_analysis", {})
     for key, expected in policy["security"].items():
-        if observed_security.get(key, {}).get("status") != expected:
+        if key == "private_vulnerability_reporting":
+            observed = snapshots["private_vulnerability_reporting"]
+            actual = "enabled" if observed.get("enabled") is True else "disabled"
+        else:
+            actual = observed_security.get(key, {}).get("status")
+        if actual != expected:
             blockers.append(f"security setting differs: {key}")
 
     for name, expected in sorted(policy["environments"].items()):
@@ -113,6 +149,8 @@ def audit(policy: dict[str, Any], snapshots: dict[str, Any]) -> list[str]:
         if "_error" in environment:
             blockers.append(f"environment unavailable: {name}")
             continue
+        if environment.get("can_admins_bypass") is not expected["can_admins_bypass"]:
+            blockers.append(f"environment administrator bypass differs: {name}")
         reviewers = [
             item
             for item in environment.get("protection_rules", [])

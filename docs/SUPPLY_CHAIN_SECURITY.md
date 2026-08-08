@@ -79,7 +79,8 @@ tracked workflow policy:
 - disallow force pushes and branch deletion;
 - restrict Actions to GitHub-authored actions plus the exact allowlisted SHAs;
 - protect the release environment with required reviewers;
-- keep secret scanning and push protection enabled; and
+- keep secret scanning, push protection, and private vulnerability reporting
+  enabled;
 - retain artifact attestations and uploaded evidence for the release-retention
   period.
 
@@ -96,5 +97,7 @@ python scripts/verify_repository_controls.py `
 ```
 
 The command is read-only, binds the evidence to the checked-out commit, and
-fails closed when branch protection, aggregate required checks, Actions
-restrictions, security analysis, or deployment-environment policy drifts.
+fails closed when branch protection, aggregate required checks, merge and
+repository settings, Actions restrictions, security analysis, private
+vulnerability reporting, GCL custom-property projection, or
+deployment-environment policy drifts.
