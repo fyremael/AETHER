@@ -49,7 +49,8 @@ class PagesIdentityTests(unittest.TestCase):
         )
         self.assertIn("--candidate-sha \"${{ github.sha }}\"", workflow)
         self.assertIn("source-version.json", workflow)
-        self.assertIn("toolchain: 1.86.0", workflow)
+        self.assertIn("rustup toolchain install 1.86.0", workflow)
+        self.assertNotIn("dtolnay/rust-toolchain", workflow)
         self.assertIn("verify_pages_deployment.py", workflow)
         self.assertIn("pages-deployment-verification", workflow)
 

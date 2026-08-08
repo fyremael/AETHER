@@ -1,0 +1,76 @@
+{
+  "schema_version": "aether.gcl-ecosystem-admission.v1",
+  "captured_at": "2026-08-08T09:28:50Z",
+  "work_package": "https://github.com/grandchallenge/MATH-PROGRAMME/issues/294",
+  "repository": {
+    "historical_identity": "fyremael/AETHER",
+    "live_identity": "grandchallenge/AETHER",
+    "repository_id": 1184906615,
+    "node_id": "R_kgDORqA9dw",
+    "protected_main_sha": "62272646689b726bdb54bd94b86f42efc812f618",
+    "orbital_head_sha": "a4b513bdb63b65a29463656d56bfbec035882401",
+    "controls_tooling_sha": "9218ea08cdfb529da482203854dbb0d7175e79fa"
+  },
+  "profile": {
+    "pull_request": "https://github.com/grandchallenge/gcl-standards/pull/33",
+    "candidate_sha": "1bfb4dfa349394e4a4f5cddf159e79e317fb505d",
+    "profile": "provider",
+    "risk_tier": "high",
+    "claim_promotion_role": "none",
+    "release_policy": "controlled_alpha",
+    "status": "candidate_unmerged"
+  },
+  "controls": {
+    "status": "passed",
+    "blockers": [],
+    "private_vulnerability_reporting": "enabled"
+  },
+  "qualification": {
+    "candidate_sha": "62272646689b726bdb54bd94b86f42efc812f618",
+    "repository": "grandchallenge/AETHER",
+    "status": "blocked",
+    "runs": {
+      "ci": 31249900197,
+      "supply_chain": 31249901392,
+      "pages": 31249902540,
+      "capacity": 31249903736
+    },
+    "blockers": [
+      "Supply Chain startup failure under the GCL Actions policy",
+      "Pages startup failure under the GCL Actions policy"
+    ]
+  },
+  "pilot": {
+    "issue": "https://github.com/grandchallenge/AETHER/issues/51",
+    "workflow": "governed_incident_blackboard",
+    "operator": "fyremael",
+    "product_sha": "62272646689b726bdb54bd94b86f42efc812f618",
+    "tooling_sha": "9218ea08cdfb529da482203854dbb0d7175e79fa",
+    "sqlite_restart_replay": "passed",
+    "package_backup_restore_restart": "passed",
+    "postgres_restart_replay": "unavailable",
+    "operator_error_fail_closed": "passed",
+    "resource_exhaustion": "passed",
+    "policy_isolation": "passed",
+    "stale_authority_fencing": "passed",
+    "abstention": "passed",
+    "source_derived_external_boundaries": "recorded",
+    "wrapper_hang": "observed_not_counted"
+  },
+  "release": {
+    "prerelease_published": false,
+    "promotion_record_published": false,
+    "disposition": "controlled_alpha_retained"
+  },
+  "bridge": {
+    "status": "on_hold",
+    "next_authority": "separate_future_work_package"
+  },
+  "claim_boundaries": {
+    "institutional_authority_activated": false,
+    "constitutional_authority_granted": false,
+    "mathematical_claim_promotion_granted": false,
+    "commercial_claim_widened": false,
+    "orbital_in_protected_main": false
+  }
+}
