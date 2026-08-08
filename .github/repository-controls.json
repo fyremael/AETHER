@@ -1,6 +1,6 @@
 {
   "schema_version": "aether.repository-controls.v1",
-  "repository": "fyremael/AETHER",
+  "repository": "grandchallenge/AETHER",
   "protected_branch": {
     "name": "main",
     "required_status_checks": [
@@ -24,8 +24,12 @@
     "github_owned_allowed": true,
     "verified_allowed": false,
     "patterns_allowed": [
-      "dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c",
-      "zricethezav/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7"
+      "leanprover/*",
+      "ossf/*",
+      "raven-actions/actionlint@*",
+      "azohra/shell-linter@*",
+      "release-drafter/release-drafter@*",
+      "zulip/github-actions-zulip@*"
     ]
   },
   "repository_settings": {

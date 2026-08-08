@@ -16,9 +16,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # stable
-        with:
-          toolchain: 1.86.0
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.86.0 --profile minimal --no-self-update
+          rustup default 1.86.0
 
       - name: Run extended pilot soak
         shell: pwsh
