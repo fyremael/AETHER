@@ -60,6 +60,28 @@ double-click scripts/run-demo-05.cmd
 
 That is the current ML-facing customer-facing exemplar.
 
+If you need the strongest frontier-engineering product showcase, run Demo 07:
+
+```text
+double-click scripts/run-demo-07.cmd
+```
+
+It combines dependent engineering work, competing candidates, exact
+product/tooling identities, runner-epoch fencing, immutable package evidence,
+replay, learning updates, and promotion proof in one bounded console.
+
+For a high-level, continuously moving operations-room view of that contract,
+open the private AETHER Orbital console:
+
+```text
+https://aether-orbital-control.baltigor.chatgpt.site
+```
+
+Use its timeline to scrub to `AsOf(e199)`, compare the epoch-2 authority handoff,
+then return to `Current` and inspect the promotion proof. The feed is a
+deterministic visual simulation; it does not write to AETHER or hosted release
+systems.
+
 If you need the broader governed shared workspace reference pattern rather than
 the support-desk application wedge, run Demo 04.
 
@@ -150,6 +172,8 @@ Use this guide by the question you need answered:
 | If you need to know... | Use |
 | --- | --- |
 | “What is happening in the live pilot service right now?” | `run-aether-ops.cmd` inside the package |
+| “Can I see the engineering fabric evolve over time?” | AETHER Orbital web console |
+| “How does AETHER govern frontier engineering and release decisions?” | Demo 07 |
 | “What is the clearest ML-facing design-partner walkthrough?” | Demo 05 |
 | “What is the broader governed-workspace reference pattern?” | Demo 04 |
 | “What is the clearest single showcase?” | Demo 03 |
@@ -171,6 +195,7 @@ Use this guide by the question you need answered:
 | Demo 03 | Coordination situation room | Present the strongest current end-to-end story in one run |
 | Demo 04 | Governed incident blackboard | Explain AETHER as a shared governed workspace for agents and operators |
 | Demo 05 | AI support resolution desk | Explain AETHER through a relevant ML-facing support application with retrieved evidence and governed handoff |
+| Demo 07 | Frontier engineering control room | Show governed dependent work, exact candidate identity, runner fencing, immutable package evidence, replay, learning updates, and promotion proof |
 
 ## Which Demo To Use
 
@@ -198,6 +223,12 @@ Use this guide by the question you need answered:
 - you want a design-partner-ready story about a shared incident board for agents and operators
 - you want to show observations, candidate actions, governed authority, replay, and proof in a 5-10 minute screen share
 
+### Use Demo 07 when
+
+- the audience works with coding agents, specialist models, CI, or release engineering
+- you need a technical product story that starts with candidate decisions rather than kernel vocabulary
+- you want one bounded run to show recursive work readiness, two-identity policy, runner-epoch fencing, immutable package evidence, replay, learning, and explainable promotion
+
 ## Running Demos
 
 ### Windows operator path
@@ -209,6 +240,7 @@ Double-click one of these:
 - `scripts/run-demo-03.cmd`
 - `scripts/run-demo-04.cmd`
 - `scripts/run-demo-05.cmd`
+- `scripts/run-demo-07.cmd`
 
 Each launcher calls the shared PowerShell runner and pauses before closing so the output remains visible.
 
@@ -222,6 +254,7 @@ cargo run -p aether_api --example demo_02_multi_worker_lease_handoff
 cargo run -p aether_api --example demo_03_coordination_situation_room
 cargo run -p aether_api --example demo_04_governed_incident_blackboard
 cargo run -p aether_api --example demo_05_ai_support_resolution_desk
+cargo run -p aether_api --example demo_07_frontier_engineering_control_room
 cargo run -p aether_api --example http_kernel_service
 ```
 
@@ -443,7 +476,8 @@ The example, narrative, and runner output are expected to agree. If they do not,
 
 ### If you need the strongest single showcase
 
-Run Demo 03 and keep the report from that run. It is the best current summary of AETHER’s progress.
+Run Demo 07 for the strongest technical product story. Run Demo 03 instead
+when the audience wants the most concentrated raw kernel-proof story.
 
 ## Related Documents
 
@@ -454,3 +488,5 @@ Run Demo 03 and keep the report from that run. It is the best current summary of
 - `docs/SUPPLY_CHAIN_SECURITY.md` for SBOM, scanner, attestation, and repository-control gates
 - `docs/API_CLIENT_MIGRATION.md` for capability negotiation and legacy-contract sunset gates
 - `examples/demo-03-coordination-situation-room.md` for the flagship narrative
+- `examples/demo-07-frontier-engineering-control-room.md` for the frontier
+  engineering product narrative

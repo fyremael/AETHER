@@ -23,6 +23,22 @@ proof, so the system can answer five practical questions: what is active now,
 which action is actually ready, who owns the case now, what changed since the
 last handoff, and why the answer is true.
 
+For the strongest technical product story, start with the
+[frontier engineering control room](./docs/COMMERCIALIZATION/FRONTIER_ENGINEERING_CONTROL_ROOM.md)
+and its
+[runnable Demo 07 walkthrough](./examples/demo-07-frontier-engineering-control-room.md).
+It shows AETHER governing dependent work, competing change candidates, exact
+product/tooling identities, runner authority, package evidence, replay,
+learning updates, and explainable promotion.
+
+For the high-level temporal operations view, open the private
+[AETHER Orbital control room](https://aether-orbital-control.baltigor.chatgpt.site).
+It animates the same governed fabric and now includes a read-only observation
+adapter for AETHER service status, bounded journal/audit tails, and GitHub
+workflow evidence. Every source is labeled live, hybrid, or demo; workflow
+success does not become promotion proof without a separately verified immutable
+product/tooling identity binding.
+
 If you want the fastest ML-facing product path first, start with
 [`docs/COMMERCIALIZATION/AI_SUPPORT_RESOLUTION_DESK.md`](./docs/COMMERCIALIZATION/AI_SUPPORT_RESOLUTION_DESK.md)
 and then walk through
@@ -46,7 +62,10 @@ covers, and proof snapshots generated from the same presentation system.
 If you are joining the project fresh, read [`docs/README.md`](./docs/README.md)
 and [`CONTRIBUTING.md`](./CONTRIBUTING.md) after this file and then walk
 through
-[`examples/demo-05-ai-support-resolution-desk.md`](./examples/demo-05-ai-support-resolution-desk.md).
+[`examples/demo-07-frontier-engineering-control-room.md`](./examples/demo-07-frontier-engineering-control-room.md).
+Then use
+[`examples/demo-05-ai-support-resolution-desk.md`](./examples/demo-05-ai-support-resolution-desk.md)
+for the end-user application wedge.
 Follow with
 [`examples/demo-04-governed-incident-blackboard.md`](./examples/demo-04-governed-incident-blackboard.md)
 for the broader governed-workspace framing and then

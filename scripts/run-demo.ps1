@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("01", "02", "03", "04", "05")]
+    [ValidateSet("01", "02", "03", "04", "05", "07")]
     [string]$Demo = "01",
     [switch]$PauseOnExit
 )
@@ -66,6 +66,18 @@ $demoMap = @{
             "retrieved evidence re-entering the case flow in a controlled way"
             "selected-resolution derivation, ownership handoff, and stale fencing"
             "Current, AsOf, and proof traces in one ML-facing walkthrough"
+        )
+    }
+    "07" = @{
+        Title = "Frontier Engineering Control Room"
+        Crate = "aether_api"
+        Example = "demo_07_frontier_engineering_control_room"
+        Narrative = Join-Path $repoRoot "examples\demo-07-frontier-engineering-control-room.md"
+        Highlights = @(
+            "recursive engineering work graph with exact temporal replay"
+            "competing product and release-control candidates under a two-identity policy"
+            "current runner authority, stale evidence fencing, and immutable package bytes"
+            "promotion proof plus accepted-versus-retained routing updates"
         )
     }
 }

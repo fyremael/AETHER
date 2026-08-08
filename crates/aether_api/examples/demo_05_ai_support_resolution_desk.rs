@@ -2,8 +2,8 @@ use aether_api::{
     AppendRequest, ArtifactReference, GetArtifactReferenceRequest, HistoryRequest,
     InMemoryKernelService, KernelService, RegisterArtifactReferenceRequest,
     RegisterVectorRecordRequest, ResolveTraceHandleRequest, RunDocumentRequest,
-    SearchVectorsRequest, VectorFactProjection, VectorMetric, VectorRecordMetadata,
-    VectorSearchMatch,
+    SearchVectorsRequest, SearchVectorsResponse, VectorFactProjection, VectorMetric,
+    VectorRecordMetadata, VectorSearchMatch,
 };
 use aether_ast::{
     AttributeId, Datom, DatomProvenance, DerivationTrace, ElementId, EntityId, ExtensionalFact,
@@ -11,7 +11,32 @@ use aether_ast::{
 };
 use std::collections::BTreeMap;
 
+const BASELINE_CASES: usize = 1;
+const BASELINE_RESOLUTIONS: usize = 2;
+const BASELINE_EVIDENCE_RECORDS: usize = 1;
+const BASELINE_ASSIGNMENT_ATTEMPTS: usize = 4;
+const BASELINE_JOURNAL_DATOMS: usize = 24;
+const SCALED_CASES: usize = 13;
+const DATOMS_PER_SCALED_CASE: usize = 21;
+const CATALOG_ANCHOR_DATOMS_PER_SCALED_CASE: usize = 2;
+
+#[derive(Clone, Copy)]
+struct SupportCaseSpec {
+    case_id: u64,
+    step_id: u64,
+    preferred_resolution_id: u64,
+    fallback_resolution_id: u64,
+    evidence_id: u64,
+    subject: &'static str,
+    preferred_title: &'static str,
+    fallback_title: &'static str,
+    priority: &'static str,
+    channel: &'static str,
+    current_owner: &'static str,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let case_specs = support_case_specs();
     let mut service = InMemoryKernelService::new();
     service.append(AppendRequest {
         datoms: support_case_history(),
@@ -55,36 +80,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             entity: EntityId::new(9_101),
             source_artifact_id: Some("kb-apply-credit".into()),
             embedding_ref: "s3://aether/support/vectors/vec-apply-credit.bin".into(),
-            dimensions: 3,
+            dimensions: SCALED_CASES,
             metric: VectorMetric::Cosine,
             metadata: BTreeMap::from([("topic".into(), Value::String("migration-credit".into()))]),
             provenance: DatomProvenance::default(),
             policy: None,
             registered_at: ElementId::new(20),
         },
-        embedding: vec![0.96, 0.04, 0.01],
+        embedding: one_hot_embedding(0),
     })?;
 
     service.append(AppendRequest {
         datoms: support_handoff_history(),
     })?;
 
-    let search = service.search_vectors(SearchVectorsRequest {
-        sidecar_id: "support-memory".into(),
-        query_embedding: vec![1.0, 0.0, 0.0],
-        top_k: 1,
-        metric: VectorMetric::Cosine,
-        as_of: Some(ElementId::new(20)),
-        projection: Some(VectorFactProjection {
-            predicate: PredicateRef {
-                id: PredicateId::new(81),
-                name: "retrieved_support_evidence".into(),
-                arity: 3,
-            },
-            query_entity: EntityId::new(501),
-        }),
-        policy_context: None,
+    service.append(AppendRequest {
+        datoms: scaled_support_case_history(&case_specs[1..]),
     })?;
+    register_scaled_support_memory(&mut service, &case_specs[1..])?;
+
+    let searches = search_support_memory(&mut service, &case_specs)?;
+    let search = &searches[0];
+    let projected_facts = searches
+        .iter()
+        .flat_map(|search| search.facts.iter().cloned())
+        .collect::<Vec<_>>();
 
     let evidence_artifact = service.get_artifact_reference(GetArtifactReferenceRequest {
         sidecar_id: "support-memory".into(),
@@ -102,21 +122,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  - controlled handoff through live assignment authority");
     println!("  - temporal replay plus a proof trace for the chosen path");
     println!();
-    println!("Published support-case history:");
-    for datom in service
+    let history = service
         .history(HistoryRequest {
             policy_context: None,
         })?
-        .datoms
-    {
-        println!("  - {}", describe_datom(&datom));
+        .datoms;
+    print_scale_contract(&case_specs, history.len(), projected_facts.len())?;
+    println!();
+    println!("Published support-case history (hero case drill-down):");
+    for datom in history.iter().filter(|datom| is_hero_datom(datom)) {
+        println!("  - {}", describe_datom(datom));
     }
+    println!(
+        "  - ... {} additional governed journal datoms remain queryable without flooding the console",
+        history
+            .len()
+            .saturating_sub(history.iter().filter(|datom| is_hero_datom(datom)).count())
+    );
 
     let active_cases = service.run_document(RunDocumentRequest {
         dsl: support_dsl(
             "current",
             "goal active_case(case, subject, priority, channel)\n  keep case, subject, priority, channel",
-            search.facts.as_slice(),
+            projected_facts.as_slice(),
+            &case_specs,
         ),
         policy_context: None,
     })?;
@@ -129,6 +158,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .rows
             .as_slice(),
         "The case desk starts with the customer issue, not with infrastructure jargon.",
+        5,
     );
     print_evidence_section(
         "Retrieved evidence from the support-memory sidecar",
@@ -140,7 +170,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         dsl: support_dsl(
             "current",
             "goal resolution_board(resolution, title, approval, suppression, confidence)\n  keep resolution, title, approval, suppression, confidence",
-            search.facts.as_slice(),
+            projected_facts.as_slice(),
+            &case_specs,
         ),
         policy_context: None,
     })?;
@@ -153,13 +184,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .rows
             .as_slice(),
         "One path is clear once evidence, approval, and dependencies line up. The fallback path stays visibly suppressed.",
+        6,
     );
 
     let ready_resolution = service.run_document(RunDocumentRequest {
         dsl: support_dsl(
             "as_of e20",
             "goal ready_resolution_detail(case, subject, resolution, title)\n  keep case, subject, resolution, title",
-            search.facts.as_slice(),
+            projected_facts.as_slice(),
+            &case_specs,
         ),
         policy_context: None,
     })?;
@@ -172,13 +205,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .rows
             .as_slice(),
         "Retrieved evidence, approval, confidence, suppression, and dependency state all have to line up before the desk marks a path as ready.",
+        5,
     );
 
     let current_selection = service.run_document(RunDocumentRequest {
         dsl: support_dsl(
             "current",
             "goal case_resolution_selected_detail(case, subject, title, owner, epoch)\n  keep case, subject, title, owner, epoch",
-            search.facts.as_slice(),
+            projected_facts.as_slice(),
+            &case_specs,
         ),
         policy_context: None,
     })?;
@@ -192,13 +227,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Act III: Who owns the case now? (Current)",
         selected_rows.as_slice(),
         "The desk now names a single current owner for the selected resolution because assignment authority has advanced to the live holder.",
+        5,
     );
 
     let before_handoff = service.run_document(RunDocumentRequest {
         dsl: support_dsl(
             "as_of e23",
             "goal case_resolution_selected_detail(case, subject, title, owner, epoch)\n  keep case, subject, title, owner, epoch",
-            search.facts.as_slice(),
+            projected_facts.as_slice(),
+            &case_specs,
         ),
         policy_context: None,
     })?;
@@ -211,13 +248,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .rows
             .as_slice(),
         "Replay shows that ownership really did change. This is a semantic handoff, not a dashboard illusion.",
+        5,
     );
 
     let stale_recommendations = service.run_document(RunDocumentRequest {
         dsl: support_dsl(
             "current",
             "goal stale_assignment_attempt_detail(case, subject, owner, epoch)\n  keep case, subject, owner, epoch",
-            search.facts.as_slice(),
+            projected_facts.as_slice(),
+            &case_specs,
         ),
         policy_context: None,
     })?;
@@ -230,9 +269,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .rows
             .as_slice(),
         "AETHER keeps assignment history, but it still distinguishes what merely happened from what is semantically valid now.",
+        6,
     );
 
-    if let Some(tuple_id) = selected_rows.first().and_then(|row| row.tuple_id) {
+    assert_scaled_semantics(
+        active_cases
+            .query
+            .as_ref()
+            .expect("query should exist")
+            .rows
+            .len(),
+        candidate_resolutions
+            .query
+            .as_ref()
+            .expect("query should exist")
+            .rows
+            .len(),
+        selected_rows.len(),
+        stale_recommendations
+            .query
+            .as_ref()
+            .expect("query should exist")
+            .rows
+            .len(),
+    )?;
+
+    if let Some(tuple_id) = selected_rows
+        .iter()
+        .find(|row| {
+            row.values.first() == Some(&Value::Entity(EntityId::new(case_specs[0].case_id)))
+        })
+        .and_then(|row| row.tuple_id)
+    {
         let handle = current_selection
             .execution
             .as_ref()
@@ -266,15 +334,348 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn print_section(title: &str, rows: &[QueryRow], note: &str) {
+fn support_case_specs() -> Vec<SupportCaseSpec> {
+    let mut specs = vec![SupportCaseSpec {
+        case_id: 501,
+        step_id: 801,
+        preferred_resolution_id: 901,
+        fallback_resolution_id: 902,
+        evidence_id: 9_101,
+        subject: "duplicate charge after plan migration",
+        preferred_title: "apply-migration-credit",
+        fallback_title: "escalate-to-billing-specialist",
+        priority: "high",
+        channel: "chat",
+        current_owner: "lead-ana",
+    }];
+    let scenarios = [
+        (
+            "customer trapped in password reset loop",
+            "invalidate-reset-session",
+            "escalate-to-identity-specialist",
+            "high",
+            "email",
+            "lead-marcus",
+        ),
+        (
+            "invoice missing tax registration details",
+            "regenerate-compliant-invoice",
+            "escalate-to-billing-operations",
+            "medium",
+            "chat",
+            "specialist-nia",
+        ),
+        (
+            "shipment address locked after checkout",
+            "apply-carrier-address-correction",
+            "escalate-to-fulfillment-lead",
+            "high",
+            "phone",
+            "lead-ana",
+        ),
+        (
+            "workspace entitlement missing after renewal",
+            "reconcile-workspace-entitlements",
+            "escalate-to-subscription-operations",
+            "high",
+            "chat",
+            "lead-marcus",
+        ),
+        (
+            "data export remains queued overnight",
+            "restart-governed-export-job",
+            "escalate-to-data-operations",
+            "medium",
+            "email",
+            "specialist-nia",
+        ),
+        (
+            "approved refund has not reached card",
+            "reconcile-refund-settlement",
+            "escalate-to-payments-specialist",
+            "high",
+            "phone",
+            "lead-ana",
+        ),
+        (
+            "team invitation resolves to expired tenant",
+            "reissue-tenant-bound-invitation",
+            "escalate-to-identity-specialist",
+            "medium",
+            "chat",
+            "lead-marcus",
+        ),
+        (
+            "regional tax rate changed mid-cycle",
+            "apply-tax-adjustment-credit",
+            "escalate-to-tax-operations",
+            "high",
+            "email",
+            "specialist-nia",
+        ),
+        (
+            "webhook retries exhausted after outage",
+            "replay-idempotent-webhook-batch",
+            "escalate-to-integration-engineering",
+            "high",
+            "chat",
+            "lead-ana",
+        ),
+        (
+            "subscription pause ignored billing date",
+            "correct-pause-effective-date",
+            "escalate-to-billing-operations",
+            "medium",
+            "phone",
+            "lead-marcus",
+        ),
+        (
+            "sso certificate rotation rejected metadata",
+            "restore-validated-sso-metadata",
+            "escalate-to-identity-engineering",
+            "critical",
+            "chat",
+            "specialist-nia",
+        ),
+        (
+            "api quota remains stale after upgrade",
+            "reconcile-api-quota-entitlement",
+            "escalate-to-platform-operations",
+            "high",
+            "email",
+            "lead-ana",
+        ),
+    ];
+
+    for (index, scenario) in scenarios.into_iter().enumerate() {
+        let offset = index as u64 + 1;
+        specs.push(SupportCaseSpec {
+            case_id: 501 + offset,
+            step_id: 801 + offset,
+            preferred_resolution_id: 901 + offset * 2,
+            fallback_resolution_id: 902 + offset * 2,
+            evidence_id: 9_101 + offset,
+            subject: scenario.0,
+            preferred_title: scenario.1,
+            fallback_title: scenario.2,
+            priority: scenario.3,
+            channel: scenario.4,
+            current_owner: scenario.5,
+        });
+    }
+    specs
+}
+
+fn register_scaled_support_memory(
+    service: &mut InMemoryKernelService,
+    specs: &[SupportCaseSpec],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut next_element = scaled_history_tail_element().0 + 1;
+    for (index, spec) in specs.iter().enumerate() {
+        service.append(AppendRequest {
+            datoms: vec![annotate_string_datom(
+                spec.case_id,
+                16,
+                &format!("artifact-catalog-anchor-{}", spec.case_id),
+                next_element,
+            )],
+        })?;
+        let artifact_registered_at = ElementId::new(next_element);
+        next_element += 1;
+        let artifact_id = format!("kb-{}", spec.preferred_title);
+        service.register_artifact_reference(RegisterArtifactReferenceRequest {
+            reference: ArtifactReference {
+                sidecar_id: "support-memory".into(),
+                artifact_id: artifact_id.clone(),
+                entity: EntityId::new(spec.evidence_id),
+                uri: format!("s3://aether/support/runbooks/{}.md", spec.preferred_title),
+                media_type: "text/markdown".into(),
+                byte_length: 1_500 + index as u64 * 37,
+                digest: Some(format!("sha256:{artifact_id}")),
+                metadata: BTreeMap::from([
+                    ("kind".into(), Value::String("runbook".into())),
+                    ("title".into(), Value::String(spec.preferred_title.into())),
+                ]),
+                provenance: DatomProvenance::default(),
+                policy: None,
+                registered_at: artifact_registered_at,
+            },
+        })?;
+        service.append(AppendRequest {
+            datoms: vec![annotate_string_datom(
+                spec.case_id,
+                16,
+                &format!("vector-catalog-anchor-{}", spec.case_id),
+                next_element,
+            )],
+        })?;
+        let vector_registered_at = ElementId::new(next_element);
+        next_element += 1;
+        service.register_vector_record(RegisterVectorRecordRequest {
+            record: VectorRecordMetadata {
+                sidecar_id: "support-memory".into(),
+                vector_id: format!("vec-{}", spec.preferred_title),
+                entity: EntityId::new(spec.evidence_id),
+                source_artifact_id: Some(artifact_id),
+                embedding_ref: format!("s3://aether/support/vectors/{}.bin", spec.preferred_title),
+                dimensions: SCALED_CASES,
+                metric: VectorMetric::Cosine,
+                metadata: BTreeMap::from([(
+                    "topic".into(),
+                    Value::String(spec.preferred_title.into()),
+                )]),
+                provenance: DatomProvenance::default(),
+                policy: None,
+                registered_at: vector_registered_at,
+            },
+            embedding: one_hot_embedding(index + 1),
+        })?;
+    }
+    Ok(())
+}
+
+fn search_support_memory(
+    service: &mut InMemoryKernelService,
+    specs: &[SupportCaseSpec],
+) -> Result<Vec<SearchVectorsResponse>, Box<dyn std::error::Error>> {
+    specs
+        .iter()
+        .enumerate()
+        .map(|(index, spec)| {
+            let as_of = if index == 0 {
+                ElementId::new(20)
+            } else {
+                scaled_catalog_tail_element()
+            };
+            Ok(service.search_vectors(SearchVectorsRequest {
+                sidecar_id: "support-memory".into(),
+                query_embedding: one_hot_embedding(index),
+                top_k: 1,
+                metric: VectorMetric::Cosine,
+                as_of: Some(as_of),
+                projection: Some(VectorFactProjection {
+                    predicate: PredicateRef {
+                        id: PredicateId::new(81),
+                        name: "retrieved_support_evidence".into(),
+                        arity: 3,
+                    },
+                    query_entity: EntityId::new(spec.case_id),
+                }),
+                policy_context: None,
+            })?)
+        })
+        .collect()
+}
+
+fn one_hot_embedding(index: usize) -> Vec<f32> {
+    let mut embedding = vec![0.0; SCALED_CASES];
+    embedding[index] = 1.0;
+    embedding
+}
+
+fn print_scale_contract(
+    specs: &[SupportCaseSpec],
+    journal_datoms: usize,
+    evidence_records: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let resolutions = specs.len() * 2;
+    let assignment_attempts = specs.len() * 4;
+    let expected_datoms = BASELINE_JOURNAL_DATOMS
+        + (specs.len() - BASELINE_CASES)
+            * (DATOMS_PER_SCALED_CASE + CATALOG_ANCHOR_DATOMS_PER_SCALED_CASE);
+    let scaled = specs.len() >= BASELINE_CASES * 10
+        && resolutions >= BASELINE_RESOLUTIONS * 10
+        && evidence_records >= BASELINE_EVIDENCE_RECORDS * 10
+        && assignment_attempts >= BASELINE_ASSIGNMENT_ATTEMPTS * 10
+        && journal_datoms >= BASELINE_JOURNAL_DATOMS * 10
+        && journal_datoms == expected_datoms;
+    if !scaled {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "scaled workload contract failed: cases={} resolutions={} evidence={} attempts={} datoms={} expected_datoms={expected_datoms}",
+                specs.len(),
+                resolutions,
+                evidence_records,
+                assignment_attempts,
+                journal_datoms
+            ),
+        )
+        .into());
+    }
+
+    println!("Scale contract: >=10x baseline");
+    println!(
+        "  - {} governed cases ({:.1}x)",
+        specs.len(),
+        specs.len() as f64 / BASELINE_CASES as f64
+    );
+    println!(
+        "  - {resolutions} candidate resolutions ({:.1}x)",
+        resolutions as f64 / BASELINE_RESOLUTIONS as f64
+    );
+    println!(
+        "  - {evidence_records} governed evidence records ({:.1}x)",
+        evidence_records as f64 / BASELINE_EVIDENCE_RECORDS as f64
+    );
+    println!(
+        "  - {assignment_attempts} assignment attempts ({:.1}x)",
+        assignment_attempts as f64 / BASELINE_ASSIGNMENT_ATTEMPTS as f64
+    );
+    println!(
+        "  - {journal_datoms} journal datoms ({:.1}x)",
+        journal_datoms as f64 / BASELINE_JOURNAL_DATOMS as f64
+    );
+    Ok(())
+}
+
+fn assert_scaled_semantics(
+    active_cases: usize,
+    candidate_resolutions: usize,
+    selected_resolutions: usize,
+    stale_attempts: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let expected_stale_attempts = SCALED_CASES * 3;
+    if active_cases != SCALED_CASES
+        || candidate_resolutions != SCALED_CASES * 2
+        || selected_resolutions != SCALED_CASES
+        || stale_attempts != expected_stale_attempts
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "scaled semantic outcomes failed: active={active_cases} candidates={candidate_resolutions} selected={selected_resolutions} stale={stale_attempts}"
+            ),
+        )
+        .into());
+    }
+    println!();
+    println!("Scaled semantic outcome");
+    println!("-----------------------");
+    println!("  - {active_cases} active cases");
+    println!("  - {candidate_resolutions} published candidate resolutions");
+    println!("  - {selected_resolutions} current selected resolutions");
+    println!("  - {stale_attempts} stale assignment attempts fenced");
+    Ok(())
+}
+
+fn is_hero_datom(datom: &Datom) -> bool {
+    matches!(datom.entity.0, 501 | 801 | 901 | 902)
+}
+
+fn print_section(title: &str, rows: &[QueryRow], note: &str, max_rows: usize) {
     println!();
     println!("{title}");
     println!("{}", "-".repeat(title.len()));
     if rows.is_empty() {
         println!("  - none");
     } else {
-        for row in rows {
+        println!("  - rows: {}", rows.len());
+        for row in rows.iter().take(max_rows) {
             println!("  - {}", format_values(&row.values));
+        }
+        if rows.len() > max_rows {
+            println!("  - ... {} more rows", rows.len() - max_rows);
         }
     }
     println!("  {note}");
@@ -441,8 +842,144 @@ fn support_handoff_history() -> Vec<Datom> {
     ]
 }
 
-fn support_dsl(view: &str, query_body: &str, projected_facts: &[ExtensionalFact]) -> String {
+fn scaled_support_case_history(specs: &[SupportCaseSpec]) -> Vec<Datom> {
+    let mut datoms = Vec::with_capacity(specs.len() * DATOMS_PER_SCALED_CASE);
+    for (index, spec) in specs.iter().enumerate() {
+        let mut element = 26 + index as u64 * DATOMS_PER_SCALED_CASE as u64;
+        datoms.push(assert_string_datom(spec.case_id, 1, spec.subject, element));
+        element += 1;
+        datoms.push(assert_string_datom(spec.case_id, 2, spec.priority, element));
+        element += 1;
+        datoms.push(assert_string_datom(spec.case_id, 3, spec.channel, element));
+        element += 1;
+        datoms.push(assert_string_datom(
+            spec.step_id,
+            4,
+            "complete case-specific verification",
+            element,
+        ));
+        element += 1;
+        datoms.push(assert_string_datom(spec.step_id, 5, "done", element));
+        element += 1;
+        datoms.push(assert_string_datom(
+            spec.preferred_resolution_id,
+            6,
+            spec.preferred_title,
+            element,
+        ));
+        element += 1;
+        datoms.push(ref_scalar_datom(
+            spec.preferred_resolution_id,
+            7,
+            spec.case_id,
+            element,
+        ));
+        element += 1;
+        datoms.push(ref_set_datom(
+            spec.preferred_resolution_id,
+            8,
+            spec.step_id,
+            element,
+        ));
+        element += 1;
+        datoms.push(assert_string_datom(
+            spec.preferred_resolution_id,
+            9,
+            "approved",
+            element,
+        ));
+        element += 1;
+        datoms.push(assert_string_datom(
+            spec.preferred_resolution_id,
+            10,
+            "clear",
+            element,
+        ));
+        element += 1;
+        datoms.push(assert_string_datom(
+            spec.preferred_resolution_id,
+            11,
+            "high",
+            element,
+        ));
+        element += 1;
+        datoms.push(assert_string_datom(
+            spec.fallback_resolution_id,
+            6,
+            spec.fallback_title,
+            element,
+        ));
+        element += 1;
+        datoms.push(ref_scalar_datom(
+            spec.fallback_resolution_id,
+            7,
+            spec.case_id,
+            element,
+        ));
+        element += 1;
+        datoms.push(assert_string_datom(
+            spec.fallback_resolution_id,
+            9,
+            "approved",
+            element,
+        ));
+        element += 1;
+        datoms.push(assert_string_datom(
+            spec.fallback_resolution_id,
+            10,
+            "suppressed",
+            element,
+        ));
+        element += 1;
+        datoms.push(assert_string_datom(
+            spec.fallback_resolution_id,
+            11,
+            "medium",
+            element,
+        ));
+        element += 1;
+        datoms.push(assert_string_datom(spec.case_id, 15, "open", element));
+        element += 1;
+        datoms.push(annotate_string_datom(
+            spec.case_id,
+            16,
+            &format!("support-memory-anchor-{}", spec.case_id),
+            element,
+        ));
+        element += 1;
+        datoms.push(assert_string_datom(
+            spec.case_id,
+            12,
+            spec.current_owner,
+            element,
+        ));
+        element += 1;
+        datoms.push(assert_u64_datom(spec.case_id, 13, 2, element));
+        element += 1;
+        datoms.push(assert_string_datom(spec.case_id, 14, "active", element));
+    }
+    datoms
+}
+
+fn scaled_history_tail_element() -> ElementId {
+    ElementId::new(26 + (SCALED_CASES - BASELINE_CASES) as u64 * DATOMS_PER_SCALED_CASE as u64 - 1)
+}
+
+fn scaled_catalog_tail_element() -> ElementId {
+    ElementId::new(
+        scaled_history_tail_element().0
+            + (SCALED_CASES - BASELINE_CASES) as u64 * CATALOG_ANCHOR_DATOMS_PER_SCALED_CASE as u64,
+    )
+}
+
+fn support_dsl(
+    view: &str,
+    query_body: &str,
+    projected_facts: &[ExtensionalFact],
+    specs: &[SupportCaseSpec],
+) -> String {
     let rendered_projected_facts = render_extensional_facts(projected_facts);
+    let rendered_support_facts = render_support_facts(specs);
     format!(
         r#"
 schema v1 {{
@@ -503,13 +1040,7 @@ predicates {{
 }}
 
 facts {{
-  support_case(entity(501))
-  candidate_resolution(entity(901))
-  candidate_resolution(entity(902))
-  assignment_attempt(entity(501), "triage-agent", 1)
-  assignment_attempt(entity(501), "lead-ana", 1)
-  assignment_attempt(entity(501), "triage-agent", 2)
-  assignment_attempt(entity(501), "lead-ana", 2)
+{rendered_support_facts}
 {rendered_projected_facts}
 }}
 
@@ -575,6 +1106,45 @@ fn render_extensional_facts(facts: &[ExtensionalFact]) -> String {
         rendered.push('(');
         rendered.push_str(values.as_str());
         rendered.push_str(")\n");
+    }
+    rendered
+}
+
+fn render_support_facts(specs: &[SupportCaseSpec]) -> String {
+    let mut rendered = String::new();
+    for spec in specs {
+        let facts = [
+            format!("support_case(entity({}))", spec.case_id),
+            format!(
+                "candidate_resolution(entity({}))",
+                spec.preferred_resolution_id
+            ),
+            format!(
+                "candidate_resolution(entity({}))",
+                spec.fallback_resolution_id
+            ),
+            format!(
+                "assignment_attempt(entity({}), \"triage-agent\", 1)",
+                spec.case_id
+            ),
+            format!(
+                "assignment_attempt(entity({}), \"{}\", 1)",
+                spec.case_id, spec.current_owner
+            ),
+            format!(
+                "assignment_attempt(entity({}), \"triage-agent\", 2)",
+                spec.case_id
+            ),
+            format!(
+                "assignment_attempt(entity({}), \"{}\", 2)",
+                spec.case_id, spec.current_owner
+            ),
+        ];
+        for fact in facts {
+            rendered.push_str("  ");
+            rendered.push_str(&fact);
+            rendered.push('\n');
+        }
     }
     rendered
 }
@@ -733,5 +1303,39 @@ fn ref_set_datom(entity: u64, attribute: u64, value: u64, element: u64) -> Datom
         causal_context: Default::default(),
         provenance: DatomProvenance::default(),
         policy: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn scaled_workload_exceeds_every_ten_x_baseline() {
+        let specs = support_case_specs();
+        let scaled_history = scaled_support_case_history(&specs[1..]);
+        let elements = scaled_history
+            .iter()
+            .map(|datom| datom.element)
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(specs.len(), SCALED_CASES);
+        assert!(specs.len() >= BASELINE_CASES * 10);
+        assert!(specs.len() * 2 >= BASELINE_RESOLUTIONS * 10);
+        assert!(specs.len() >= BASELINE_EVIDENCE_RECORDS * 10);
+        assert!(specs.len() * 4 >= BASELINE_ASSIGNMENT_ATTEMPTS * 10);
+        assert_eq!(
+            scaled_history.len(),
+            (SCALED_CASES - BASELINE_CASES) * DATOMS_PER_SCALED_CASE
+        );
+        assert_eq!(elements.len(), scaled_history.len());
+
+        let total_datoms = BASELINE_JOURNAL_DATOMS
+            + scaled_history.len()
+            + (SCALED_CASES - BASELINE_CASES) * CATALOG_ANCHOR_DATOMS_PER_SCALED_CASE;
+        assert_eq!(total_datoms, 300);
+        assert!(total_datoms >= BASELINE_JOURNAL_DATOMS * 10);
+        assert_eq!(scaled_catalog_tail_element(), ElementId::new(301));
     }
 }

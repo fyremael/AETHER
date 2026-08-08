@@ -219,6 +219,29 @@ ordinary feature backlog:
 
 - The governed incident blackboard demo pack is a product-facing packaging layer over current proof, not a claim that AETHER is already a general multi-agent control plane.
 - The AI support resolution desk app pack is a flagship ML-facing reference application over current proof, not a claim that AETHER is already a finished ML orchestration platform, autonomous support SaaS, or authoritative vector-truth layer.
+- Its 13-case, 300-datom scaled showcase is functional semantic evidence only;
+  it is not a capacity benchmark, concurrent-user test, soak qualification, or
+  production sizing recommendation.
+- The frontier engineering control room is a service-backed functional proof
+  over a deterministic 24-package campaign and the SHA-256/byte length of its
+  real running executable. It is not a live GitHub or CI integration, an
+  autonomous coding system, a production-capacity test, a software-delivery
+  qualification, or evidence for commercial GA.
+- AETHER Orbital now has a read-only adapter for service status, bounded
+  journal/audit tails, and current GitHub workflow observations, but a deployed
+  console is only fully live when a reachable AETHER service and least-privilege
+  read credential are configured. Otherwise it is explicitly hybrid or uses
+  the deterministic Demo 07 fallback. GitHub's workflow-run API exposes a
+  tooling head SHA, not the release workflow's selected product SHA, so the
+  console keeps identity binding and promotion unverified unless a separate
+  immutable `aether.release-evidence.v1` record supplies that proof. The
+  console has no write-capable controls.
+- Orbital remains owner-only. Its qualified prebuilt Worker archive does not
+  contain the transitive `postcss` or `sharp` packages currently reported by
+  the source-tree production dependency audit, but those upstream dependency
+  findings still need resolution before any public-access proposal.
+- Its accepted and retained routing updates are governed journal facts; they do
+  not update model weights or claim autonomous online learning.
 - The blackboard / TupleSpace language remains a reference pattern and explanation aid. It is not yet a stable top-level product API, facade contract, or replacement public identity for AETHER.
 - The Go shell and Python SDK are now capability-negotiated real boundary clients,
   but both remain early surfaces without richer async and administration layers.

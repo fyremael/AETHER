@@ -7,13 +7,27 @@ to see a relevant end-user workflow before they learn kernel vocabulary.
 
 The story is simple:
 
-- a customer issue lands on one governed case desk
+- customer issues land on one governed case desk
 - retrieval sidecars surface prior-case or runbook evidence
 - planner logic publishes candidate resolutions and escalation options
 - AETHER derives which path is actually ready
 - assignment authority moves through a semantic handoff
 - stale recommendation attempts are fenced
 - operators can replay a prior cut and inspect the proof trail for the chosen path
+
+## Scale Profile
+
+The runnable showcase now exercises an order-of-magnitude-larger governed
+workload while keeping `case/501` as the screen-share drill-down:
+
+- 13 support cases versus the original 1
+- 26 candidate resolutions versus the original 2
+- 13 journal-anchored artifact/vector evidence records versus the original 1
+- 52 assignment attempts versus the original 4
+- 300 append-only journal datoms versus the original 24
+
+Those are real inputs to the rule and sidecar paths. The console prints bounded
+samples plus aggregate counts so the larger workload remains readable.
 
 ## Why This Demo Exists
 
@@ -64,7 +78,7 @@ The Windows launcher writes a timestamped report to `artifacts/demos/demo-05/`.
 
 Use the walkthrough in this order:
 
-1. show the active support case
+1. show the scale contract and active-case sample
 2. show the retrieved evidence and candidate resolutions
 3. show which resolution is actually ready at `AsOf(e20)`
 4. show who owns the case now at `Current`
@@ -84,6 +98,7 @@ That ordering keeps the buyer question first:
 
 The demo prints:
 
+- the enforced `>=10x` workload contract and exact aggregate counts
 - the support-case history as append-only semantic facts
 - the active case desk view
 - the retrieved support evidence returned by the sidecar search
@@ -97,6 +112,10 @@ The demo prints:
 ## Why It Matters
 
 This demo is deliberately disciplined.
+
+The 13-case workload proves that the same demo semantics execute over a larger
+working set. It is not a capacity benchmark, concurrency claim, soak result, or
+production sizing recommendation.
 
 It does not pretend that AETHER is already a general ML orchestration platform.
 It shows something narrower and more believable:
